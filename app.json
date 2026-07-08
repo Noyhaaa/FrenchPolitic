@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "FrenchPolitic",
+    "slug": "frenchpolitic",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "frenchpolitic",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.frenchpolitic.app"
+    },
+    "android": {
+      "package": "com.frenchpolitic.app",
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-dev-client",
+      "expo-location",
+      "expo-image-picker",
+      "expo-notifications"
+    ]
+  }
+}
