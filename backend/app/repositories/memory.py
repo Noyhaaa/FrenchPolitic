@@ -1,41 +1,45 @@
-"""Implémentation in-memory du repository (V0).
+"""Implémentation in-memory du repository.
 
-Alimentée par les données seed (`app.data.seed`), qui reprennent les mocks du
-frontend. Sera remplacée par une implémentation PostgreSQL en Phase 1 —
-l'API n'en verra rien (elle dépend du protocole `ScrutinRepository`).
+Alimentée par les données seed (`app.data.seed`). Sert de backend par défaut
+(données de démonstration) ; l'API n'en voit rien (elle dépend du protocole
+`DossierRepository`).
 """
 from __future__ import annotations
 
-from app.repositories.base import ScrutinRepository
-from app.schemas import Scrutin, ScrutinListItem
+from app.repositories.base import DossierRepository
+from app.schemas import Dossier, DossierListItem, Scrutin
 from app.utils.text import fold as _fold
 
 
-def _sort_key(s: Scrutin) -> str:
-    return s.date
+def _sort_key(d: Dossier) -> str:
+    return d.date_dernier_scrutin
 
 
-class InMemoryScrutinRepository(ScrutinRepository):
-    def __init__(self, scrutins: list[Scrutin]) -> None:
+class InMemoryDossierRepository(DossierRepository):
+    def __init__(self, dossiers: list[Dossier], scrutins: list[Scrutin]) -> None:
         # Index par id + liste triée du plus récent au plus ancien.
-        ordered = sorted(scrutins, key=_sort_key, reverse=True)
+        ordered = sorted(dossiers, key=_sort_key, reverse=True)
         self._ordered = ordered
-        self._by_id = {s.id: s for s in ordered}
+        self._by_id = {d.id: d for d in ordered}
+        self._scrutins = {s.id: s for s in scrutins}
 
-    async def list(self, limit: int = 20, offset: int = 0) -> list[ScrutinListItem]:
+    async def list(self, limit: int = 20, offset: int = 0) -> list[DossierListItem]:
         window = self._ordered[offset : offset + limit]
-        return [ScrutinListItem.from_scrutin(s) for s in window]
+        return [DossierListItem.from_dossier(d) for d in window]
 
-    async def get(self, scrutin_id: str) -> Scrutin | None:
-        return self._by_id.get(scrutin_id)
+    async def get(self, dossier_id: str) -> Dossier | None:
+        return self._by_id.get(dossier_id)
 
-    async def search(self, query: str, limit: int = 20) -> list[ScrutinListItem]:
+    async def get_scrutin(self, scrutin_id: str) -> Scrutin | None:
+        return self._scrutins.get(scrutin_id)
+
+    async def search(self, query: str, limit: int = 20) -> list[DossierListItem]:
         q = _fold(query.strip())
         if not q:
             return await self.list(limit=limit)
         results = [
-            s
-            for s in self._ordered
-            if q in _fold(f"{s.titre_clair} {s.titre_officiel} {s.theme}")
+            d
+            for d in self._ordered
+            if q in _fold(f"{d.titre_clair} {d.titre_officiel} {d.accroche} {d.theme}")
         ]
-        return [ScrutinListItem.from_scrutin(s) for s in results[:limit]]
+        return [DossierListItem.from_dossier(d) for d in results[:limit]]

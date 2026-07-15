@@ -47,9 +47,18 @@ python -m app.ingestion.run --limit 300     # 300 récents (~4 s) ; sans --limit
 uvicorn app.main:app --reload
 ```
 
-L'ingestion télécharge l'archive des scrutins + l'archive AMO (organes) pour
-résoudre les noms de groupes, parse, contrôle la cohérence des décomptes et
-upsert (idempotent). Chaque exécution est journalisée dans la table `sync_run`.
+L'ingestion télécharge l'archive des scrutins + l'archive AMO (organes **et
+acteurs** : groupes + annuaire des députés pour le vote nominatif), parse,
+contrôle la cohérence des décomptes, **regroupe les scrutins par dossier**
+(`dossierRef`) et upsert (idempotent) : les dossiers (liste compacte des votes)
+et le détail de chaque vote (table `scrutin`, avec les noms des votants).
+Lorsqu'un nouveau scrutin rejoint un dossier déjà en base, celui-ci est marqué
+« mis à jour » (§7.7). Chaque exécution est journalisée dans la table `sync_run`.
+
+> Le modèle de tables a évolué (dossiers allégés + table `scrutin` au format
+> vote-détaillé). Après mise à jour du code, **relancer l'ingestion** pour
+> recréer/remplir les tables (les payloads précédents ne sont plus au bon format ;
+> au besoin `DROP TABLE dossier; DROP TABLE scrutin;` avant).
 
 - Documentation interactive : http://localhost:8000/docs
 - Santé : http://localhost:8000/health
@@ -58,14 +67,17 @@ upsert (idempotent). Chaque exécution est journalisée dans la table `sync_run`
 
 | Méthode | Route              | Écran            | Description                                   |
 |---------|--------------------|------------------|-----------------------------------------------|
-| GET     | `/scrutins`        | Fil (1)          | Derniers scrutins, du plus récent au plus ancien |
-| GET     | `/scrutins/{id}`   | Fiche (2)        | Détail : résumé sourcé, résultats, groupes    |
-| GET     | `/recherche?q=`    | Recherche (3)    | Plein texte sur titre clair + officiel + thème |
+| GET     | `/dossiers`        | Fil (1)          | Derniers dossiers, du plus récent au plus ancien |
+| GET     | `/dossiers/{id}`   | Fiche dossier (2)| Détail : résumé sourcé + liste compacte des votes |
+| GET     | `/scrutins/{id}`   | Fiche vote (3)   | Détail d'un vote : groupes + nominatif si dispo |
+| GET     | `/recherche?q=`    | Recherche (4)    | Plein texte sur titre clair + officiel + thème |
 | GET     | `/health`          | —                | Statut du service                             |
 
-Le JSON est en **camelCase**, miroir exact du type `Scrutin` du frontend
-(`src/types/index.ts`) : l'app peut remplacer `@/data` par un client API sans
-transformation.
+Le JSON est en **camelCase**, miroir exact des types `Dossier` / `Scrutin` du
+frontend (`src/types/index.ts`) : l'app consomme l'API sans transformation.
+L'unité exposée est le **dossier** (texte de loi) ; sa fiche liste les votes en
+version **compacte** (`ScrutinResume`), le détail (ventilation par groupe, noms
+des votants) se charge à la demande via `/scrutins/{id}`.
 
 ## Organisation
 
@@ -73,12 +85,12 @@ transformation.
 app/
   main.py            Assemblage FastAPI (CORS, routes, repository via lifespan)
   config.py          Réglages (env / .env)
-  api/routes/        scrutins.py (fil, fiche, recherche), health.py
-  schemas/           Contrat d'API (Pydantic, camelCase) = §5.3 du MVP
+  api/routes/        dossiers.py (fil, fiche dossier, fiche vote, recherche), health.py
+  schemas/           Contrat d'API (Pydantic, camelCase) = §5.3 — Dossier + Scrutin
   domain/enums.py    Statuts, positions, niveaux de confiance…
-  db/                models.py (scrutin, groupe, sync_run) · session.py (moteur async)
+  db/                models.py (dossier, scrutin, groupe, sync_run) · session.py (moteur async)
   repositories/      Protocole + in-memory (seed) + postgres (ingéré) — choix via config
-  data/seed.py       Données FICTIVES de démonstration (portage du mock frontend)
+  data/seed.py       Dossiers FICTIFS de démonstration
   ai/                Pipeline de résumé (§4)
     prompts.py       Prompt système neutre (§4.1–4.3)
     rag.py           Construction du contexte ancré (RAG)
@@ -87,10 +99,10 @@ app/
     generation.py    Orchestration RAG → LLM → garde-fous → publier/revue
     review_queue.py  File de revue humaine (§4.6)
   ingestion/         Alimentation depuis les sources officielles (§5)
-    assemblee.py     Open data AN : download + parse_scrutin (pur) → schéma Scrutin
-    organes.py       Résolution des groupes (AMO) + couleurs
+    assemblee.py     Open data AN : download + parse_scrutin (pur, nominatif inclus) → ScrutinParse
+    organes.py       Résolution des groupes (AMO) + couleurs + annuaire des députés
     normalize.py     Thème (heuristique), positions, décomptes
-    sync.py          Job download → parse → cohérence → upsert (idempotent)
+    sync.py          Job download → parse → regroupement par dossier → upsert (idempotent)
     run.py           CLI : python -m app.ingestion.run
     legifrance.py    API Légifrance via PISTE (OAuth2) — stub Phase 2
 tests/               Tests API + garde-fous + génération + ingestion (+ repo pg opt-in)
@@ -99,21 +111,26 @@ tests/               Tests API + garde-fous + génération + ingestion (+ repo p
 ## Ce qui est réel vs. à venir
 
 **Implémenté et testé maintenant**
-- Les 3 endpoints du cœur, servis au choix depuis l'in-memory (seed) ou
+- Les 4 endpoints du cœur, servis au choix depuis l'in-memory (seed) ou
   **PostgreSQL** (données réelles ingérées).
 - Le contrat d'API camelCase aligné sur le frontend.
 - **Ingestion réelle de l'open data AN** (17e législature) : scrutins publics +
-  résolution des groupes via l'archive AMO, parsing pur testé, contrôles de
-  cohérence, upsert idempotent, journal `sync_run`.
+  résolution des groupes **et des députés** (annuaire acteurs) via l'archive AMO,
+  parsing pur testé (**vote nominatif** inclus), contrôles de cohérence,
+  **regroupement par dossier** + badge « mis à jour » à la fusion, upsert
+  idempotent (dossiers + détail des votes), journal `sync_run`.
+  Le nominatif n'existe pas dans le seed (on n'invente pas des noms, §2.5) :
+  il apparaît sur les données réellement ingérées.
 - Les **garde-fous éditoriaux** (ancrage, lexique orienté avec accents, cohérence
   des chiffres, décision de revue) et le pipeline de génération avec `MockLLM`.
 
 **Stubs à interface stable (Phase 2)**
-- Génération réelle des résumés : RAG (pgvector) + client LLM Anthropic. En
-  attendant, les scrutins ingérés ont un résumé vide (confiance « faible »,
-  jamais comblé — §2.5) ; l'app affiche un placeholder et les données factuelles.
+- Génération réelle des résumés : RAG (pgvector) + client LLM Anthropic, au niveau
+  du **dossier**. En attendant, les dossiers ingérés ont un résumé vide (confiance
+  « faible », jamais comblé — §2.5) ; l'app affiche un placeholder et les données
+  factuelles (scrutins, résultats, groupes).
 - Légifrance/PISTE : texte consolidé des dossiers (OAuth2 déjà esquissé).
-- Amendements clés (nécessite les données de dossier).
+- Amendements clés au niveau du dossier (aujourd'hui liste vide).
 
 ## Règles produit qui contraignent le backend
 

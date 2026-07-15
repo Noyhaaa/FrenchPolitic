@@ -1,4 +1,4 @@
-from app.repositories.base import ScrutinRepository
-from app.repositories.memory import InMemoryScrutinRepository
+from app.repositories.base import DossierRepository
+from app.repositories.memory import InMemoryDossierRepository
 
-__all__ = ["ScrutinRepository", "InMemoryScrutinRepository"]
+__all__ = ["DossierRepository", "InMemoryDossierRepository"]

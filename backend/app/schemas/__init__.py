@@ -1,25 +1,31 @@
 from app.schemas.scrutin import (
     Amendement,
     ChangementTexte,
+    Dossier,
+    DossierListItem,
+    MiseAJourDossier,
     PhaseScrutin,
     PhraseSourcee,
     PositionGroupe,
     ResultatGlobal,
     ResumeScrutin,
     Scrutin,
-    ScrutinListItem,
+    ScrutinResume,
     SourceOfficielle,
 )
 
 __all__ = [
     "Amendement",
     "ChangementTexte",
+    "Dossier",
+    "DossierListItem",
+    "MiseAJourDossier",
     "PhaseScrutin",
     "PhraseSourcee",
     "PositionGroupe",
     "ResultatGlobal",
     "ResumeScrutin",
     "Scrutin",
-    "ScrutinListItem",
+    "ScrutinResume",
     "SourceOfficielle",
 ]

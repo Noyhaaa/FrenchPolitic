@@ -10,10 +10,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import health, scrutins
+from app.api.routes import dossiers, health
 from app.config import settings
-from app.data.seed import SEED_SCRUTINS
-from app.repositories import InMemoryScrutinRepository
+from app.data.seed import SEED_DOSSIERS, SEED_SCRUTINS
+from app.repositories import InMemoryDossierRepository
 
 
 @asynccontextmanager
@@ -22,17 +22,19 @@ async def lifespan(app: FastAPI):
     # dépendent que du protocole — passer de memory à postgres est transparent.
     if settings.repository_backend == "postgres":
         from app.db.session import make_engine, make_session_factory
-        from app.repositories.postgres import PostgresScrutinRepository
+        from app.repositories.postgres import PostgresDossierRepository
 
         engine = make_engine()
         app.state.db_engine = engine
-        app.state.scrutin_repository = PostgresScrutinRepository(
+        app.state.dossier_repository = PostgresDossierRepository(
             make_session_factory(engine)
         )
         yield
         await engine.dispose()
     else:
-        app.state.scrutin_repository = InMemoryScrutinRepository(SEED_SCRUTINS)
+        app.state.dossier_repository = InMemoryDossierRepository(
+            SEED_DOSSIERS, SEED_SCRUTINS
+        )
         yield
 
 
@@ -52,8 +54,9 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(health.router)
-    app.include_router(scrutins.router)
-    app.include_router(scrutins.search_router)
+    app.include_router(dossiers.router)
+    app.include_router(dossiers.scrutin_router)
+    app.include_router(dossiers.search_router)
     return app
 
 

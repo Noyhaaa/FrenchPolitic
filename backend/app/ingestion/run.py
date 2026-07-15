@@ -28,8 +28,8 @@ async def _main(limit: int | None, legislature: int) -> None:
     await engine.dispose()
 
     print(
-        f"Terminé : {report.scrutins_upserts}/{report.scrutins_vus} scrutins, "
-        f"{report.groupes} groupes."
+        f"Terminé : {report.dossiers_upserts} dossiers "
+        f"({report.scrutins_vus} scrutins vus), {report.groupes} groupes."
     )
     if report.anomalies:
         print(f"⚠ {len(report.anomalies)} anomalie(s) de cohérence (non bloquantes) :")

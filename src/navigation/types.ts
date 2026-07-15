@@ -1,0 +1,20 @@
+import type { NavigatorScreenParams } from '@react-navigation/native';
+
+export type MainTabsParamList = {
+  Accueil: undefined;
+  Recherche: undefined;
+  Assistant: undefined;
+  Profil: undefined;
+};
+
+export type RootStackParamList = {
+  MainTabs: NavigatorScreenParams<MainTabsParamList>;
+  DossierDetail: { dossierId: string };
+  ScrutinDetail: { scrutinId: string };
+};
+
+declare global {
+  namespace ReactNavigation {
+    interface RootParamList extends RootStackParamList {}
+  }
+}

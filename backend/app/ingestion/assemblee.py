@@ -4,16 +4,18 @@ Sources (licence ouverte, 17e législature) :
 - Scrutins publics : archive ZIP de fichiers JSON (un par scrutin).
 - Organes (AMO) : pour résoudre les groupes politiques par nom.
 
-`parse_scrutin` est une fonction pure (dict brut → `Scrutin`), testable sans
-réseau. Le résumé IA n'étant pas encore généré, il est laissé vide avec une
-confiance « faible » et les champs non documentés listés (règle d'or §2.5 :
-jamais de comblement).
+`parse_scrutin` est une fonction pure (dict brut → `ScrutinParse`), testable sans
+réseau. Elle produit un scrutin au niveau du vote **plus** les métadonnées du
+dossier auquel il se rattache (le regroupement en `Dossier` a lieu dans `sync`).
+Le résumé IA n'étant pas encore généré, il est laissé vide au niveau du dossier
+avec une confiance « faible » (règle d'or §2.5 : jamais de comblement).
 """
 from __future__ import annotations
 
 import io
 import json
 import zipfile
+from dataclasses import dataclass
 
 import httpx
 
@@ -29,7 +31,6 @@ from app.ingestion.organes import GroupResolver
 from app.schemas import (
     PositionGroupe,
     ResultatGlobal,
-    ResumeScrutin,
     Scrutin,
     SourceOfficielle,
 )
@@ -43,6 +44,19 @@ ORGANES_URL = (
     "{leg}/amo/deputes_actifs_mandats_actifs_organes/"
     "AMO10_deputes_actifs_mandats_actifs_organes.json.zip"
 )
+
+
+@dataclass
+class ScrutinParse:
+    """Résultat du parsing d'un scrutin : le vote + son rattachement au dossier."""
+
+    scrutin: Scrutin
+    dossier_id: str
+    dossier_titre: str
+    dossier_ref: str | None
+    theme: str
+    legislature: str
+    numero: str
 
 
 class AssembleeOpenDataClient:
@@ -69,52 +83,86 @@ class AssembleeOpenDataClient:
                 out.append(json.load(f))
         return out
 
-    async def download_organes(self) -> list[dict]:
-        """Télécharge l'archive AMO et renvoie les JSON d'organes bruts."""
+    async def download_amo(self) -> tuple[list[dict], list[dict]]:
+        """Télécharge l'archive AMO une seule fois : (organes, acteurs).
+
+        Les organes donnent les groupes politiques ; les acteurs, l'annuaire
+        des députés pour le vote nominatif (§5.2).
+        """
         zf = await self._download_zip(ORGANES_URL.format(leg=self.legislature))
-        out: list[dict] = []
+        organes: list[dict] = []
+        acteurs: list[dict] = []
         for name in zf.namelist():
-            if "/organe/" in name and name.endswith(".json"):
+            if not name.endswith(".json"):
+                continue
+            if "/organe/" in name:
                 with zf.open(name) as f:
-                    out.append(json.load(f))
-        return out
+                    organes.append(json.load(f))
+            elif "/acteur/" in name:
+                with zf.open(name) as f:
+                    acteurs.append(json.load(f))
+        return organes, acteurs
 
 
-def _sources(legislature: str, numero: str, dossier_ref: str | None) -> list[SourceOfficielle]:
-    sources = [
-        SourceOfficielle(
-            type="scrutin",
-            libelle="Scrutin",
-            url=f"https://www.assemblee-nationale.fr/dyn/{legislature}/scrutins/{numero}",
-        )
-    ]
-    if dossier_ref:
-        sources.append(
-            SourceOfficielle(
-                type="texte",
-                libelle="Dossier législatif",
-                url=f"https://www.assemblee-nationale.fr/dyn/{legislature}/dossiers/{dossier_ref}",
-            )
-        )
-    return sources
+def scrutin_source(legislature: str, numero: str) -> SourceOfficielle:
+    return SourceOfficielle(
+        type="scrutin",
+        libelle="Scrutin",
+        url=f"https://www.assemblee-nationale.fr/dyn/{legislature}/scrutins/{numero}",
+    )
 
 
-def parse_scrutin(raw: dict, resolver: GroupResolver) -> Scrutin:
-    """Convertit un scrutin open data en `Scrutin` (fonction pure)."""
+def dossier_source(legislature: str, dossier_ref: str) -> SourceOfficielle:
+    return SourceOfficielle(
+        type="texte",
+        libelle="Dossier législatif",
+        url=f"https://www.assemblee-nationale.fr/dyn/{legislature}/dossiers/{dossier_ref}",
+    )
+
+
+def _noms_votants(
+    bloc: object, acteurs: dict[str, str] | None
+) -> list[str] | None:
+    """Noms des votants d'un bloc `decompteNominatif` (pours/contres/abstentions).
+
+    None si l'annuaire ou le bloc manque (§2.5 : le détail est alors masqué,
+    jamais inventé). Acteur inconnu de l'annuaire → on garde sa référence PA…
+    (factuel) plutôt que d'inventer un nom.
+    """
+    if acteurs is None or not isinstance(bloc, dict):
+        return None
+    noms: list[str] = []
+    for votant in as_list(bloc.get("votant")):
+        if not isinstance(votant, dict):
+            continue
+        ref = votant.get("acteurRef") or ""
+        if ref:
+            noms.append(acteurs.get(ref, ref))
+    return noms or None
+
+
+def parse_scrutin(
+    raw: dict, resolver: GroupResolver, acteurs: dict[str, str] | None = None
+) -> ScrutinParse:
+    """Convertit un scrutin open data en `ScrutinParse` (fonction pure).
+
+    `acteurs` (annuaire PA… → nom) active l'extraction du vote nominatif.
+    """
     s = raw["scrutin"]
     legislature = str(s.get("legislature", ""))
     numero = str(s.get("numero", ""))
 
     objet = s.get("objet") or {}
     dossier = objet.get("dossierLegislatif") or {}
-    dossier_titre = dossier.get("libelle")
+    dossier_titre_raw = dossier.get("libelle")
     dossier_ref = dossier.get("dossierRef")
 
-    titre_officiel = s.get("titre") or objet.get("libelle") or ""
-    # En attendant la reformulation IA, on prend le libellé du dossier (souvent
-    # plus clair que « l'amendement n° 80… »), sinon le titre officiel.
-    titre_clair = truncate(dossier_titre or objet.get("libelle") or titre_officiel, 90)
-    accroche = truncate(objet.get("libelle") or dossier_titre or titre_officiel, 160)
+    # Objet du vote (« l'amendement n° 80… », « l'ensemble du texte »…).
+    objet_libelle = s.get("titre") or objet.get("libelle") or ""
+    # Titre du dossier (souvent plus clair) ; sinon on retombe sur l'objet.
+    dossier_titre = dossier_titre_raw or objet.get("libelle") or objet_libelle
+    # Pas de dossierRef → le scrutin est son propre dossier (singleton).
+    dossier_id = dossier_ref or s["uid"]
 
     decompte = (s.get("syntheseVote") or {}).get("decompte") or {}
     resultat = ResultatGlobal(
@@ -131,6 +179,7 @@ def parse_scrutin(raw: dict, resolver: GroupResolver) -> Scrutin:
         info = resolver.resolve(ref)
         vote = g.get("vote") or {}
         dv = vote.get("decompteVoix") or {}
+        dn = vote.get("decompteNominatif") or {}
         positions.append(
             PositionGroupe(
                 groupe_id=info.id,
@@ -141,33 +190,30 @@ def parse_scrutin(raw: dict, resolver: GroupResolver) -> Scrutin:
                 contre=to_int(dv.get("contre")),
                 abstention=to_int(dv.get("abstentions")),
                 cohesion=None,
+                noms_pour=_noms_votants(dn.get("pours"), acteurs),
+                noms_contre=_noms_votants(dn.get("contres"), acteurs),
+                noms_abstention=_noms_votants(dn.get("abstentions"), acteurs),
             )
         )
 
-    resume = ResumeScrutin(
-        titre_clair=titre_clair,
-        resume=[],
-        public_concerne=[],
-        confiance="faible",
-        relu_par_humain=False,
-        # Ces champs viendront de la génération IA (Phase 2) — non comblés ici.
-        champs_non_documentes=["resume", "contexte", "objectif", "public_concerne"],
-    )
-
-    return Scrutin(
+    scrutin = Scrutin(
         id=s["uid"],
+        dossier_id=dossier_id,
         date=str(s.get("dateScrutin", "")),
-        titre_officiel=titre_officiel,
-        titre_clair=titre_clair,
-        accroche=accroche,
+        objet=truncate(objet_libelle or dossier_titre, 120),
         statut=map_statut((s.get("sort") or {}).get("code", "")),
-        phase=None,
-        theme=guess_theme(titre_clair, accroche, dossier_titre or ""),
         scrutin_public=True,  # l'archive ne contient que des scrutins publics (§5.2)
-        temps_lecture_sec=30,
         resultat=resultat,
         positions_groupes=positions,
-        amendements=[],  # nécessite les données d'amendements du dossier (Phase 2)
-        sources=_sources(legislature, numero, dossier_ref),
-        resume=resume,
+        sources=[scrutin_source(legislature, numero)],
+    )
+
+    return ScrutinParse(
+        scrutin=scrutin,
+        dossier_id=dossier_id,
+        dossier_titre=truncate(dossier_titre, 160),
+        dossier_ref=dossier_ref,
+        theme=guess_theme(dossier_titre, objet_libelle),
+        legislature=legislature,
+        numero=numero,
     )

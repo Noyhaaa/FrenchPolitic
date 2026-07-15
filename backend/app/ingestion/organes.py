@@ -60,6 +60,29 @@ def _couleur_pour(abrev: str) -> str:
     return GROUP_COLORS.get(fold(abrev).upper(), GROUP_COLORS.get(abrev, _COULEUR_DEFAUT))
 
 
+def build_acteurs_from_amo(acteur_wrappers: list[dict]) -> dict[str, str]:
+    """Annuaire `acteurRef` (PA…) → « Prénom Nom » (archive AMO, clé « acteur »).
+
+    Sert au vote nominatif (§5.2) : les ventilations ne citent que des acteurRef.
+    Fonction pure : testable avec quelques acteurs en entrée.
+    """
+    acteurs: dict[str, str] = {}
+    for wrapper in acteur_wrappers:
+        acteur = wrapper.get("acteur", wrapper)
+        uid = acteur.get("uid")
+        if isinstance(uid, dict):  # les fichiers acteur sérialisent uid en objet
+            uid = uid.get("#text")
+        if not uid:
+            continue
+        ident = (acteur.get("etatCivil") or {}).get("ident") or {}
+        nom_complet = " ".join(
+            p for p in (ident.get("prenom"), ident.get("nom")) if p
+        ).strip()
+        if nom_complet:
+            acteurs[uid] = nom_complet
+    return acteurs
+
+
 def build_resolver_from_organes(organe_wrappers: list[dict]) -> GroupResolver:
     """Construit le résolveur à partir des JSON d'organes (clé « organe »).
 

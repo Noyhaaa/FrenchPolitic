@@ -1,7 +1,8 @@
-"""Contrat d'API — miroir exact du type `Scrutin` du frontend (src/types/index.ts).
+"""Contrat d'API — miroir exact des types du frontend (src/types/index.ts).
 
-Sérialisé en camelCase pour que l'app mobile puisse remplacer `@/data` par un
-client API sans transformation. Le §5.3 du MVP décrit ce modèle de données.
+Unité centrale : le `Dossier` (un texte de loi), qui agrège les `Scrutin`
+(votes successifs) et ses amendements. Sérialisé en camelCase pour que l'app
+mobile consomme l'API sans transformation. Le §5.3 du MVP décrit ce modèle.
 """
 from __future__ import annotations
 
@@ -49,6 +50,11 @@ class PositionGroupe(CamelModel):
     contre: int
     abstention: int
     cohesion: float | None = None
+    # Vote nominatif (§5.2) : noms des députés du groupe par position.
+    # None si la source ne le fournit pas (§2.5 : jamais de comblement).
+    noms_pour: list[str] | None = None
+    noms_contre: list[str] | None = None
+    noms_abstention: list[str] | None = None
 
 
 class Amendement(CamelModel):
@@ -75,6 +81,8 @@ class PhaseScrutin(CamelModel):
 
 
 class ResumeScrutin(CamelModel):
+    """Résumé neutre du texte (au niveau du dossier)."""
+
     titre_clair: str
     resume: list[PhraseSourcee]
     contexte: str | None = None
@@ -88,24 +96,72 @@ class ResumeScrutin(CamelModel):
 
 
 class Scrutin(CamelModel):
+    """Un vote public précis rattaché à un dossier (objet + résultat + groupes).
+
+    Servi par `GET /scrutins/{id}` — la fiche dossier n'embarque que des
+    `ScrutinResume` (le nominatif rendrait le payload dossier illisible/lourd).
+    """
+
     id: str
+    dossier_id: str
     date: str  # ISO 8601
+    objet: str
+    statut: StatutScrutin
+    scrutin_public: bool
+    resultat: ResultatGlobal
+    positions_groupes: list[PositionGroupe] = []
+    sources: list[SourceOfficielle] = []
+
+
+class ScrutinResume(CamelModel):
+    """Version allégée d'un scrutin, embarquée dans la fiche dossier."""
+
+    id: str
+    date: str
+    objet: str
+    statut: StatutScrutin
+    scrutin_public: bool
+    resultat: ResultatGlobal
+
+    @classmethod
+    def from_scrutin(cls, s: Scrutin) -> "ScrutinResume":
+        return cls(
+            id=s.id,
+            date=s.date,
+            objet=s.objet,
+            statut=s.statut,
+            scrutin_public=s.scrutin_public,
+            resultat=s.resultat,
+        )
+
+
+class MiseAJourDossier(CamelModel):
+    """Indicateur « mis à jour » d'un dossier (§7.7)."""
+
+    date: str  # ISO 8601
+    label: str
+
+
+class Dossier(CamelModel):
+    """Entité centrale : un dossier législatif (un texte) et sa trajectoire."""
+
+    id: str
     titre_officiel: str
     titre_clair: str
     accroche: str
     statut: StatutScrutin
     phase: PhaseScrutin | None = None
     theme: str
-    scrutin_public: bool
     temps_lecture_sec: int
-    resultat: ResultatGlobal
-    positions_groupes: list[PositionGroupe] = []
+    date_dernier_scrutin: str
+    mise_a_jour: MiseAJourDossier | None = None
+    scrutins: list[ScrutinResume] = []
     amendements: list[Amendement] = []
     sources: list[SourceOfficielle] = []
     resume: ResumeScrutin
 
 
-class ScrutinListItem(CamelModel):
+class DossierListItem(CamelModel):
     """Version allégée pour le fil et la recherche (§3.1 / §3.3).
 
     Suffit à afficher une carte sans transférer tout le détail.
@@ -118,17 +174,19 @@ class ScrutinListItem(CamelModel):
     statut: StatutScrutin
     theme: str
     temps_lecture_sec: int
-    resultat: ResultatGlobal
+    nombre_scrutins: int
+    mise_a_jour: MiseAJourDossier | None = None
 
     @classmethod
-    def from_scrutin(cls, s: Scrutin) -> "ScrutinListItem":
+    def from_dossier(cls, d: Dossier) -> "DossierListItem":
         return cls(
-            id=s.id,
-            date=s.date,
-            titre_clair=s.titre_clair,
-            accroche=s.accroche,
-            statut=s.statut,
-            theme=s.theme,
-            temps_lecture_sec=s.temps_lecture_sec,
-            resultat=s.resultat,
+            id=d.id,
+            date=d.date_dernier_scrutin,
+            titre_clair=d.titre_clair,
+            accroche=d.accroche,
+            statut=d.statut,
+            theme=d.theme,
+            temps_lecture_sec=d.temps_lecture_sec,
+            nombre_scrutins=len(d.scrutins),
+            mise_a_jour=d.mise_a_jour,
         )
