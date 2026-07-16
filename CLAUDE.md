@@ -104,11 +104,17 @@ n° X ») ; le scrutin du parent embarque ses sous-amendements pour la fiche vot
 La fusion inter-runs pose le badge « mis à jour » quand un nouveau scrutin
 (texte, amendement ou sous-amendement) rejoint un dossier connu. Les **sources
 du dossier** sont de niveau dossier uniquement (la page du dossier législatif) —
-la source de chaque vote reste sur son scrutin, servie par sa fiche vote. Les
-**garde-fous éditoriaux** (§4.4) et le pipeline de génération existent, testés avec
-un LLM mock ; la **génération réelle des résumés reste en Phase 2** (RAG pgvector +
-LLM Anthropic), donc les dossiers ingérés ont un résumé vide (non comblé, §2.5 —
-l'app affiche un placeholder) et une liste d'amendements vide (Phase 2 également).
+la source de chaque vote reste sur son scrutin, servie par sa fiche vote. Le
+**résumé neutre est généré à l'ingestion par un gabarit déterministe** (`app/ai/`
+— `faits` → `rag` → `gabarit` → garde-fous, dans `generer_resume`), ancré
+uniquement sur les faits des scrutins (nature, trajectoire, résultat du vote
+décisif, positions des groupes, comptes d'amendements), **sans LLM ni clé API** :
+5 phrases sourcées, chacune portant son `source_id`, qui passent les **garde-fous
+éditoriaux** (§4.4) par construction. Un LLM (AnthropicLLM derrière `LLMClient`)
+pourra fluidifier le style plus tard sans changer ce contrat ; la fusion
+inter-runs ne préserve un résumé que s'il a été **relu par un humain**
+(`relu_par_humain`), sinon elle régénère. Reste vide/non comblé (§2.5) la liste
+des **amendements enrichis** (texte complet, exposé sommaire — Phase 2 Légifrance).
 Détails dans `backend/README.md`.
 
 ## Stack & commandes

@@ -375,13 +375,18 @@ def test_merge_deplace_un_vote_reclasse_hors_des_scrutins():
     assert merged.mise_a_jour is None
 
 
-def test_resume_vide_non_comble():
-    """Sans génération IA, le résumé du dossier reste vide + confiance faible (§2.5)."""
+def test_resume_genere_est_ancre_et_non_comble():
+    """Le résumé par gabarit est généré à l'ingestion : chaque phrase est
+    ancrée sur un fait, et les champs non tirés des scrutins (contexte,
+    public concerné…) restent signalés comme non documentés (§2.5)."""
     resolver = build_resolver_from_organes(ORGANES)
     dossier = build_dossier([_vote_texte(resolver, "VT1", "2026-07-02")])
-    assert dossier.resume.resume == []
-    assert dossier.resume.confiance.value == "faible"
-    assert "resume" in dossier.resume.champs_non_documentes
+    # Non vide, chaque phrase sourcée.
+    assert dossier.resume.resume
+    assert all(p.source_id for p in dossier.resume.resume)
+    assert dossier.resume.confiance.value == "moyenne"
+    # Le contexte éditorial (hors scrutins) n'est pas comblé.
+    assert "contexte" in dossier.resume.champs_non_documentes
 
 
 def test_mise_a_jour_quand_nouveau_vote():

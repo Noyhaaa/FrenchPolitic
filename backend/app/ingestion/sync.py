@@ -33,11 +33,12 @@ from app.ingestion.organes import (
     build_acteurs_from_amo,
     build_resolver_from_organes,
 )
+from app.ai.faits import construire_faits
+from app.ai.generation import generer_resume
 from app.schemas import (
     Amendement,
     Dossier,
     MiseAJourDossier,
-    ResumeScrutin,
     Scrutin,
     ScrutinResume,
     SourceOfficielle,
@@ -82,18 +83,6 @@ def _dedupe_sources(sources: list[SourceOfficielle]) -> list[SourceOfficielle]:
             seen.add(s.url)
             out.append(s)
     return out
-
-
-def _empty_resume(titre_clair: str) -> ResumeScrutin:
-    """Résumé non comblé (§2.5) — la génération IA viendra en Phase 2."""
-    return ResumeScrutin(
-        titre_clair=titre_clair,
-        resume=[],
-        public_concerne=[],
-        confiance="faible",
-        relu_par_humain=False,
-        champs_non_documentes=["resume", "contexte", "objectif", "public_concerne"],
-    )
 
 
 def _amendement_from_scrutin(scrutin: Scrutin) -> Amendement:
@@ -175,7 +164,16 @@ def build_dossier(parses: list[ScrutinParse]) -> Dossier:
         scrutins=[ScrutinResume.from_scrutin(s) for s in votes_texte],
         amendements=_structurer_amendements(votes_amendement),
         sources=_dedupe_sources(sources),
-        resume=_empty_resume(titre_clair),
+        # Résumé neutre par gabarit, ancré sur les faits des scrutins (§4.1).
+        resume=generer_resume(
+            construire_faits(
+                titre_clair=titre_clair,
+                titre_officiel=ref.dossier_titre,
+                theme=ref.theme,
+                votes_texte=votes_texte,
+                votes_amendement=votes_amendement,
+            )
+        ),
     )
 
 
@@ -248,8 +246,10 @@ def _merge_avec_existant(prev: Dossier, incoming: Dossier) -> Dossier:
         incoming.sources = _dedupe_sources(incoming.sources)
     else:
         incoming.sources = _dedupe_sources(incoming.sources + prev.sources)
-    # Conserve un résumé déjà généré (Phase 2) plutôt que l'écraser par un vide.
-    if prev.resume.resume:
+    # Résumé : le gabarit est déterministe et reflète les faits à jour, donc on
+    # garde la version fraîche. On ne préserve QUE le résumé relu/édité par un
+    # humain (le travail éditorial ne doit pas être écrasé par une régénération).
+    if prev.resume.relu_par_humain:
         incoming.resume = prev.resume
 
     if nouveaux:

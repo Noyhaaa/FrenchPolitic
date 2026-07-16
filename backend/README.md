@@ -141,11 +141,19 @@ tests/               Tests API + garde-fous + génération + ingestion (+ repo p
 - Les **garde-fous éditoriaux** (ancrage, lexique orienté avec accents, cohérence
   des chiffres, décision de revue) et le pipeline de génération avec `MockLLM`.
 
+**Résumé neutre par gabarit (en place)**
+- Généré à l'ingestion, **sans LLM ni clé API** : `app/ai/faits.py` (faits des
+  scrutins) → `rag.py` (passages étiquetés) → `gabarit.py` (5 phrases sourcées) →
+  garde-fous (`generer_resume`). Chaque phrase porte son `source_id` et passe
+  l'ancrage / le lexique / les chiffres par construction (confiance « moyenne »).
+- Un LLM (AnthropicLLM derrière `LLMClient`, ou Ollama en local) pourra reformuler
+  le style plus tard sans toucher au reste ; la fusion ne préserve un résumé que
+  s'il est **relu par un humain**, sinon elle régénère depuis les faits à jour.
+
 **Stubs à interface stable (Phase 2)**
-- Génération réelle des résumés : RAG (pgvector) + client LLM Anthropic, au niveau
-  du **dossier**. En attendant, les dossiers ingérés ont un résumé vide (confiance
-  « faible », jamais comblé — §2.5) ; l'app affiche un placeholder et les données
-  factuelles (scrutins, résultats, groupes).
+- Enrichissement Légifrance/PISTE : texte consolidé + métadonnées d'amendement
+  (le résumé pourra alors s'appuyer sur l'exposé des motifs, pas seulement les
+  scrutins).
 - Légifrance/PISTE : texte consolidé des dossiers (OAuth2 déjà esquissé).
 - Métadonnées d'amendement enrichies (texte complet, exposé sommaire) — pour
   l'instant un amendement = l'objet officiel de son scrutin (numéro/auteur

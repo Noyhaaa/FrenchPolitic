@@ -113,6 +113,27 @@ def texte_de_rattachement(objet: str) -> str | None:
     return titre[0].upper() + titre[1:]
 
 
+# Nature du texte, reconnue en tête de titre (miroir de `natureTexte` côté
+# frontend). Ordre important : les variantes « organique » avant les génériques.
+_NATURES: tuple[tuple[str, str], ...] = (
+    ("projet de loi organique", "Projet de loi organique"),
+    ("projet de loi", "Projet de loi"),
+    ("proposition de loi organique", "Proposition de loi organique"),
+    ("proposition de loi", "Proposition de loi"),
+    ("proposition de resolution", "Proposition de résolution"),
+)
+
+
+def nature_texte(titre: str) -> str | None:
+    """Nature du texte (« Projet de loi »…) si le titre la porte, sinon None
+    (§2.5 : on ne déduit pas)."""
+    t = fold(titre).lstrip()
+    for prefixe, libelle in _NATURES:
+        if t.startswith(prefixe):
+            return libelle
+    return None
+
+
 def map_position(position_majoritaire: str | None) -> PositionVote:
     """Position majoritaire d'un groupe → enum interne."""
     p = fold(position_majoritaire or "")
