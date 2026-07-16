@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View } from 'react-native';
-import { colors, spacing, typography } from '@/theme';
+import { colors, mono, spacing, typography } from '@/theme';
 import { PositionGroupe } from '@/types';
 import { positionLabel } from '@/utils/format';
 import { ResultBar } from './ResultBar';
@@ -9,8 +9,9 @@ interface Props {
 }
 
 /**
- * Une ligne par groupe (§3.2 point 5) : pastille couleur + nom à gauche,
- * barre pour/contre/abstention à droite (maquette).
+ * Une ligne par groupe (§3.2 point 5), au format « Party Breakdown » du
+ * prototype : barre de couleur du groupe à gauche, nom, barre
+ * pour/abstention/contre et décomptes mono colorés.
  * Symétrie stricte : même gabarit pour tous les groupes (§7 point 4).
  */
 export function GroupVoteRow({ groupe }: Props) {
@@ -22,21 +23,32 @@ export function GroupVoteRow({ groupe }: Props) {
         groupe.positionMajoritaire
       )}. ${pour} pour, ${contre} contre, ${abstention} abstentions.`}
     >
-      <View style={styles.nameWrap}>
-        <View style={[styles.dot, { backgroundColor: groupe.couleur }]} />
-        <Text style={styles.name} numberOfLines={2}>
+      <View style={[styles.colorBar, { backgroundColor: groupe.couleur }]} />
+      <View style={styles.info}>
+        <Text style={styles.name} numberOfLines={1}>
           {groupe.groupeNom}
         </Text>
-      </View>
-      <View style={styles.barWrap}>
         <ResultBar
-          height={8}
+          height={5}
           segments={[
             { value: pour, color: colors.pour },
-            { value: contre, color: colors.contre },
             { value: abstention, color: colors.abstention },
+            { value: contre, color: colors.contre },
           ]}
         />
+        <View style={styles.counts}>
+          <Text style={[styles.count, { color: colors.pour }]}>
+            {pour} POUR
+          </Text>
+          {abstention > 0 ? (
+            <Text style={[styles.count, { color: colors.abstention }]}>
+              {abstention} ABS
+            </Text>
+          ) : null}
+          <Text style={[styles.count, { color: colors.contre }]}>
+            {contre} CONTRE
+          </Text>
+        </View>
       </View>
     </View>
   );
@@ -48,23 +60,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
   },
-  nameWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    width: 118,
+  colorBar: {
+    width: 4,
+    height: 40,
+    borderRadius: 2,
+  },
+  info: {
+    flex: 1,
+    gap: spacing.xs,
   },
   name: {
-    ...typography.meta,
-    color: colors.textSecondary,
-    flexShrink: 1,
+    ...typography.label,
+    color: colors.textPrimary,
   },
-  dot: {
-    width: 9,
-    height: 9,
-    borderRadius: 5,
+  counts: {
+    flexDirection: 'row',
+    gap: spacing.lg,
   },
-  barWrap: {
-    flex: 1,
+  count: {
+    fontSize: 10,
+    fontWeight: '600',
+    fontFamily: mono,
   },
 });

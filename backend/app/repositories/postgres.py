@@ -5,16 +5,32 @@ la version in-memory : l'API ne voit pas la différence (choix via la config).
 """
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from datetime import date, timedelta
+
 from app.db.models import DossierRow, ScrutinRow
-from app.repositories.base import DossierRepository
-from app.schemas import Dossier, DossierListItem, MiseAJourDossier, Scrutin
+from app.repositories.base import DossierRepository, ordonner_sections
+from app.schemas import (
+    Accueil,
+    Dossier,
+    DossierListItem,
+    MiseAJourDossier,
+    RecapMensuel,
+    Scrutin,
+    ScrutinResume,
+    SectionTheme,
+)
 from app.utils.text import fold
 
 
 def _to_list_item(row: DossierRow) -> DossierListItem:
+    # Le payload (déjà chargé avec la ligne) porte les scrutins : on en tire le
+    # résultat du dernier vote nominatif pour la barre de la carte (§5.2, §2.5).
+    scrutins = [
+        ScrutinResume.model_validate(s) for s in row.payload.get("scrutins", [])
+    ]
     return DossierListItem(
         id=row.id,
         date=row.date,
@@ -29,6 +45,7 @@ def _to_list_item(row: DossierRow) -> DossierListItem:
             if row.mise_a_jour
             else None
         ),
+        resultat_dernier_scrutin=DossierListItem._resultat_dernier(scrutins),
     )
 
 
@@ -69,3 +86,98 @@ class PostgresDossierRepository(DossierRepository):
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         return [_to_list_item(r) for r in rows]
+
+    async def accueil(self, par_section: int = 10) -> Accueil:
+        jour_expr = func.substr(DossierRow.date, 1, 10)
+        recents = (
+            select(DossierRow)
+            .order_by(DossierRow.date.desc(), DossierRow.id.desc())
+        )
+        aujourdhui_str = date.today().isoformat()
+        hier_str = (date.today() - timedelta(days=1)).isoformat()
+
+        async with self._sf() as session:
+            a_la_une_row = (
+                (await session.execute(recents.limit(1))).scalars().first()
+            )
+            a_la_une = _to_list_item(a_la_une_row) if a_la_une_row else None
+
+            async def _du_jour(jour: str) -> list[DossierListItem]:
+                rows = (
+                    (await session.execute(recents.where(jour_expr == jour)))
+                    .scalars()
+                    .all()
+                )
+                # La une n'est pas répétée dans Aujourd'hui / Hier.
+                return [
+                    _to_list_item(r)
+                    for r in rows
+                    if a_la_une is None or r.id != a_la_une.id
+                ]
+
+            aujourdhui = await _du_jour(aujourdhui_str)
+            hier = await _du_jour(hier_str)
+
+            # Une requête ciblée par thème (jamais tous les payloads d'un coup).
+            themes = (
+                (await session.execute(select(DossierRow.theme).distinct()))
+                .scalars()
+                .all()
+            )
+            sections: list[SectionTheme] = []
+            for theme in themes:
+                rows = (
+                    (
+                        await session.execute(
+                            recents.where(DossierRow.theme == theme).limit(
+                                par_section
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                sections.append(
+                    SectionTheme(
+                        theme=theme, dossiers=[_to_list_item(r) for r in rows]
+                    )
+                )
+
+        return Accueil(
+            a_la_une=a_la_une,
+            aujourdhui=aujourdhui,
+            hier=hier,
+            sections=ordonner_sections(sections),
+        )
+
+    async def recap_mensuel(self) -> RecapMensuel | None:
+        # Clé « AAAA-MM » sur la date ISO du scrutin ; comptes SQL (exacts,
+        # indépendants de la pagination du fil).
+        mois_expr = func.substr(ScrutinRow.date, 1, 7)
+        statut = ScrutinRow.payload["statut"].astext
+        async with self._sf() as session:
+            mois_max = (
+                await session.execute(
+                    select(func.max(mois_expr)).where(ScrutinRow.date != "")
+                )
+            ).scalar()
+            if not mois_max:
+                return None
+            votes, adoptes, rejetes, textes = (
+                await session.execute(
+                    select(
+                        func.count(),
+                        func.count().filter(statut == "adopte"),
+                        func.count().filter(statut == "rejete"),
+                        func.count(func.distinct(ScrutinRow.dossier_id)),
+                    ).where(mois_expr == mois_max)
+                )
+            ).one()
+        return RecapMensuel(
+            annee=int(mois_max[:4]),
+            mois=int(mois_max[5:7]),
+            votes=votes,
+            adoptes=adoptes,
+            rejetes=rejetes,
+            textes=textes,
+        )

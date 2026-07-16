@@ -215,4 +215,45 @@ export interface DossierListItem {
   /** Nombre de scrutins rattachés (affiché sur la carte). */
   nombreScrutins: number;
   miseAJour?: MiseAJourDossier;
+  /**
+   * Résultat du dernier scrutin **public** du dossier (voix pour/contre) —
+   * alimente la barre de résultat de la carte. Absent si le dernier vote n'est
+   * pas nominatif (à main levée) : on n'affiche alors pas de barre (§2.5, §5.2).
+   */
+  resultatDernierScrutin?: ResultatGlobal;
+}
+
+/** Une rangée thématique de l'accueil (façon « catégorie » Netflix). */
+export interface SectionTheme {
+  theme: ThemeScrutin;
+  dossiers: DossierListItem[];
+}
+
+/**
+ * Écran d'accueil complet, servi en UNE réponse (miroir backend).
+ * Construit côté serveur pour un affichage atomique — pas de remplissage
+ * progressif des rangées. « Aujourd'hui » / « Hier » vides hors jours de
+ * séance (rangée masquée, §2.5).
+ */
+export interface Accueil {
+  aLaUne: DossierListItem | null;
+  aujourdhui: DossierListItem[];
+  hier: DossierListItem[];
+  sections: SectionTheme[];
+}
+
+/**
+ * Activité du dernier mois **actif** (carte récap de l'accueil, §7.8).
+ * Compte des votes (scrutins tenus dans le mois), pas des dossiers.
+ * Miroir de `RecapMensuel` côté backend.
+ */
+export interface RecapMensuel {
+  annee: number;
+  /** 1–12. */
+  mois: number;
+  votes: number;
+  adoptes: number;
+  rejetes: number;
+  /** Nombre de dossiers (textes) ayant connu au moins un vote dans le mois. */
+  textes: number;
 }

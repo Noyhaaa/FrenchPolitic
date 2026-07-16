@@ -1,7 +1,7 @@
-import { StyleSheet, Text } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
-import { colors, typography } from '@/theme';
+import { colors, radius, typography } from '@/theme';
 import {
   AssistantScreen,
   HomeScreen,
@@ -21,9 +21,13 @@ const icons: Record<keyof MainTabsParamList, string> = {
 
 function TabIcon({ name, focused }: { name: keyof MainTabsParamList; focused: boolean }) {
   return (
-    <Text style={[styles.icon, { opacity: focused ? 1 : 0.45 }]}>
-      {icons[name]}
-    </Text>
+    <View style={styles.iconWrap}>
+      <Text style={[styles.icon, { opacity: focused ? 1 : 0.35 }]}>
+        {icons[name]}
+      </Text>
+      {/* Point d'accent sous l'onglet actif (prototype). */}
+      <View style={[styles.dot, { opacity: focused ? 1 : 0 }]} />
+    </View>
   );
 }
 
@@ -32,10 +36,10 @@ export function MainTabs() {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
-        tabBarActiveTintColor: colors.brand,
+        tabBarActiveTintColor: colors.textPrimary,
         tabBarInactiveTintColor: colors.textTertiary,
         tabBarStyle: styles.tabBar,
-        tabBarLabelStyle: typography.meta,
+        tabBarLabelStyle: styles.label,
         tabBarIcon: ({ focused }) => (
           <TabIcon name={route.name} focused={focused} />
         ),
@@ -51,10 +55,25 @@ export function MainTabs() {
 
 const styles = StyleSheet.create({
   tabBar: {
-    backgroundColor: colors.surface,
-    borderTopColor: colors.border,
+    backgroundColor: colors.background,
+    borderTopColor: colors.borderStrong,
+  },
+  label: {
+    ...typography.meta,
+    fontFamily: undefined,
+    fontWeight: '600',
+  },
+  iconWrap: {
+    alignItems: 'center',
+    gap: 3,
   },
   icon: {
     fontSize: 20,
+  },
+  dot: {
+    width: 4,
+    height: 4,
+    borderRadius: radius.pill,
+    backgroundColor: colors.brand,
   },
 });

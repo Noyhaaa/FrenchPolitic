@@ -264,7 +264,7 @@ export function DossierDetailScreen() {
         {/* 4. Ce qui change — titre hors carte, AVANT gris / APRÈS bleu (§4.5) */}
         {resume.changement && (
           <View style={styles.flatSection}>
-            <Text style={typography.sectionTitle}>Ce qui change</Text>
+            <Text style={typography.overline}>Ce qui change</Text>
             <View style={styles.changeRow}>
               <View style={[styles.changeCol, styles.changeAvant]}>
                 <Text style={styles.avantLabel}>AVANT</Text>
@@ -414,7 +414,7 @@ export function DossierDetailScreen() {
             doublon ici. Masqué si rien au niveau dossier (§2.5). */}
         {dossier.sources.length > 0 && (
           <View style={styles.flatSection}>
-            <Text style={typography.sectionTitle}>Sources officielles</Text>
+            <Text style={typography.overline}>Sources officielles</Text>
             <SourceGrid sources={dossier.sources} />
           </View>
         )}
@@ -544,8 +544,7 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   voteObjet: {
-    ...typography.body,
-    fontWeight: '600',
+    ...typography.cardTitle,
     fontSize: 14,
     lineHeight: 20,
   },
@@ -652,7 +651,8 @@ const styles = StyleSheet.create({
   },
   fabSub: {
     ...typography.meta,
-    color: colors.brandSoft,
+    color: colors.textOnAccent,
+    opacity: 0.75,
   },
   fabArrow: {
     color: colors.textOnAccent,

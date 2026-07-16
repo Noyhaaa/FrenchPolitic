@@ -3,10 +3,10 @@ import { colors, radius, spacing, typography } from '@/theme';
 import { StatutScrutin } from '@/types';
 import { statutLabel } from '@/utils/format';
 
-const config: Record<StatutScrutin, { fg: string; bg: string; icon: string }> = {
-  adopte: { fg: colors.adopte, bg: colors.adopteSoft, icon: '✅' },
-  rejete: { fg: colors.rejete, bg: colors.rejeteSoft, icon: '❌' },
-  en_cours: { fg: colors.enCours, bg: colors.enCoursSoft, icon: '🟡' },
+const config: Record<StatutScrutin, { bg: string; icon: string }> = {
+  adopte: { bg: colors.adopte, icon: '✓' },
+  rejete: { bg: colors.rejete, icon: '✕' },
+  en_cours: { bg: colors.enCours, icon: '◷' },
 };
 
 interface Props {
@@ -16,11 +16,12 @@ interface Props {
 }
 
 /**
- * Badge de statut : couleur + icône + libellé texte.
- * L'information n'est jamais portée par la couleur seule (RGAA, §8).
+ * Badge de statut (style prototype : fond plein, texte mono en capitales).
+ * L'information n'est jamais portée par la couleur seule : toujours un
+ * glyphe + un libellé texte (RGAA, §8).
  */
 export function StatusBadge({ statut, label }: Props) {
-  const { fg, bg, icon } = config[statut];
+  const { bg, icon } = config[statut];
   const text = label ?? statutLabel(statut);
   return (
     <View
@@ -29,7 +30,7 @@ export function StatusBadge({ statut, label }: Props) {
       accessibilityLabel={`Statut : ${text}`}
     >
       <Text style={styles.icon}>{icon}</Text>
-      <Text style={[typography.badge, { color: fg }]}>{text}</Text>
+      <Text style={[typography.badge, styles.label]}>{text}</Text>
     </View>
   );
 }
@@ -39,12 +40,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
-    paddingVertical: 5,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.pill,
-    gap: 6,
+    paddingVertical: 3,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.sm,
+    gap: 4,
   },
   icon: {
-    fontSize: 11,
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.textOnAccent,
+  },
+  label: {
+    color: colors.textOnAccent,
   },
 });

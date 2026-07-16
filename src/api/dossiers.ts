@@ -1,15 +1,13 @@
-import { Dossier, DossierListItem, Scrutin } from '@/types';
+import { Accueil, Dossier, DossierListItem, RecapMensuel, Scrutin } from '@/types';
 import { apiGet } from './client';
 
-/** Nombre de dossiers par page du fil. */
-export const PAGE_SIZE = 20;
-
-/** Fil des dossiers, paginé (§3.1). */
-export function fetchDossiers(
-  { limit = PAGE_SIZE, offset = 0 }: { limit?: number; offset?: number } = {},
-  signal?: AbortSignal,
-): Promise<DossierListItem[]> {
-  return apiGet<DossierListItem[]>('/dossiers', { limit, offset }, signal);
+/**
+ * Écran d'accueil complet en UNE réponse (§3.1) : à la une, aujourd'hui,
+ * hier, rangées par thème — l'affichage est atomique, pas de remplissage
+ * progressif. (Le fil paginé `/dossiers` reste exposé par l'API.)
+ */
+export function fetchAccueil(signal?: AbortSignal): Promise<Accueil> {
+  return apiGet<Accueil>('/accueil', undefined, signal);
 }
 
 /** Fiche détaillée d'un dossier (§3.2). */
@@ -20,6 +18,11 @@ export function fetchDossier(id: string, signal?: AbortSignal): Promise<Dossier>
 /** Détail d'un vote : groupes + nominatif si disponible (§3.2, §5.2). */
 export function fetchScrutin(id: string, signal?: AbortSignal): Promise<Scrutin> {
   return apiGet<Scrutin>(`/scrutins/${encodeURIComponent(id)}`, undefined, signal);
+}
+
+/** Activité du dernier mois actif (carte récap de l'accueil, §7.8). */
+export function fetchRecap(signal?: AbortSignal): Promise<RecapMensuel | null> {
+  return apiGet<RecapMensuel | null>('/recap', undefined, signal);
 }
 
 /** Recherche plein texte (§3.3). */

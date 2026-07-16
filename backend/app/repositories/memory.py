@@ -6,8 +6,17 @@ Alimentée par les données seed (`app.data.seed`). Sert de backend par défaut
 """
 from __future__ import annotations
 
-from app.repositories.base import DossierRepository
-from app.schemas import Dossier, DossierListItem, Scrutin
+from datetime import date, timedelta
+
+from app.repositories.base import DossierRepository, ordonner_sections
+from app.schemas import (
+    Accueil,
+    Dossier,
+    DossierListItem,
+    RecapMensuel,
+    Scrutin,
+    SectionTheme,
+)
 from app.utils.text import fold as _fold
 
 
@@ -43,3 +52,43 @@ class InMemoryDossierRepository(DossierRepository):
             if q in _fold(f"{d.titre_clair} {d.titre_officiel} {d.accroche} {d.theme}")
         ]
         return [DossierListItem.from_dossier(d) for d in results[:limit]]
+
+    async def accueil(self, par_section: int = 10) -> Accueil:
+        items = [DossierListItem.from_dossier(d) for d in self._ordered]
+        a_la_une = items[0] if items else None
+        reste = items[1:]  # la une n'est pas répétée dans Aujourd'hui / Hier
+
+        aujourdhui_str = date.today().isoformat()
+        hier_str = (date.today() - timedelta(days=1)).isoformat()
+
+        par_theme: dict[str, list[DossierListItem]] = {}
+        for it in items:
+            par_theme.setdefault(it.theme, []).append(it)
+
+        return Accueil(
+            a_la_une=a_la_une,
+            aujourdhui=[d for d in reste if d.date[:10] == aujourdhui_str],
+            hier=[d for d in reste if d.date[:10] == hier_str],
+            sections=ordonner_sections(
+                [
+                    SectionTheme(theme=t, dossiers=liste[:par_section])
+                    for t, liste in par_theme.items()
+                ]
+            ),
+        )
+
+    async def recap_mensuel(self) -> RecapMensuel | None:
+        dates = [s for s in self._scrutins.values() if s.date]
+        if not dates:
+            return None
+        # Dernier mois calendaire ayant connu au moins un vote (clé « AAAA-MM »).
+        mois_max = max(s.date[:7] for s in dates)
+        du_mois = [s for s in dates if s.date[:7] == mois_max]
+        return RecapMensuel(
+            annee=int(mois_max[:4]),
+            mois=int(mois_max[5:7]),
+            votes=len(du_mois),
+            adoptes=sum(1 for s in du_mois if s.statut.value == "adopte"),
+            rejetes=sum(1 for s in du_mois if s.statut.value == "rejete"),
+            textes=len({s.dossier_id for s in du_mois}),
+        )

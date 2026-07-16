@@ -12,6 +12,7 @@ from app.ingestion.normalize import (
     map_statut,
     numero_amendement,
     numero_amendement_parent,
+    texte_de_rattachement,
 )
 from app.ingestion.organes import build_acteurs_from_amo, build_resolver_from_organes
 from app.schemas import ScrutinResume, SourceOfficielle
@@ -150,6 +151,70 @@ def test_parse_scrutin_complet():
     assert len(s.positions_groupes) == 2
     assert s.positions_groupes[0].groupe_nom == "Rassemblement National"
     assert s.scrutin_public is True
+
+
+def _sans_dossier_ref(objet: str) -> dict:
+    """Une variante de SCRUTIN sans dossierRef, à objet choisi."""
+    import copy
+
+    brut = copy.deepcopy(SCRUTIN)
+    brut["scrutin"]["titre"] = objet
+    brut["scrutin"]["objet"]["libelle"] = objet
+    del brut["scrutin"]["objet"]["dossierLegislatif"]
+    return brut
+
+
+def test_texte_de_rattachement():
+    assert texte_de_rattachement(
+        "l'amendement n° 39 de M. Mattei à l'article 2 de la proposition de loi "
+        "visant à lutter contre la fraude."
+    ) == "Proposition de loi visant à lutter contre la fraude"
+    # La mention de lecture est retirée : même texte → même dossier.
+    assert texte_de_rattachement(
+        "l'ensemble du projet de loi de finances pour 2026 (première lecture)"
+    ) == "Projet de loi de finances pour 2026"
+    # Aucun texte cité → None (motion de censure, déclaration…).
+    assert texte_de_rattachement(
+        "la motion de censure déposée en application de l'article 49, alinéa 2"
+    ) is None
+
+
+def test_sans_dossier_ref_regroupe_par_texte_cite():
+    """Sans dossierRef, les votes citant le même texte partagent un dossier
+    reconstitué — le fil montre le texte, pas chaque amendement (pas de
+    pollution en singletons)."""
+    resolver = build_resolver_from_organes(ORGANES)
+    a = parse_scrutin(
+        _sans_dossier_ref(
+            "l'amendement n° 4 de M. Y à l'article 2 de la proposition de loi "
+            "visant à protéger la ressource en eau"
+        ),
+        resolver,
+    )
+    b = parse_scrutin(
+        _sans_dossier_ref(
+            "l'ensemble de la proposition de loi visant à protéger la ressource "
+            "en eau (première lecture)"
+        ),
+        resolver,
+    )
+    assert a.dossier_id.startswith("TXT-")
+    assert a.dossier_id == b.dossier_id  # même texte → même dossier
+    assert (
+        a.dossier_titre
+        == "Proposition de loi visant à protéger la ressource en eau"
+    )
+    assert a.dossier_ref is None  # pas de page de dossier inventée (§2.5)
+
+
+def test_sans_dossier_ref_ni_texte_reste_singleton():
+    """Un vote autonome (motion de censure…) reste son propre dossier."""
+    resolver = build_resolver_from_organes(ORGANES)
+    p = parse_scrutin(
+        _sans_dossier_ref("la motion de censure déposée par 185 députés"),
+        resolver,
+    )
+    assert p.dossier_id == "VTANR5L17V999"  # l'uid du scrutin
 
 
 def _scrutin_derive(resolver, uid, date, objet):

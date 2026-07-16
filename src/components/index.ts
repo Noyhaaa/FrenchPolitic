@@ -1,6 +1,10 @@
 export { StatusBadge } from './StatusBadge';
 export { ThemeAvatar } from './ThemeAvatar';
 export { DossierCard } from './DossierCard';
+export { DossierTile, TILE_WIDTH } from './DossierTile';
+export { HeroDossier } from './HeroDossier';
+export { MiniResultat } from './MiniResultat';
+export { RecapVotes } from './RecapVotes';
 export { ResultBar } from './ResultBar';
 export type { Segment } from './ResultBar';
 export { GroupVoteRow } from './GroupVoteRow';

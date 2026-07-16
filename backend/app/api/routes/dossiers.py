@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import get_dossier_repository
 from app.repositories.base import DossierRepository
-from app.schemas import Dossier, DossierListItem, Scrutin
+from app.schemas import Accueil, Dossier, DossierListItem, RecapMensuel, Scrutin
 
 router = APIRouter(prefix="/dossiers", tags=["dossiers"])
 
@@ -65,3 +65,32 @@ async def search(
 ) -> list[DossierListItem]:
     """Recherche plein texte sur titre clair + titre officiel + thème (écran 3)."""
     return await repo.search(q, limit=limit)
+
+
+@search_router.get(
+    "/accueil",
+    response_model=Accueil,
+    summary="Écran d'accueil complet",
+)
+async def accueil(
+    par_section: int = Query(10, ge=1, le=30, alias="parSection"),
+    repo: DossierRepository = Depends(get_dossier_repository),
+) -> Accueil:
+    """L'accueil en UNE réponse : à la une, aujourd'hui, hier, rangées par
+    thème. Construit côté serveur pour un affichage atomique (pas de
+    remplissage progressif des rangées côté client)."""
+    return await repo.accueil(par_section=par_section)
+
+
+@search_router.get(
+    "/recap",
+    response_model=RecapMensuel | None,
+    summary="Activité du dernier mois actif",
+)
+async def recap(
+    repo: DossierRepository = Depends(get_dossier_repository),
+) -> RecapMensuel | None:
+    """Compte des votes tenus le dernier mois ayant connu de l'activité
+    (carte récap de l'accueil). Purement descriptif (§7.8) ; null si aucune
+    donnée — le client masque alors la carte (§2.5)."""
+    return await repo.recap_mensuel()

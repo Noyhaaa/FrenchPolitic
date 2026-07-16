@@ -8,6 +8,7 @@ import {
 } from '@/utils/format';
 import { StatusBadge } from './StatusBadge';
 import { ThemeAvatar } from './ThemeAvatar';
+import { MiniResultat } from './MiniResultat';
 
 interface Props {
   dossier: DossierListItem;
@@ -51,6 +52,12 @@ export function DossierCard({ dossier, onPress }: Props) {
         {dossier.accroche}
       </Text>
 
+      {dossier.resultatDernierScrutin ? (
+        <View style={styles.result}>
+          <MiniResultat resultat={dossier.resultatDernierScrutin} />
+        </View>
+      ) : null}
+
       <Text style={[typography.meta, styles.meta]}>
         {formatDateRelative(dossier.date)} · {nbVotes} ·{' '}
         {formatTempsLecture(dossier.tempsLectureSec)}
@@ -65,6 +72,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.xl,
     padding: spacing.xl,
     gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   pressed: {
     opacity: 0.85,
@@ -91,6 +100,9 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     marginTop: spacing.xs,
     marginBottom: -spacing.xs,
+  },
+  result: {
+    marginTop: spacing.xs,
   },
   title: {
     marginTop: spacing.xs,

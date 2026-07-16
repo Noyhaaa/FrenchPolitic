@@ -39,5 +39,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: colors.surfaceMuted,
     width: '100%',
+    columnGap: 2, // fin liseré entre segments, comme le prototype
   },
 });

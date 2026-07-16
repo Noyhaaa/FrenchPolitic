@@ -152,6 +152,22 @@ class MiseAJourDossier(CamelModel):
     label: str
 
 
+class RecapMensuel(CamelModel):
+    """Récapitulatif d'activité du dernier mois **actif** (carte de l'accueil).
+
+    Compte des **votes** (scrutins tenus dans le mois) — pas des dossiers, dont
+    le statut évolue au fil de la navette. Purement descriptif (§7.8).
+    """
+
+    annee: int
+    mois: int  # 1–12
+    votes: int
+    adoptes: int
+    rejetes: int
+    # Nombre de dossiers (textes) ayant connu au moins un vote dans le mois.
+    textes: int
+
+
 class Dossier(CamelModel):
     """Entité centrale : un dossier législatif (un texte) et sa trajectoire."""
 
@@ -186,6 +202,19 @@ class DossierListItem(CamelModel):
     temps_lecture_sec: int
     nombre_scrutins: int
     mise_a_jour: MiseAJourDossier | None = None
+    # Résultat du dernier scrutin **public** (voix pour/contre) pour la barre de
+    # la carte. None si le dernier vote n'est pas nominatif (§5.2, §2.5).
+    resultat_dernier_scrutin: ResultatGlobal | None = None
+
+    @staticmethod
+    def _resultat_dernier(scrutins: list[ScrutinResume]) -> ResultatGlobal | None:
+        # `scrutins` est ordonné du plus récent au plus ancien : on prend le
+        # résultat du premier vote nominatif (les votes à main levée n'ont pas de
+        # décompte affichable, §5.2).
+        for s in scrutins:
+            if s.scrutin_public:
+                return s.resultat
+        return None
 
     @classmethod
     def from_dossier(cls, d: Dossier) -> "DossierListItem":
@@ -199,4 +228,27 @@ class DossierListItem(CamelModel):
             temps_lecture_sec=d.temps_lecture_sec,
             nombre_scrutins=len(d.scrutins),
             mise_a_jour=d.mise_a_jour,
+            resultat_dernier_scrutin=cls._resultat_dernier(d.scrutins),
         )
+
+
+class SectionTheme(CamelModel):
+    """Une rangée thématique de l'accueil (façon « catégorie » Netflix)."""
+
+    theme: str
+    dossiers: list[DossierListItem] = []
+
+
+class Accueil(CamelModel):
+    """Écran d'accueil complet, servi en UNE réponse.
+
+    Construire les rangées côté serveur évite le remplissage désordonné qu'on
+    aurait en les dérivant d'un fil paginé : le client affiche tout d'un coup.
+    « Aujourd'hui » / « Hier » sont factuels (date du dernier scrutin) et vides
+    hors jours de séance — le client masque alors la rangée (§2.5).
+    """
+
+    a_la_une: DossierListItem | None = None
+    aujourdhui: list[DossierListItem] = []
+    hier: list[DossierListItem] = []
+    sections: list[SectionTheme] = []

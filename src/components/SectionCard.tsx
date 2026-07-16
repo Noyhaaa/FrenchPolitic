@@ -9,12 +9,13 @@ interface Props {
   flat?: boolean;
 }
 
-/** Conteneur d'une section de la fiche scrutin (§3.2). */
+/** Conteneur d'une section de la fiche scrutin (§3.2).
+ * En-tête mono en capitales, comme les sections du prototype. */
 export function SectionCard({ title, children, flat }: Props) {
   return (
     <View style={[styles.card, flat && styles.flat]}>
       {title ? (
-        <Text style={[typography.sectionTitle, styles.title]}>{title}</Text>
+        <Text style={[typography.overline, styles.title]}>{title}</Text>
       ) : null}
       {children}
     </View>
@@ -24,14 +25,17 @@ export function SectionCard({ title, children, flat }: Props) {
 const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
-    borderRadius: radius.xl,
+    borderRadius: radius.lg,
     padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   flat: {
     backgroundColor: 'transparent',
+    borderWidth: 0,
     paddingHorizontal: 0,
   },
   title: {
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
   },
 });

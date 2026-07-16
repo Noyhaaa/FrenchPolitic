@@ -1,12 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Dossier, DossierListItem, Scrutin } from '@/types';
+import { Accueil, Dossier, RecapMensuel, Scrutin } from '@/types';
 
 /**
  * Cache local pour l'usage hors-ligne (§8 : l'app reste utilisable sur les
  * contenus déjà consultés). On stocke le dernier fil et chaque fiche ouverte.
  * Best-effort : toute erreur de stockage est ignorée silencieusement.
  */
-const KEY_FEED = 'cache:dossiers:feed';
+const KEY_ACCUEIL = 'cache:accueil';
+const KEY_RECAP = 'cache:recap';
 const keyDetail = (id: string) => `cache:dossier:${id}`;
 const keyScrutin = (id: string) => `cache:scrutin:${id}`;
 
@@ -28,10 +29,12 @@ async function writeJson(key: string, value: unknown): Promise<void> {
 }
 
 export const cache = {
-  getFeed: () => readJson<DossierListItem[]>(KEY_FEED),
-  setFeed: (items: DossierListItem[]) => writeJson(KEY_FEED, items),
+  getAccueil: () => readJson<Accueil>(KEY_ACCUEIL),
+  setAccueil: (a: Accueil) => writeJson(KEY_ACCUEIL, a),
   getDetail: (id: string) => readJson<Dossier>(keyDetail(id)),
   setDetail: (d: Dossier) => writeJson(keyDetail(d.id), d),
   getScrutin: (id: string) => readJson<Scrutin>(keyScrutin(id)),
   setScrutin: (s: Scrutin) => writeJson(keyScrutin(s.id), s),
+  getRecap: () => readJson<RecapMensuel>(KEY_RECAP),
+  setRecap: (r: RecapMensuel) => writeJson(KEY_RECAP, r),
 };

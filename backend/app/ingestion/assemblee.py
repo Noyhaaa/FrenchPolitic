@@ -12,6 +12,7 @@ avec une confiance « faible » (règle d'or §2.5 : jamais de comblement).
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import zipfile
@@ -24,9 +25,11 @@ from app.ingestion.normalize import (
     guess_theme,
     map_position,
     map_statut,
+    texte_de_rattachement,
     to_int,
     truncate,
 )
+from app.utils.text import fold
 from app.ingestion.organes import GroupResolver
 from app.schemas import (
     PositionGroupe,
@@ -159,10 +162,28 @@ def parse_scrutin(
 
     # Objet du vote (« l'amendement n° 80… », « l'ensemble du texte »…).
     objet_libelle = s.get("titre") or objet.get("libelle") or ""
-    # Titre du dossier (souvent plus clair) ; sinon on retombe sur l'objet.
-    dossier_titre = dossier_titre_raw or objet.get("libelle") or objet_libelle
-    # Pas de dossierRef → le scrutin est son propre dossier (singleton).
-    dossier_id = dossier_ref or s["uid"]
+    # Rattachement au dossier, par ordre de fiabilité :
+    # 1) dossierRef officiel ;
+    # 2) sinon, le texte de loi cité dans l'objet même du vote (« … de la
+    #    proposition de loi visant à… ») — tous les votes d'un même texte
+    #    (articles, amendements, motions liées) se regroupent ainsi sous un
+    #    dossier reconstitué, au lieu de polluer le fil en singletons ;
+    # 3) sinon (motion de censure, déclaration…), le scrutin est son propre
+    #    dossier : c'est un événement autonome, légitime dans le fil.
+    if dossier_ref:
+        dossier_id = dossier_ref
+        dossier_titre = dossier_titre_raw or objet.get("libelle") or objet_libelle
+    else:
+        rattachement = texte_de_rattachement(objet_libelle)
+        if rattachement:
+            # Id stable entre runs : dérivé du titre plié (insensible aux
+            # accents / à la casse) — l'upsert fusionne les runs successifs.
+            cle = fold(rattachement)
+            dossier_id = "TXT-" + hashlib.sha1(cle.encode()).hexdigest()[:16]
+            dossier_titre = rattachement
+        else:
+            dossier_id = s["uid"]
+            dossier_titre = dossier_titre_raw or objet.get("libelle") or objet_libelle
 
     decompte = (s.get("syntheseVote") or {}).get("decompte") or {}
     resultat = ResultatGlobal(

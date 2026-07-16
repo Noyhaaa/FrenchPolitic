@@ -49,9 +49,14 @@ uvicorn app.main:app --reload
 
 L'ingestion télécharge l'archive des scrutins + l'archive AMO (organes **et
 acteurs** : groupes + annuaire des députés pour le vote nominatif), parse,
-contrôle la cohérence des décomptes, **regroupe les scrutins par dossier**
-(`dossierRef`) et upsert (idempotent) : les dossiers (liste compacte des votes)
-et le détail de chaque vote (table `scrutin`, avec les noms des votants).
+contrôle la cohérence des décomptes, **regroupe les scrutins par dossier** et
+upsert (idempotent) : les dossiers (liste compacte des votes) et le détail de
+chaque vote (table `scrutin`, avec les noms des votants). Regroupement en
+cascade : le `dossierRef` officiel quand il existe ; sinon le **texte de
+rattachement extrait de l'objet du vote** (« … de la proposition de loi visant
+à… » → dossier reconstitué, id stable `TXT-…`, mention de lecture ignorée) ;
+sinon le scrutin reste un dossier singleton (motion de censure, déclaration…).
+Le fil n'expose ainsi que des textes — jamais un vote d'amendement isolé.
 Les votes d'amendement sont classés depuis l'objet officiel (amendement vs
 sous-amendement, numéro et auteur extraits quand sans ambiguïté) ; chaque
 **sous-amendement est rattaché à son amendement parent** (« … à l'amendement
@@ -73,7 +78,9 @@ Lorsqu'un nouveau scrutin rejoint un dossier déjà en base, celui-ci est marqu�
 
 | Méthode | Route              | Écran            | Description                                   |
 |---------|--------------------|------------------|-----------------------------------------------|
-| GET     | `/dossiers`        | Fil (1)          | Derniers dossiers, du plus récent au plus ancien |
+| GET     | `/accueil`         | Accueil (1)      | Écran complet en une réponse : à la une, aujourd'hui/hier, rangées par thème |
+| GET     | `/recap`           | Accueil (1)      | Activité du dernier mois actif (votes, adoptés/rejetés, textes) |
+| GET     | `/dossiers`        | Fil paginé       | Derniers dossiers, du plus récent au plus ancien |
 | GET     | `/dossiers/{id}`   | Fiche dossier (2)| Résumé sourcé + votes sur le texte + amendements |
 | GET     | `/scrutins/{id}`   | Fiche vote (3)   | Détail d'un vote (texte ou amendement) : groupes + nominatif |
 | GET     | `/recherche?q=`    | Recherche (4)    | Plein texte sur titre clair + officiel + thème |

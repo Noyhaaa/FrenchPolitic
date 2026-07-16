@@ -4,7 +4,7 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { colors, radius, spacing, typography } from '@/theme';
+import { colors, mono, radius, serif, spacing, typography } from '@/theme';
 import {
   AmendementRow,
   ErrorView,
@@ -18,8 +18,8 @@ import {
   StatusBadge,
 } from '@/components';
 import { useScrutin } from '@/hooks';
-import { PositionGroupe } from '@/types';
-import { formatDateLong, libelleScrutin } from '@/utils/format';
+import { PositionGroupe, StatutScrutin } from '@/types';
+import { formatDateLong, libelleScrutin, statutLabel } from '@/utils/format';
 import type { RootStackParamList } from '@/navigation/types';
 
 type DetailRoute = RouteProp<RootStackParamList, 'ScrutinDetail'>;
@@ -126,6 +126,8 @@ export function ScrutinDetailScreen() {
   // Titre = type du vote en clair ; l'objet officiel complet (le sujet exact)
   // reste affiché dessous — rien n'est perdu, tout reste sourcé (§2.5).
   const lib = libelleScrutin(scrutin.objet);
+  const totalVoix =
+    resultat.pour + resultat.contre + resultat.abstention + resultat.nonVotants;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -153,34 +155,51 @@ export function ScrutinDetailScreen() {
             .join(' · ')}
         </Text>
 
-        {/* Résultat global : barre + décomptes */}
-        <SectionCard title="Résultat du vote">
-          <ResultBar
-            height={12}
-            segments={[
-              { value: resultat.pour, color: colors.pour },
-              { value: resultat.contre, color: colors.contre },
-              { value: resultat.abstention, color: colors.abstention },
-              { value: resultat.nonVotants, color: colors.nonVotant },
-            ]}
-          />
-          <View style={styles.tally}>
-            <TallyItem label="Pour" value={resultat.pour} color={colors.pour} align="flex-start" />
-            <TallyItem label="Contre" value={resultat.contre} color={colors.contre} align="center" />
-            <TallyItem label="Abstention" value={resultat.abstention} color={colors.textSecondary} align="flex-end" />
+        {/* Résultat global (format prototype) : verdict, grille des décomptes,
+            barre combinée + échelle. Tout est factuel : décomptes officiels. */}
+        <SectionCard title="Résultat du vote" flat>
+          <VerdictCard statut={scrutin.statut} resultat={resultat} />
+
+          <View style={styles.tallyGrid}>
+            <TallyItem label="Pour" value={resultat.pour} total={totalVoix} color={colors.pour} />
+            <View style={styles.tallySep} />
+            <TallyItem label="Contre" value={resultat.contre} total={totalVoix} color={colors.contre} />
+            <View style={styles.tallySep} />
+            <TallyItem label="Abstention" value={resultat.abstention} total={totalVoix} color={colors.abstention} />
+          </View>
+
+          <View style={styles.barBlock}>
+            <ResultBar
+              height={6}
+              segments={[
+                { value: resultat.pour, color: colors.pour },
+                { value: resultat.abstention, color: colors.abstention },
+                { value: resultat.contre, color: colors.contre },
+                { value: resultat.nonVotants, color: colors.nonVotant },
+              ]}
+            />
+            <View style={styles.barScale}>
+              <Text style={styles.barScaleText}>0</Text>
+              {resultat.nonVotants > 0 ? (
+                <Text style={styles.barScaleText}>
+                  {resultat.nonVotants} non-votant{resultat.nonVotants > 1 ? 's' : ''}
+                </Text>
+              ) : null}
+              <Text style={styles.barScaleText}>{totalVoix}</Text>
+            </View>
           </View>
         </SectionCard>
 
         {/* Vote par groupe — scrutins publics uniquement (§3.2, §5.2).
             Tap sur un groupe (si nominatif dispo) → noms des votants. */}
         {scrutin.scrutinPublic ? (
-          <SectionCard title="Vote par groupe">
-            <View style={{ gap: spacing.lg }}>
+          <SectionCard title="Vote par groupe" flat>
+            <View style={{ gap: spacing.sm }}>
               {scrutin.positionsGroupes.map((g) => {
                 const depliable = aDesNoms(g);
                 const ouvert = ouverts.has(g.groupeId);
                 return (
-                  <View key={g.groupeId}>
+                  <View key={g.groupeId} style={styles.groupCard}>
                     {depliable ? (
                       <Pressable
                         onPress={() => toggleGroupe(g.groupeId)}
@@ -263,7 +282,7 @@ export function ScrutinDetailScreen() {
         {/* Source officielle du scrutin (réversibilité §7.5) */}
         {scrutin.sources.length > 0 && (
           <View style={styles.flatSection}>
-            <Text style={typography.sectionTitle}>Sources officielles</Text>
+            <Text style={typography.overline}>Sources officielles</Text>
             <SourceGrid sources={scrutin.sources} />
           </View>
         )}
@@ -272,20 +291,58 @@ export function ScrutinDetailScreen() {
   );
 }
 
+/** Verdict du vote (prototype) : icône + statut en serif + écart de voix. */
+function VerdictCard({
+  statut,
+  resultat,
+}: {
+  statut: StatutScrutin;
+  resultat: { pour: number; contre: number };
+}) {
+  const ui: Record<StatutScrutin, { fg: string; bg: string; icon: string }> = {
+    adopte: { fg: colors.adopte, bg: colors.adopteSoft, icon: '✓' },
+    rejete: { fg: colors.rejete, bg: colors.rejeteSoft, icon: '✕' },
+    en_cours: { fg: colors.enCours, bg: colors.enCoursSoft, icon: '◷' },
+  };
+  const { fg, bg, icon } = ui[statut];
+  const ecart = Math.abs(resultat.pour - resultat.contre);
+  return (
+    <View
+      style={[styles.verdict, { backgroundColor: bg, borderColor: fg }]}
+      accessibilityRole="text"
+      accessibilityLabel={`${statutLabel(statut)}, écart de ${ecart} voix.`}
+    >
+      <View style={[styles.verdictIconWrap, { backgroundColor: bg }]}>
+        <Text style={[styles.verdictIcon, { color: fg }]}>{icon}</Text>
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.verdictLabel, { color: fg }]}>
+          {statutLabel(statut)}
+        </Text>
+        <Text style={typography.bodySecondary}>
+          Écart de {ecart} voix entre pour et contre
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 function TallyItem({
   label,
   value,
+  total,
   color,
-  align,
 }: {
   label: string;
   value: number;
+  total: number;
   color: string;
-  align: 'flex-start' | 'center' | 'flex-end';
 }) {
+  const pct = total > 0 ? Math.round((value / total) * 100) : 0;
   return (
-    <View style={[styles.tallyItem, { alignItems: align }]}>
+    <View style={styles.tallyItem}>
       <Text style={[styles.tallyValue, { color }]}>{value}</Text>
+      <Text style={styles.tallyPct}>{pct}%</Text>
       <Text style={typography.meta}>{label}</Text>
     </View>
   );
@@ -332,18 +389,79 @@ const styles = StyleSheet.create({
   objetOfficiel: {
     marginTop: -spacing.md,
   },
-  tally: {
+  verdict: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: spacing.md,
+    alignItems: 'center',
+    gap: spacing.md,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  verdictIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  verdictIcon: {
+    fontSize: 24,
+    fontWeight: '800',
+  },
+  verdictLabel: {
+    fontSize: 22,
+    lineHeight: 27,
+    fontWeight: '800',
+    fontFamily: serif,
+  },
+  tallyGrid: {
+    flexDirection: 'row',
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  tallySep: {
+    width: 1,
+    backgroundColor: colors.border,
   },
   tallyItem: {
     flex: 1,
+    alignItems: 'center',
     gap: 2,
+    paddingVertical: spacing.lg,
   },
   tallyValue: {
     fontSize: 22,
     fontWeight: '800',
+    fontFamily: mono,
+  },
+  tallyPct: {
+    fontSize: 10,
+    fontFamily: mono,
+    color: colors.textTertiary,
+  },
+  barBlock: {
+    marginTop: spacing.md,
+    gap: spacing.xs,
+  },
+  barScale: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  barScaleText: {
+    fontSize: 10,
+    fontFamily: mono,
+    color: colors.textTertiary,
+  },
+  groupCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
   },
   deplieHint: {
     ...typography.meta,

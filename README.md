@@ -23,8 +23,9 @@ Le frontend et le backend partagent le **même contrat de données** (les types
 
 ## Fonctionnalités (V1 — le « parcours en or »)
 
-- **Fil des dossiers** : les derniers textes de loi, défilement infini. Un dossier
-  qui reçoit un nouveau vote remonte avec un badge **« mis à jour »**.
+- **Accueil façon Netflix** : un texte « à la une », les rangées Aujourd'hui /
+  Hier, le récap du dernier mois d'activité, puis une rangée par thème. Un
+  dossier qui reçoit un nouveau vote porte un badge **« mis à jour »**.
 - **Fiche dossier** : résumé neutre du texte, puis trois sections distinctes —
   les votes sur le texte (type du vote en clair : « Vote sur l'ensemble »,
   « Motion de censure », « Article 2 »…), les **amendements** (numéro, auteur,

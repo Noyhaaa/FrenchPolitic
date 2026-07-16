@@ -1,5 +1,5 @@
 import {
-  DefaultTheme,
+  DarkTheme,
   NavigationContainer,
   type Theme,
 } from '@react-navigation/native';
@@ -13,9 +13,9 @@ import type { RootStackParamList } from './types';
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 const navTheme: Theme = {
-  ...DefaultTheme,
+  ...DarkTheme,
   colors: {
-    ...DefaultTheme.colors,
+    ...DarkTheme.colors,
     background: colors.background,
     card: colors.surface,
     text: colors.textPrimary,

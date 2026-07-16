@@ -81,6 +81,38 @@ def auteur_amendement(objet: str) -> str | None:
     return auteurs.pop() if len(auteurs) == 1 else None
 
 
+# Texte de loi cité dans l'objet d'un vote (« … à l'article 2 de la proposition
+# de loi visant à … ») : nature reconnue puis tout ce qui suit. Seule
+# « résolution » porte un accent → classe [ée] (pas de fold : on veut retrouver
+# la casse/les accents d'origine pour le titre affiché).
+_RE_TEXTE_RATTACHEMENT = re.compile(
+    r"(?:projet de loi|proposition de loi|proposition de r[ée]solution)\b.*$",
+    re.IGNORECASE | re.DOTALL,
+)
+# Mention finale de procédure entre parenthèses (« (deuxième lecture) »,
+# « (texte de la commission mixte paritaire) ») : à retirer de la clé de
+# regroupement pour qu'un même texte ne soit pas éclaté par lecture.
+_RE_MENTION_FINALE = re.compile(r"\s*\([^()]*\)\s*$")
+
+
+def texte_de_rattachement(objet: str) -> str | None:
+    """Titre du texte de loi auquel se rattache un vote, extrait de son objet
+    officiel (sous-chaîne telle quelle, §2.5 : rien n'est reformulé).
+
+    Sert à regrouper sous un même dossier les scrutins dépourvus de
+    `dossierRef` (amendements, articles, motions liées à un texte). None si
+    l'objet ne cite aucun texte (motion de censure, déclaration…).
+    """
+    m = _RE_TEXTE_RATTACHEMENT.search(objet)
+    if not m:
+        return None
+    titre = m.group(0).strip().rstrip(".").strip()
+    titre = _RE_MENTION_FINALE.sub("", titre).strip()
+    if not titre:
+        return None
+    return titre[0].upper() + titre[1:]
+
+
 def map_position(position_majoritaire: str | None) -> PositionVote:
     """Position majoritaire d'un groupe → enum interne."""
     p = fold(position_majoritaire or "")

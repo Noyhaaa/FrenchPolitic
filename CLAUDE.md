@@ -38,10 +38,14 @@ chargement / erreur / hors-ligne.
 > en V2 — le verrou §2.4 sur le suivi de dossier est **levé** en conséquence.
 
 Quatre écrans du cœur de valeur :
-1. **Fil des dossiers** (`HomeScreen` → `useDossiers`), avec **défilement infini**
-   (pagination par pages de 20 via `?limit&offset`). La carte affiche la
-   **nature du texte** (« Projet de loi »…) quand le titre la porte
-   (`natureTexte` — rien d'affiché sinon, on ne déduit pas).
+1. **Accueil façon Netflix** (`HomeScreen` → `useAccueil`, `GET /accueil`) :
+   l'écran complet arrive en **une réponse** (affichage atomique, pas de
+   remplissage progressif) — hero « à la une », rangées horizontales
+   **Aujourd'hui** / **Hier** (masquées si vides, §2.5), carte **récap du
+   dernier mois actif** (`useRecap`, `GET /recap`), puis **une rangée par
+   thème**. Pas de défilement infini : la recherche sert à aller au-delà.
+   Les vignettes affichent la **nature du texte** (« Projet de loi »…) quand
+   le titre la porte (`natureTexte` — rien d'affiché sinon, on ne déduit pas).
 2. **Fiche dossier** (`DossierDetailScreen` → `useDossier`) : résumé du texte,
    puis **trois sections distinctes** — la **liste compacte des votes sur le
    texte** (titre = **type du vote en clair** via `libelleScrutin` : « Vote sur
@@ -73,8 +77,10 @@ désormais le seed backend `backend/app/data/seed.py`.)
 Plus deux écrans « à venir » (`AssistantScreen`, `ProfileScreen`) présents dans la
 tab bar mais hors périmètre V1 (§2.3 / §2.4).
 
-**Backend** — API FastAPI servant les 4 endpoints du cœur (`/dossiers`,
-`/dossiers/{id}`, `/scrutins/{id}`, `/recherche`). Le détail d'un dossier reste
+**Backend** — API FastAPI servant les endpoints du cœur (`/accueil` — écran
+d'accueil complet en une réponse —, `/dossiers`, `/dossiers/{id}`,
+`/scrutins/{id}`, `/recherche`, `/recap` — activité du dernier mois actif).
+Le détail d'un dossier reste
 **léger** (liste de `ScrutinResume`) ; le détail complet d'un vote — groupes et
 **vote nominatif** (noms des députés, résolus via l'annuaire acteurs de l'archive
 AMO) — vit dans la table `scrutin` et est servi à la demande. Deux backends de
@@ -84,8 +90,13 @@ ingérées). En dev, `backend/.env` fixe `REPOSITORY_BACKEND=postgres` + `DATABA
 pour que l'API serve la base ; **les tests forcent `memory`** (`tests/conftest.py`)
 et restent donc sur le seed. **Phase 1 faite** : ingestion réelle de l'open data AN
 (17e législature) — scrutins publics + groupes (archive AMO) — parsée, contrôlée,
-**regroupée par dossier** (`dossierRef`) et upsertée dans PostgreSQL (SQLAlchemy
-async), via `python -m app.ingestion.run`. Les votes d'amendement sont classés à
+**regroupée par dossier** et upsertée dans PostgreSQL (SQLAlchemy
+async), via `python -m app.ingestion.run`. Regroupement en cascade : `dossierRef`
+officiel quand il existe, sinon **texte de rattachement extrait de l'objet du
+vote** (« … de la proposition de loi visant à… » → dossier reconstitué à id
+stable `TXT-…`), sinon singleton (motion de censure, déclaration — événements
+autonomes légitimes dans le fil). Le fil ne montre donc que des textes/dossiers,
+jamais un amendement isolé. Les votes d'amendement sont classés à
 l'ingestion (`est_amendement` / `est_sous_amendement` sur l'objet officiel, avec
 extraction du numéro et de l'auteur quand ils sont sans ambiguïté) et chaque
 sous-amendement est **rattaché à son amendement parent** (« … à l'amendement
@@ -134,9 +145,9 @@ système (sans les deps) est utilisé et échoue (`ModuleNotFoundError`).
 App.tsx                      Racine : GestureHandlerRootView + SafeAreaProvider + RootNavigator
 src/
   theme/                     Design system (source unique de vérité visuelle)
-    colors.ts                Palette (fond crème, statuts, couleurs de vote)
+    colors.ts                Palette sombre éditoriale (prototype new_screens), statuts, couleurs de vote
     spacing.ts               Échelle d'espacement + rayons
-    typography.ts            Échelle typographique
+    typography.ts            Échelle typographique (serif titres · sans corps · mono métadonnées)
   types/index.ts             Modèle de données (miroir des schémas backend, §5.3 MVP)
   api/                       Client HTTP : config (URL), client (fetch+timeout), dossiers+scrutins, cache offline
   hooks/                     useDossiers / useDossier / useScrutin / useDossierSearch (chargement + cache + états)

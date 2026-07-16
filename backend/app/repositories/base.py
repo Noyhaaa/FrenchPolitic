@@ -7,12 +7,33 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from app.schemas import Dossier, DossierListItem, Scrutin
+from app.schemas import (
+    Accueil,
+    Dossier,
+    DossierListItem,
+    RecapMensuel,
+    Scrutin,
+    SectionTheme,
+)
+
+
+def ordonner_sections(sections: list[SectionTheme]) -> list[SectionTheme]:
+    """Rangées thématiques de l'accueil : par volume décroissant, « Autre » en
+    dernier (règle partagée par toutes les implémentations)."""
+    return sorted(
+        sections,
+        key=lambda s: (s.theme == "Autre", -len(s.dossiers), s.theme),
+    )
 
 
 class DossierRepository(Protocol):
     async def list(self, limit: int = 20, offset: int = 0) -> list[DossierListItem]:
         """Fil des dossiers, du plus récent au plus ancien (§3.1)."""
+        ...
+
+    async def accueil(self, par_section: int = 10) -> Accueil:
+        """Écran d'accueil complet en une réponse : à la une, aujourd'hui,
+        hier, rangées par thème (au plus `par_section` dossiers chacune)."""
         ...
 
     async def get(self, dossier_id: str) -> Dossier | None:
@@ -25,4 +46,11 @@ class DossierRepository(Protocol):
 
     async def search(self, query: str, limit: int = 20) -> list[DossierListItem]:
         """Recherche plein texte titre clair + titre officiel + thème (§3.3)."""
+        ...
+
+    async def recap_mensuel(self) -> RecapMensuel | None:
+        """Activité du dernier mois ayant connu au moins un vote (accueil).
+
+        None si aucune donnée (le client masque alors la carte, §2.5).
+        """
         ...

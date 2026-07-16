@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { colors, radius, spacing, typography } from '@/theme';
+import { colors, radius, serif, spacing, typography } from '@/theme';
 import type { Amendement } from '@/types';
 import { detailObjetAmendement, titreAmendement } from '@/utils/format';
 
@@ -93,7 +93,8 @@ const styles = StyleSheet.create({
   },
   titre: {
     ...typography.body,
-    fontWeight: '600',
+    fontWeight: '700',
+    fontFamily: serif,
     fontSize: 14,
     lineHeight: 20,
   },

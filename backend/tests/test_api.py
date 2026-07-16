@@ -120,3 +120,55 @@ def test_recherche_insensible_aux_accents(client):
     r = client.get("/recherche", params={"q": "energie"})
     assert r.status_code == 200
     assert any("énergie" in i["titreClair"].lower() for i in r.json())
+
+
+def test_recap_mensuel(client):
+    """La carte récap de l'accueil : votes du dernier mois actif, en camelCase.
+
+    Les comptes sont recalculés depuis le seed pour ne pas figer de valeurs.
+    """
+    from app.data.seed import SEED_SCRUTINS
+
+    r = client.get("/recap")
+    assert r.status_code == 200
+    body = r.json()
+    assert body is not None
+
+    mois_max = max(s.date[:7] for s in SEED_SCRUTINS if s.date)
+    du_mois = [s for s in SEED_SCRUTINS if s.date[:7] == mois_max]
+    assert body["annee"] == int(mois_max[:4])
+    assert body["mois"] == int(mois_max[5:7])
+    assert body["votes"] == len(du_mois)
+    assert body["adoptes"] == sum(1 for s in du_mois if s.statut.value == "adopte")
+    assert body["rejetes"] == sum(1 for s in du_mois if s.statut.value == "rejete")
+    assert body["textes"] == len({s.dossier_id for s in du_mois})
+    # Cohérence interne : adoptés + rejetés ≤ votes (le reste = en cours).
+    assert body["adoptes"] + body["rejetes"] <= body["votes"]
+
+
+def test_accueil_complet_en_une_reponse(client):
+    """L'accueil est servi en une réponse : à la une + rangées par thème
+    (l'affichage client est atomique, pas de remplissage progressif)."""
+    r = client.get("/accueil")
+    assert r.status_code == 200
+    body = r.json()
+
+    # À la une = dossier le plus récent du fil.
+    fil = client.get("/dossiers").json()
+    assert body["aLaUne"]["id"] == fil[0]["id"]
+
+    # La une n'est pas répétée dans Aujourd'hui / Hier.
+    ids_jour = {d["id"] for d in body["aujourdhui"]} | {
+        d["id"] for d in body["hier"]
+    }
+    assert body["aLaUne"]["id"] not in ids_jour
+
+    # Chaque thème présent a sa rangée ; « Autre » (si présent) est en dernier.
+    themes = [s["theme"] for s in body["sections"]]
+    assert set(themes) == {d["theme"] for d in fil}
+    if "Autre" in themes:
+        assert themes[-1] == "Autre"
+    # Contenu en camelCase, borné par parSection.
+    for section in body["sections"]:
+        assert 1 <= len(section["dossiers"]) <= 10
+        assert all(d["theme"] == section["theme"] for d in section["dossiers"])
