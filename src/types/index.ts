@@ -59,12 +59,25 @@ export interface PositionGroupe {
   nomsAbstention?: string[];
 }
 
-/** Un amendement clé, rattaché au texte (§4.5). Vide en V1 (Phase 2). */
+/**
+ * Un amendement du texte (§4.5). Quand il a fait l'objet d'un scrutin public,
+ * `scrutinId` pointe vers ce vote (détail + nominatif via la fiche vote) — c'est
+ * là que le vote de l'amendement s'affiche, pas dans la liste des votes du texte.
+ */
 export interface Amendement {
   id: string;
+  /** Numéro officiel (« 80 » pour « l'amendement n° 80 »), si identifiable. */
+  numero?: string;
   objet: string;
   auteur?: string;
   sort: 'adopte' | 'rejete' | 'retire';
+  /** Scrutin public correspondant, si l'amendement a été mis aux voix. */
+  scrutinId?: string;
+  /**
+   * Sous-amendements rattachés (« … à l'amendement n° X »). Affichés dans leur
+   * propre section de la fiche dossier ET sur la fiche vote de leur parent.
+   */
+  sousAmendements?: Amendement[];
 }
 
 export type TypeSource = 'texte' | 'scrutin' | 'debats' | 'amendements';
@@ -129,6 +142,11 @@ export interface Scrutin {
   scrutinPublic: boolean;
   resultat: ResultatGlobal;
   positionsGroupes: PositionGroupe[];
+  /**
+   * Pour le vote d'un amendement : ses sous-amendements (chacun lié à son
+   * propre scrutin) — la fiche vote de l'amendement les liste.
+   */
+  sousAmendements?: Amendement[];
   sources: SourceOfficielle[];
 }
 

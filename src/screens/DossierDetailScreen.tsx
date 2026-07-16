@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -12,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, spacing, typography } from '@/theme';
 import {
   AiNotice,
+  AmendementRow,
   ErrorView,
   LoadingView,
   OfflineBanner,
@@ -24,11 +26,17 @@ import {
   formatDateLong,
   formatMicroResultat,
   formatTempsLecture,
+  libelleScrutin,
+  natureTexte,
   statutLabel,
 } from '@/utils/format';
 import type { RootStackParamList } from '@/navigation/types';
 
 type DetailRoute = RouteProp<RootStackParamList, 'DossierDetail'>;
+
+/** Nombre d'éléments montrés par liste avant le bouton « Voir plus » (lisibilité :
+ * un dossier réel peut compter des dizaines de votes d'amendement). */
+const APERCU_LISTE = 4;
 
 /** Emoji des publics concernés (maquette « Qui est concerné ? »). */
 const publicEmoji: Record<string, string> = {
@@ -70,6 +78,39 @@ export function DossierDetailScreen() {
     route.params.dossierId,
   );
   const goBack = () => navigation.goBack();
+  // Listes longues repliées par défaut (votes, amendements, sous-amendements).
+  const [listesDepliees, setListesDepliees] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  const basculerListe = (cle: string) =>
+    setListesDepliees((prev) => {
+      const next = new Set(prev);
+      if (next.has(cle)) next.delete(cle);
+      else next.add(cle);
+      return next;
+    });
+  const visibles = <T,>(liste: T[], cle: string): T[] =>
+    listesDepliees.has(cle) || liste.length <= APERCU_LISTE
+      ? liste
+      : liste.slice(0, APERCU_LISTE);
+  const boutonVoirPlus = (longueur: number, cle: string, libelle: string) =>
+    longueur > APERCU_LISTE ? (
+      <Pressable
+        onPress={() => basculerListe(cle)}
+        accessibilityRole="button"
+        accessibilityLabel={
+          listesDepliees.has(cle)
+            ? `Réduire la liste des ${libelle}`
+            : `Voir les ${longueur - APERCU_LISTE} autres ${libelle}`
+        }
+      >
+        <Text style={styles.voirPlus}>
+          {listesDepliees.has(cle)
+            ? 'Réduire la liste ▲'
+            : `Voir les ${longueur - APERCU_LISTE} autres ${libelle} ▼`}
+        </Text>
+      </Pressable>
+    ) : null;
 
   if (loading && !dossier) {
     return (
@@ -102,6 +143,11 @@ export function DossierDetailScreen() {
 
   const { resume } = dossier;
   const badge = dossier.phase ?? { label: undefined, statut: dossier.statut };
+  // Sous-amendements du dossier, à plat, avec le numéro de leur amendement
+  // parent pour les situer (section dédiée, distincte des amendements).
+  const sousAmendements = dossier.amendements.flatMap((a) =>
+    (a.sousAmendements ?? []).map((sa) => ({ sa, parentNumero: a.numero })),
+  );
   const pourquoi = [
     resume.contexte && (['CONTEXTE', resume.contexte] as const),
     resume.objectif && (['OBJECTIF', resume.objectif] as const),
@@ -152,8 +198,16 @@ export function DossierDetailScreen() {
         {/* 1. Statut (phase de navette si dispo) + titre + date */}
         <StatusBadge statut={badge.statut} label={badge.label} />
         <Text style={[typography.title, styles.title]}>{resume.titreClair}</Text>
+        {/* Nature du texte (projet / proposition de loi…) quand le titre
+            officiel la porte — l'utilisateur situe le sujet d'un coup d'œil. */}
         <Text style={[typography.meta, styles.subtitle]}>
-          Assemblée nationale · {formatDateLong(dossier.dateDernierScrutin)}
+          {[
+            natureTexte(dossier.titreOfficiel),
+            'Assemblée nationale',
+            formatDateLong(dossier.dateDernierScrutin),
+          ]
+            .filter(Boolean)
+            .join(' · ')}
         </Text>
 
         {/* Badge « mis à jour » (§7.7) : le dossier a évolué depuis une
@@ -240,81 +294,130 @@ export function DossierDetailScreen() {
           </SectionCard>
         )}
 
-        {/* 6. Les votes du dossier — liste compacte : une ligne par scrutin
+        {/* 6. Les votes sur le texte — liste compacte : une ligne par scrutin
             (objet + statut + micro-résultat), le détail (groupes, nominatif)
-            se charge au tap (écran ScrutinDetail). Lisible même sur un texte
-            avec beaucoup de votes. */}
+            se charge au tap (écran ScrutinDetail). Les votes d'amendement, eux,
+            sont dans la section « Amendements » ci-dessous. */}
+        {dossier.scrutins.length > 0 && (
         <SectionCard
           title={
             dossier.scrutins.length > 1
-              ? `Les votes (${dossier.scrutins.length})`
-              : 'Le vote'
+              ? `Les votes sur le texte (${dossier.scrutins.length})`
+              : 'Le vote sur le texte'
           }
         >
-          {dossier.scrutins.map((s, i) => (
-            <Pressable
-              key={s.id}
-              onPress={() => navigation.navigate('ScrutinDetail', { scrutinId: s.id })}
-              style={({ pressed }) => [
-                styles.voteRow,
-                i > 0 && styles.voteRowBorder,
-                pressed && { opacity: 0.7 },
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel={`${s.objet}. ${statutLabel(s.statut)}, ${
-                s.resultat.pour
-              } pour, ${s.resultat.contre} contre. Voir le détail du vote.`}
-            >
-              <View style={styles.voteInfo}>
-                <Text style={styles.voteObjet} numberOfLines={2}>
-                  {s.objet}
-                </Text>
-                <View style={styles.voteMeta}>
-                  <StatusBadge statut={s.statut} />
-                  <Text style={typography.meta}>{formatDateLong(s.date)}</Text>
-                </View>
-                <Text style={typography.meta}>
-                  {formatMicroResultat(s.resultat.pour, s.resultat.contre)}
-                </Text>
-              </View>
-              <Text style={styles.voteChevron} importantForAccessibility="no">
-                ›
-              </Text>
-            </Pressable>
-          ))}
-        </SectionCard>
-
-        {/* 7. Amendements clés — bordure latérale colorée (maquette).
-            Vide en V1 (nécessite les données de dossier — Phase 2). */}
-        {dossier.amendements.length > 0 && (
-          <SectionCard title="Amendements clés">
-            <View style={{ gap: spacing.lg }}>
-              {dossier.amendements.map((a) => (
-                <View
-                  key={a.id}
-                  style={[
-                    styles.amendement,
-                    { borderLeftColor: amendementColor(a.sort) },
-                  ]}
-                >
-                  <Text style={styles.amendementObjet}>{a.objet}</Text>
-                  <View style={styles.amendementMeta}>
-                    {a.auteur ? (
-                      <Text style={typography.meta}>{a.auteur}</Text>
-                    ) : null}
-                    <AmendementSort sort={a.sort} />
+          {visibles(dossier.scrutins, 'votes').map((s, i) => {
+            // Titre = type du vote en clair (« Vote sur l'ensemble », « Motion
+            // de censure »…) — le sujet, c'est le dossier lui-même ; l'objet
+            // officiel complet reste sur la fiche vote (§7.5).
+            const lib = libelleScrutin(s.objet);
+            return (
+              <Pressable
+                key={s.id}
+                onPress={() => navigation.navigate('ScrutinDetail', { scrutinId: s.id })}
+                style={({ pressed }) => [
+                  styles.voteRow,
+                  i > 0 && styles.voteRowBorder,
+                  pressed && { opacity: 0.7 },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={`${s.objet}. ${statutLabel(s.statut)}, ${
+                  s.resultat.pour
+                } pour, ${s.resultat.contre} contre. Voir le détail du vote.`}
+              >
+                <View style={styles.voteInfo}>
+                  <Text style={styles.voteObjet} numberOfLines={2}>
+                    {lib.titre}
+                  </Text>
+                  <View style={styles.voteMeta}>
+                    <StatusBadge statut={s.statut} />
+                    <Text style={typography.meta}>
+                      {formatDateLong(s.date)}
+                      {lib.complement ? ` · ${lib.complement}` : ''}
+                    </Text>
                   </View>
+                  <Text style={typography.meta}>
+                    {formatMicroResultat(s.resultat.pour, s.resultat.contre)}
+                  </Text>
                 </View>
+                <Text style={styles.voteChevron} importantForAccessibility="no">
+                  ›
+                </Text>
+              </Pressable>
+            );
+          })}
+          {boutonVoirPlus(dossier.scrutins.length, 'votes', 'votes')}
+        </SectionCard>
+        )}
+
+        {/* 7. Amendements — lignes compactes (numéro + sort + auteur), sans
+            répéter la formule « l'amendement n° X de M. Y » de chaque objet.
+            Si l'amendement a été mis aux voix (scrutinId), la ligne ouvre la
+            page du vote (qui a voté pour/contre) — ses sous-amendements y sont
+            aussi listés. Sinon (amendement retiré…), la ligne est informative. */}
+        {dossier.amendements.length > 0 && (
+          <SectionCard title={`Amendements (${dossier.amendements.length})`}>
+            <View style={{ gap: spacing.md }}>
+              {visibles(dossier.amendements, 'amendements').map((a) => (
+                <AmendementRow
+                  key={a.id}
+                  amendement={a}
+                  onPress={
+                    a.scrutinId
+                      ? () =>
+                          navigation.navigate('ScrutinDetail', {
+                            scrutinId: a.scrutinId!,
+                          })
+                      : undefined
+                  }
+                />
               ))}
+              {boutonVoirPlus(dossier.amendements.length, 'amendements', 'amendements')}
             </View>
           </SectionCard>
         )}
 
-        {/* 8. Sources officielles — titre hors carte, chips blanches (maquette) */}
-        <View style={styles.flatSection}>
-          <Text style={typography.sectionTitle}>Sources officielles</Text>
-          <SourceGrid sources={dossier.sources} />
-        </View>
+        {/* 8. Sous-amendements — section dédiée (distincte des amendements),
+            chaque ligne rappelle l'amendement visé et ouvre son propre vote. */}
+        {sousAmendements.length > 0 && (
+          <SectionCard title={`Sous-amendements (${sousAmendements.length})`}>
+            <View style={{ gap: spacing.md }}>
+              {visibles(sousAmendements, 'sous-amendements').map(
+                ({ sa, parentNumero }) => (
+                  <AmendementRow
+                    key={sa.id}
+                    amendement={sa}
+                    sous
+                    parentNumero={parentNumero}
+                    onPress={
+                      sa.scrutinId
+                        ? () =>
+                            navigation.navigate('ScrutinDetail', {
+                              scrutinId: sa.scrutinId!,
+                            })
+                        : undefined
+                    }
+                  />
+                ),
+              )}
+              {boutonVoirPlus(
+                sousAmendements.length,
+                'sous-amendements',
+                'sous-amendements',
+              )}
+            </View>
+          </SectionCard>
+        )}
+
+        {/* 9. Sources officielles du DOSSIER (dossier législatif…). La source
+            de chaque vote ou amendement vit sur sa propre fiche — pas de
+            doublon ici. Masqué si rien au niveau dossier (§2.5). */}
+        {dossier.sources.length > 0 && (
+          <View style={styles.flatSection}>
+            <Text style={typography.sectionTitle}>Sources officielles</Text>
+            <SourceGrid sources={dossier.sources} />
+          </View>
+        )}
 
         {/* Transparence IA + signalement */}
         <AiNotice
@@ -340,25 +443,6 @@ export function DossierDetailScreen() {
           <Text style={styles.fabArrow}>›</Text>
         </Pressable>
       </View>
-    </View>
-  );
-}
-
-function amendementColor(sort: 'adopte' | 'rejete' | 'retire'): string {
-  return { adopte: colors.pour, rejete: colors.contre, retire: colors.abstention }[
-    sort
-  ];
-}
-
-function AmendementSort({ sort }: { sort: 'adopte' | 'rejete' | 'retire' }) {
-  const map = {
-    adopte: { label: 'Adopté', color: colors.adopte, bg: colors.adopteSoft },
-    rejete: { label: 'Rejeté', color: colors.contre, bg: '#F6E5D9' },
-    retire: { label: 'Retiré', color: colors.textSecondary, bg: colors.surfaceMuted },
-  }[sort];
-  return (
-    <View style={[styles.sortPill, { backgroundColor: map.bg }]}>
-      <Text style={[typography.badge, { color: map.color }]}>{map.label}</Text>
     </View>
   );
 }
@@ -523,26 +607,11 @@ const styles = StyleSheet.create({
   chipEmoji: {
     fontSize: 13,
   },
-  amendement: {
-    borderLeftWidth: 3,
-    paddingLeft: spacing.md,
-    gap: spacing.xs,
-  },
-  amendementObjet: {
-    ...typography.body,
+  voirPlus: {
+    ...typography.meta,
+    color: colors.brand,
     fontWeight: '600',
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  amendementMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  sortPill: {
-    borderRadius: radius.pill,
-    paddingVertical: 2,
-    paddingHorizontal: spacing.sm,
+    paddingTop: spacing.sm,
   },
   fabWrap: {
     position: 'absolute',

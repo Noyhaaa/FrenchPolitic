@@ -59,9 +59,16 @@ class PositionGroupe(CamelModel):
 
 class Amendement(CamelModel):
     id: str
+    # Numéro officiel (« 80 » pour « l'amendement n° 80 »), si identifiable.
+    numero: str | None = None
     objet: str
     auteur: str | None = None
     sort: SortAmendement
+    # Scrutin public de l'amendement, si mis aux voix (détail + nominatif là-bas).
+    scrutin_id: str | None = None
+    # Sous-amendements rattachés (« … à l'amendement n° X »). Un sous-amendement
+    # dont le parent n'est pas identifiable reste au niveau amendement du dossier.
+    sous_amendements: list["Amendement"] = []
 
 
 class SourceOfficielle(CamelModel):
@@ -110,6 +117,9 @@ class Scrutin(CamelModel):
     scrutin_public: bool
     resultat: ResultatGlobal
     positions_groupes: list[PositionGroupe] = []
+    # Pour le vote d'un amendement : ses sous-amendements (chacun lié à son
+    # propre scrutin) — la fiche vote de l'amendement peut ainsi les lister.
+    sous_amendements: list[Amendement] = []
     sources: list[SourceOfficielle] = []
 
 

@@ -1,6 +1,8 @@
 """Helpers de normalisation open data → schéma `Scrutin`."""
 from __future__ import annotations
 
+import re
+
 from app.domain.enums import PositionVote
 from app.utils.text import fold
 
@@ -29,6 +31,54 @@ def guess_theme(*textes: str) -> str:
 def map_statut(sort_code: str) -> str:
     """« adopté » → adopte, sinon rejete (un scrutin a toujours un résultat)."""
     return "adopte" if "adopt" in fold(sort_code) else "rejete"
+
+
+def est_amendement(objet: str) -> bool:
+    """Le scrutin porte-t-il sur un amendement (vs. le texte : ensemble, article,
+    motion) ? Heuristique sur l'objet du vote (couvre « amendement »,
+    « sous-amendement », « amendements identiques »)."""
+    return "amendement" in fold(objet)
+
+
+def est_sous_amendement(objet: str) -> bool:
+    """Le scrutin porte-t-il sur un sous-amendement (amendement à un amendement) ?"""
+    return "sous-amendement" in fold(objet)
+
+
+# « (sous-)amendement … n° 80 » — fold() transforme « º » en « o », d'où [°o].
+# Le remplissage [^,]*? tolère « amendement de suppression n° 25 ».
+_RE_NUMERO = re.compile(r"(?:sous-)?amendements?[^,]*?n[°o]\s*(\d+)")
+# Numéro de l'amendement PARENT d'un sous-amendement (« … à l'amendement n° X ») :
+# on exclut le mot « amendement » contenu dans « sous-amendement ».
+_RE_NUMERO_PARENT = re.compile(r"(?<!sous-)amendements?[^,]*?n[°o]\s*(\d+)")
+# « de M. Léaument » / « de Mme K/Bidi » — nom en un token, tel qu'écrit.
+_RE_AUTEUR = re.compile(r"\bde\s+(M\.|Mme)\s+([A-ZÀ-Þ][\w'’/-]*)")
+
+
+def numero_amendement(objet: str) -> str | None:
+    """Numéro de l'amendement (ou du sous-amendement) voté, extrait de l'objet
+    officiel. None si non identifiable (§2.5 : on n'invente pas)."""
+    m = _RE_NUMERO.search(fold(objet))
+    return m.group(1) if m else None
+
+
+def numero_amendement_parent(objet: str) -> str | None:
+    """Pour un sous-amendement : numéro de l'amendement visé
+    (« le sous-amendement n° 3 … à l'amendement n° 80 » → « 80 »)."""
+    m = _RE_NUMERO_PARENT.search(fold(objet))
+    return m.group(1) if m else None
+
+
+def auteur_amendement(objet: str) -> str | None:
+    """Auteur (« M. X » / « Mme Y ») si l'objet officiel en désigne un seul.
+
+    Plusieurs auteurs (amendements identiques) → None : pas d'ambiguïté (§2.5).
+    Pour un sous-amendement, la mention de l'amendement parent (« … à
+    l'amendement n° X de Mme Y ») est ignorée.
+    """
+    zone = re.split(r"(?:à\s+l['’]|aux\s+)amendements?\b", objet, flags=re.IGNORECASE)[0]
+    auteurs = {f"{civ} {nom}" for civ, nom in _RE_AUTEUR.findall(zone)}
+    return auteurs.pop() if len(auteurs) == 1 else None
 
 
 def map_position(position_majoritaire: str | None) -> PositionVote:

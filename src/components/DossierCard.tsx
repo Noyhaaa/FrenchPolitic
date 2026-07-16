@@ -1,7 +1,11 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, radius, spacing, typography } from '@/theme';
 import { DossierListItem } from '@/types';
-import { formatDateRelative, formatTempsLecture } from '@/utils/format';
+import {
+  formatDateRelative,
+  formatTempsLecture,
+  natureTexte,
+} from '@/utils/format';
 import { StatusBadge } from './StatusBadge';
 import { ThemeAvatar } from './ThemeAvatar';
 
@@ -36,6 +40,11 @@ export function DossierCard({ dossier, onPress }: Props) {
         ) : null}
       </View>
 
+      {/* Nature du texte (projet / proposition de loi…) si le titre la porte —
+          l'utilisateur sait d'un coup d'œil ce qu'est le dossier. */}
+      {natureTexte(dossier.titreClair) ? (
+        <Text style={styles.nature}>{natureTexte(dossier.titreClair)}</Text>
+      ) : null}
       <Text style={[typography.cardTitle, styles.title]}>{dossier.titreClair}</Text>
 
       <Text style={typography.bodySecondary} numberOfLines={2}>
@@ -76,6 +85,12 @@ const styles = StyleSheet.create({
   updateText: {
     ...typography.badge,
     color: colors.brand,
+  },
+  nature: {
+    ...typography.overline,
+    color: colors.textTertiary,
+    marginTop: spacing.xs,
+    marginBottom: -spacing.xs,
   },
   title: {
     marginTop: spacing.xs,

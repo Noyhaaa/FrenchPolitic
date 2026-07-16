@@ -9,5 +9,6 @@ export { SectionCard } from './SectionCard';
 export { Legend } from './Legend';
 export type { LegendItem } from './Legend';
 export { AiNotice } from './AiNotice';
+export { AmendementRow } from './AmendementRow';
 export { BrandHeader } from './BrandHeader';
 export { LoadingView, ErrorView, EmptyView, OfflineBanner } from './StateViews';

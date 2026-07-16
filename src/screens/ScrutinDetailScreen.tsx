@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, radius, spacing, typography } from '@/theme';
 import {
+  AmendementRow,
   ErrorView,
   GroupVoteRow,
   Legend,
@@ -17,7 +19,7 @@ import {
 } from '@/components';
 import { useScrutin } from '@/hooks';
 import { PositionGroupe } from '@/types';
-import { formatDateLong } from '@/utils/format';
+import { formatDateLong, libelleScrutin } from '@/utils/format';
 import type { RootStackParamList } from '@/navigation/types';
 
 type DetailRoute = RouteProp<RootStackParamList, 'ScrutinDetail'>;
@@ -58,7 +60,10 @@ function NomsPosition({
  */
 export function ScrutinDetailScreen() {
   const route = useRoute<DetailRoute>();
-  const navigation = useNavigation();
+  // Typage stack natif : `push` permet d'empiler la fiche vote d'un
+  // sous-amendement par-dessus celle de son amendement parent.
+  const navigation =
+    useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const insets = useSafeAreaInsets();
   const { data: scrutin, loading, offline, error, retry } = useScrutin(
     route.params.scrutinId,
@@ -118,6 +123,9 @@ export function ScrutinDetailScreen() {
   }
 
   const { resultat } = scrutin;
+  // Titre = type du vote en clair ; l'objet officiel complet (le sujet exact)
+  // reste affiché dessous — rien n'est perdu, tout reste sourcé (§2.5).
+  const lib = libelleScrutin(scrutin.objet);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -131,11 +139,18 @@ export function ScrutinDetailScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Objet du vote + statut + date */}
+        {/* Type du vote + statut + date, puis l'objet officiel complet */}
         <StatusBadge statut={scrutin.statut} />
-        <Text style={[typography.title, styles.title]}>{scrutin.objet}</Text>
+        <Text style={[typography.title, styles.title]}>{lib.titre}</Text>
+        {lib.titre !== scrutin.objet ? (
+          <Text style={[typography.bodySecondary, styles.objetOfficiel]}>
+            {scrutin.objet}
+          </Text>
+        ) : null}
         <Text style={[typography.meta, styles.subtitle]}>
-          Assemblée nationale · {formatDateLong(scrutin.date)}
+          {['Assemblée nationale', formatDateLong(scrutin.date), lib.complement]
+            .filter(Boolean)
+            .join(' · ')}
         </Text>
 
         {/* Résultat global : barre + décomptes */}
@@ -219,6 +234,32 @@ export function ScrutinDetailScreen() {
           </SectionCard>
         )}
 
+        {/* Sous-amendements de cet amendement (le cas échéant) — chacun ouvre
+            la fiche de son propre vote. */}
+        {scrutin.sousAmendements && scrutin.sousAmendements.length > 0 && (
+          <SectionCard
+            title={`Sous-amendements (${scrutin.sousAmendements.length})`}
+          >
+            <View style={{ gap: spacing.md }}>
+              {scrutin.sousAmendements.map((sa) => (
+                <AmendementRow
+                  key={sa.id}
+                  amendement={sa}
+                  sous
+                  onPress={
+                    sa.scrutinId
+                      ? () =>
+                          navigation.push('ScrutinDetail', {
+                            scrutinId: sa.scrutinId!,
+                          })
+                      : undefined
+                  }
+                />
+              ))}
+            </View>
+          </SectionCard>
+        )}
+
         {/* Source officielle du scrutin (réversibilité §7.5) */}
         {scrutin.sources.length > 0 && (
           <View style={styles.flatSection}>
@@ -286,6 +327,9 @@ const styles = StyleSheet.create({
     lineHeight: 26,
   },
   subtitle: {
+    marginTop: -spacing.md,
+  },
+  objetOfficiel: {
     marginTop: -spacing.md,
   },
   tally: {

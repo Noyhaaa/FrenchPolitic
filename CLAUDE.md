@@ -39,13 +39,29 @@ chargement / erreur / hors-ligne.
 
 Quatre écrans du cœur de valeur :
 1. **Fil des dossiers** (`HomeScreen` → `useDossiers`), avec **défilement infini**
-   (pagination par pages de 20 via `?limit&offset`).
-2. **Fiche dossier** (`DossierDetailScreen` → `useDossier`) : résumé du texte, puis
-   la **liste compacte des votes** (une ligne par scrutin : objet + statut +
-   micro-résultat), chaque ligne ouvrant la fiche vote.
+   (pagination par pages de 20 via `?limit&offset`). La carte affiche la
+   **nature du texte** (« Projet de loi »…) quand le titre la porte
+   (`natureTexte` — rien d'affiché sinon, on ne déduit pas).
+2. **Fiche dossier** (`DossierDetailScreen` → `useDossier`) : résumé du texte,
+   puis **trois sections distinctes** — la **liste compacte des votes sur le
+   texte** (titre = **type du vote en clair** via `libelleScrutin` : « Vote sur
+   l'ensemble », « Motion de censure », « Article 2 »… + statut +
+   micro-résultat ; objet non reconnu restitué tel quel, §2.5), les
+   **Amendements** (ligne compacte via `AmendementRow` : numéro + sort + auteur,
+   sans répéter la formule « l'amendement n° X de M. Y »), et les
+   **Sous-amendements** (avec rappel de l'amendement parent). Chaque ligne ouvre
+   la fiche vote. Un vote d'amendement n'apparaît **que** dans sa section (un
+   sous-amendement que dans la sienne), et les listes longues sont repliées
+   au-delà de 4 éléments (« Voir les N autres… »). Les **Sources officielles**
+   de la fiche sont de **niveau dossier** uniquement (dossier législatif…) — la
+   source de chaque vote vit sur sa propre fiche, pas de doublon.
 3. **Fiche vote** (`ScrutinDetailScreen` → `useScrutin`, `GET /scrutins/{id}`) :
+   titre = type du vote en clair, **objet officiel complet en dessous**, puis
    résultat global, ventilation par groupe, et **noms des votants** dépliables
-   groupe par groupe quand le nominatif est disponible (§5.2).
+   groupe par groupe quand le nominatif est disponible (§5.2). Sert aussi bien un
+   vote sur le texte qu'un vote d'amendement ; le vote d'un amendement liste en
+   plus **ses sous-amendements** (chacun ouvrant sa propre fiche vote, empilée
+   via `navigation.push`).
 4. **Recherche simple** (`SearchScreen` → `useDossierSearch`, avec debounce)
 
 L'URL de l'API est dérivée de l'hôte Metro en dev (`src/api/config.ts`),
@@ -69,8 +85,15 @@ pour que l'API serve la base ; **les tests forcent `memory`** (`tests/conftest.p
 et restent donc sur le seed. **Phase 1 faite** : ingestion réelle de l'open data AN
 (17e législature) — scrutins publics + groupes (archive AMO) — parsée, contrôlée,
 **regroupée par dossier** (`dossierRef`) et upsertée dans PostgreSQL (SQLAlchemy
-async), via `python -m app.ingestion.run`. La fusion inter-runs pose le badge
-« mis à jour » quand un nouveau scrutin rejoint un dossier connu. Les
+async), via `python -m app.ingestion.run`. Les votes d'amendement sont classés à
+l'ingestion (`est_amendement` / `est_sous_amendement` sur l'objet officiel, avec
+extraction du numéro et de l'auteur quand ils sont sans ambiguïté) et chaque
+sous-amendement est **rattaché à son amendement parent** (« … à l'amendement
+n° X ») ; le scrutin du parent embarque ses sous-amendements pour la fiche vote.
+La fusion inter-runs pose le badge « mis à jour » quand un nouveau scrutin
+(texte, amendement ou sous-amendement) rejoint un dossier connu. Les **sources
+du dossier** sont de niveau dossier uniquement (la page du dossier législatif) —
+la source de chaque vote reste sur son scrutin, servie par sa fiche vote. Les
 **garde-fous éditoriaux** (§4.4) et le pipeline de génération existent, testés avec
 un LLM mock ; la **génération réelle des résumés reste en Phase 2** (RAG pgvector +
 LLM Anthropic), donc les dossiers ingérés ont un résumé vide (non comblé, §2.5 —
@@ -181,12 +204,18 @@ qui affiche du contenu de scrutin doit les respecter.
 
 Défini dans `src/types/index.ts`. **Entité centrale `Dossier`** (un texte de loi) :
 `resume` (résumé neutre ancré + confiance + `champsNonDocumentes`), `scrutins`
-(les votes rattachés, du plus récent au plus ancien), `amendements` (clés, vide en
-V1), `sources`, `statut`, `theme`, `dateDernierScrutin`, `miseAJour?` (badge §7.7).
+(les **votes sur le texte**, résumés), `amendements` (les **votes d'amendement** :
+`numero?` + `auteur?` extraits de l'objet officiel quand sans ambiguïté, objet,
+sort, `scrutinId` vers la fiche vote, et `sousAmendements?` — les
+**sous-amendements rattachés** à cet amendement, même forme), `sources`,
+`statut`, `theme`, `dateDernierScrutin`, `miseAJour?` (badge §7.7). La partition
+texte / amendement / sous-amendement se fait à l'ingestion (`est_amendement`,
+`est_sous_amendement`, `numero_amendement_parent` sur l'objet du scrutin).
 Un `Scrutin` est **vote-niveau** : `dossierId`, `objet` (ce sur quoi on a voté),
 `statut`, `scrutinPublic`, `resultat`, `positionsGroupes` (avec `nomsPour` /
 `nomsContre` / `nomsAbstention` optionnels — le **nominatif**, absent = masqué,
-§2.5), `sources`. La fiche dossier n'embarque que des `ScrutinResume` (liste
+§2.5), `sousAmendements?` (pour le vote d'un amendement : ses sous-amendements),
+`sources`. La fiche dossier n'embarque que des `ScrutinResume` (liste
 compacte) ; le `Scrutin` complet est servi par `GET /scrutins/{id}`. Le fil et la
 recherche renvoient un `DossierListItem` allégé (dont `nombreScrutins` et
 `miseAJour`). Types clés : `StatutScrutin` (`adopte` | `rejete` | `en_cours`),
@@ -200,9 +229,11 @@ camelCase des schémas Pydantic backend, à répercuter des deux côtés).
   via les garde-fous / file de revue (déjà en place). Objectif : remplir le résumé
   aujourd'hui vide des dossiers Postgres.
 - **Enrichissement ingestion** : Légifrance/PISTE (texte des dossiers) et
-  **amendements clés** (aujourd'hui liste vide au niveau du dossier), classification
-  de thème plus fine (beaucoup de dossiers ressortent en « Autre »), planification du
-  job de synchro (plusieurs fois/jour).
+  **métadonnées d'amendement** (texte complet, exposé sommaire — aujourd'hui
+  l'amendement se résume à l'objet du scrutin, son numéro/auteur extraits de ce
+  libellé, et son sort), classification de thème plus fine
+  (beaucoup de dossiers ressortent en « Autre »), planification du job de synchro
+  (plusieurs fois/jour).
 - **V1.1** : fiche député (lecture seule), filtres de recherche, partage.
 - **V2** : assistant IA en questions pré-cadrées.
 

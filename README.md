@@ -25,11 +25,17 @@ Le frontend et le backend partagent le **même contrat de données** (les types
 
 - **Fil des dossiers** : les derniers textes de loi, défilement infini. Un dossier
   qui reçoit un nouveau vote remonte avec un badge **« mis à jour »**.
-- **Fiche dossier** : résumé neutre du texte + liste compacte des votes (objet,
-  statut, micro-résultat), sources officielles cliquables.
-- **Fiche vote** : au tap sur un vote — résultat global, vote par groupe
-  politique, et **noms des votants** (pour/contre/abstention) quand le scrutin
-  public le permet.
+- **Fiche dossier** : résumé neutre du texte, puis trois sections distinctes —
+  les votes sur le texte (type du vote en clair : « Vote sur l'ensemble »,
+  « Motion de censure », « Article 2 »…), les **amendements** (numéro, auteur,
+  sort) et les **sous-amendements** (rattachés à leur amendement). Chaque ligne
+  ouvre le détail de son vote ; les longues listes sont repliées (« Voir les N
+  autres »). Les sources affichées sont celles du dossier — celles de chaque
+  vote vivent sur sa fiche.
+- **Fiche vote** : au tap sur un vote (ou un amendement) — type du vote et
+  libellé officiel complet, résultat global, vote par groupe politique, et
+  **noms des votants** (pour/contre/abstention) quand le scrutin public le
+  permet. Le vote d'un amendement liste aussi ses sous-amendements.
 - **Recherche** plein texte (titre, thème), tolérante aux accents.
 
 Cache hors-ligne, accessibilité (statut jamais porté par la couleur seule),

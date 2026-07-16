@@ -21,12 +21,20 @@ from app.ingestion.assemblee import (
     dossier_source,
     parse_scrutin,
 )
+from app.ingestion.normalize import (
+    auteur_amendement,
+    est_amendement,
+    est_sous_amendement,
+    numero_amendement,
+    numero_amendement_parent,
+)
 from app.ingestion.organes import (
     GroupResolver,
     build_acteurs_from_amo,
     build_resolver_from_organes,
 )
 from app.schemas import (
+    Amendement,
     Dossier,
     MiseAJourDossier,
     ResumeScrutin,
@@ -88,36 +96,84 @@ def _empty_resume(titre_clair: str) -> ResumeScrutin:
     )
 
 
+def _amendement_from_scrutin(scrutin: Scrutin) -> Amendement:
+    """Un vote d'amendement → entrée d'amendement (liée à son scrutin public).
+
+    Numéro et auteur sont extraits de l'objet officiel quand ils sont sans
+    ambiguïté ; sinon absents (§2.5 : on n'invente pas).
+    """
+    return Amendement(
+        id=scrutin.id,
+        numero=numero_amendement(scrutin.objet),
+        objet=scrutin.objet,
+        auteur=auteur_amendement(scrutin.objet),
+        sort="adopte" if scrutin.statut.value == "adopte" else "rejete",
+        scrutin_id=scrutin.id,
+    )
+
+
+def _structurer_amendements(votes: list[Scrutin]) -> list[Amendement]:
+    """Structure les votes d'amendement d'un dossier.
+
+    Les sous-amendements sont rattachés à leur amendement parent (identifié par
+    « … à l'amendement n° X ») ; un sous-amendement sans parent identifiable
+    reste au niveau du dossier (factuel, rien n'est déduit).
+    """
+    amendements = [
+        _amendement_from_scrutin(s) for s in votes if not est_sous_amendement(s.objet)
+    ]
+    par_numero = {a.numero: a for a in amendements if a.numero}
+    for s in votes:
+        if not est_sous_amendement(s.objet):
+            continue
+        sous = _amendement_from_scrutin(s)
+        parent = par_numero.get(numero_amendement_parent(s.objet) or "")
+        if parent is not None:
+            parent.sous_amendements.append(sous)
+        else:
+            amendements.append(sous)
+    return amendements
+
+
 def build_dossier(parses: list[ScrutinParse]) -> Dossier:
     """Agrège les scrutins d'un même dossier (ordre : du plus récent au plus ancien).
 
-    Le dossier n'embarque que des `ScrutinResume` (liste compacte) : le détail
+    Les votes sur le **texte** (ensemble, articles, motions) peuplent la liste
+    compacte `scrutins` ; les votes d'**amendement** peuplent `amendements` (avec
+    un lien vers leur scrutin) — ils n'apparaissent donc pas deux fois. Le détail
     complet de chaque vote (groupes, nominatif) vit dans la table `scrutin`.
     """
-    scrutins = sorted((p.scrutin for p in parses), key=lambda s: s.date, reverse=True)
+    tous = sorted((p.scrutin for p in parses), key=lambda s: s.date, reverse=True)
     ref = parses[0]  # métadonnées de dossier partagées
     titre_clair = ref.dossier_titre[:90].rstrip()
 
-    sources: list[SourceOfficielle] = []
+    votes_texte = [s for s in tous if not est_amendement(s.objet)]
+    votes_amendement = [s for s in tous if est_amendement(s.objet)]
+
+    # Sources de NIVEAU DOSSIER uniquement : la page du dossier législatif.
+    # Chaque vote (texte, amendement, sous-amendement) garde sa source sur sa
+    # propre fiche (§7.5 s'applique écran par écran) — les répéter ici ne
+    # ferait que dupliquer. Sans référence de dossier, repli factuel sur les
+    # sources des votes.
     if ref.dossier_ref:
-        sources.append(dossier_source(ref.legislature, ref.dossier_ref))
-    for s in scrutins:
-        sources.extend(s.sources)
+        sources = [dossier_source(ref.legislature, ref.dossier_ref)]
+    else:
+        sources = [src for s in (votes_texte or tous) for src in s.sources]
 
     return Dossier(
         id=ref.dossier_id,
         titre_officiel=ref.dossier_titre,
         titre_clair=titre_clair,
         accroche=ref.dossier_titre,
-        # Statut du dossier = résultat du scrutin le plus récent (défensif).
-        statut=scrutins[0].statut,
+        # Statut / date du dossier = scrutin le plus récent, amendements compris.
+        statut=tous[0].statut,
         phase=None,
         theme=ref.theme,
         temps_lecture_sec=30,
-        date_dernier_scrutin=scrutins[0].date,
+        date_dernier_scrutin=tous[0].date,
         mise_a_jour=None,
-        scrutins=[ScrutinResume.from_scrutin(s) for s in scrutins],
-        amendements=[],  # nécessite les données de dossier (Phase 2)
+        scrutins=[ScrutinResume.from_scrutin(s) for s in votes_texte],
+        amendements=_structurer_amendements(votes_amendement),
         sources=_dedupe_sources(sources),
         resume=_empty_resume(titre_clair),
     )
@@ -126,29 +182,79 @@ def build_dossier(parses: list[ScrutinParse]) -> Dossier:
 def _merge_avec_existant(prev: Dossier, incoming: Dossier) -> Dossier:
     """Fusionne un dossier fraîchement construit avec sa version en base.
 
-    Conserve les scrutins déjà connus, ajoute les nouveaux, et pose le badge
-    « mis à jour » (§7.7) si de nouveaux scrutins sont apparus.
+    Conserve les votes (texte et amendement) déjà connus, ajoute les nouveaux, et
+    pose le badge « mis à jour » (§7.7) si un nouveau scrutin est apparu.
     """
-    prev_ids = {s.id for s in prev.scrutins}
+    def _ids(liste: list[Amendement]) -> set[str]:
+        return {a.id for a in liste} | {sa.id for a in liste for sa in a.sous_amendements}
+
+    # Le build frais fait autorité sur la CLASSIFICATION (texte vs amendement) :
+    # un id qu'il classe amendement ne doit pas rester dans les votes sur le
+    # texte, et inversement. Sans ce garde-fou, un vote ingéré sous une ancienne
+    # version (ou reclassé après un changement d'heuristique) resterait dupliqué
+    # dans les deux listes — chaque id doit vivre dans exactement une liste.
+    am_ids_frais = _ids(incoming.amendements)
+    texte_ids_frais = {s.id for s in incoming.scrutins}
+
+    # Votes sur le texte (liste compacte) : union (les fraîches priment), en
+    # retirant tout id désormais classé amendement.
     by_id = {s.id: s for s in prev.scrutins}
     for s in incoming.scrutins:
-        by_id[s.id] = s  # les données fraîches priment pour un même scrutin
-    scrutins = sorted(by_id.values(), key=lambda s: s.date, reverse=True)
+        by_id[s.id] = s
+    scrutins = sorted(
+        (s for s in by_id.values() if s.id not in am_ids_frais),
+        key=lambda s: s.date,
+        reverse=True,
+    )
 
-    nouveaux = [s for s in scrutins if s.id not in prev_ids]
+    # Amendements (sous-amendements compris) : union, en retirant tout id
+    # désormais classé vote sur le texte (au premier niveau comme en sous).
+    am_by_id = {a.id: a for a in prev.amendements}
+    for a in incoming.amendements:
+        connu = am_by_id.get(a.id)
+        if connu is not None:
+            # Union des sous-amendements (les données fraîches priment).
+            sa_by_id = {sa.id: sa for sa in connu.sous_amendements}
+            for sa in a.sous_amendements:
+                sa_by_id[sa.id] = sa
+            a.sous_amendements = list(sa_by_id.values())
+        am_by_id[a.id] = a
+    amendements: list[Amendement] = []
+    for a in am_by_id.values():
+        if a.id in texte_ids_frais:
+            continue
+        a.sous_amendements = [
+            sa for sa in a.sous_amendements if sa.id not in texte_ids_frais
+        ]
+        amendements.append(a)
+
+    # « mis à jour » (§7.7) : un vote vu ce run et inconnu jusqu'ici (dans l'une
+    # ou l'autre liste). Une simple reclassification n'est pas un nouveau vote.
+    prev_ids = {s.id for s in prev.scrutins} | _ids(prev.amendements)
+    nouveaux = bool((texte_ids_frais | am_ids_frais) - prev_ids)
 
     incoming.scrutins = scrutins
-    incoming.date_dernier_scrutin = scrutins[0].date
-    incoming.statut = scrutins[0].statut
-    incoming.sources = _dedupe_sources(prev.sources + incoming.sources)
+    incoming.amendements = amendements
+    # Date / statut : le plus récent entre l'existant et l'arrivant (le build a
+    # calculé l'arrivant sur tous ses votes, amendements compris).
+    if prev.date_dernier_scrutin > incoming.date_dernier_scrutin:
+        incoming.date_dernier_scrutin = prev.date_dernier_scrutin
+        incoming.statut = prev.statut
+    # Sources : niveau dossier uniquement. La page du dossier législatif
+    # (type « texte ») est stable inter-runs → la version fraîche suffit (et
+    # purge d'anciennes sources par-scrutin) ; en repli (pas de page dossier),
+    # union pour ne pas perdre les sources des runs passés.
+    if any(s.type == "texte" for s in incoming.sources):
+        incoming.sources = _dedupe_sources(incoming.sources)
+    else:
+        incoming.sources = _dedupe_sources(incoming.sources + prev.sources)
     # Conserve un résumé déjà généré (Phase 2) plutôt que l'écraser par un vide.
     if prev.resume.resume:
         incoming.resume = prev.resume
 
     if nouveaux:
-        plus_recent = nouveaux[0]  # scrutins triés desc → le plus récent d'abord
         incoming.mise_a_jour = MiseAJourDossier(
-            date=plus_recent.date, label="Nouveau vote"
+            date=incoming.date_dernier_scrutin, label="Nouveau vote"
         )
     else:
         incoming.mise_a_jour = prev.mise_a_jour  # conserve un éventuel badge
@@ -179,7 +285,8 @@ def _dossier_row_values(dossier: Dossier) -> dict:
     }
 
 
-async def _upsert_dossier(session: AsyncSession, dossier: Dossier) -> None:
+async def _upsert_dossier(session: AsyncSession, dossier: Dossier) -> Dossier:
+    """Upsert du dossier ; renvoie la version effectivement écrite (fusionnée)."""
     existing = await session.get(DossierRow, dossier.id)
     if existing is not None:
         prev = Dossier.model_validate(existing.payload)
@@ -190,6 +297,7 @@ async def _upsert_dossier(session: AsyncSession, dossier: Dossier) -> None:
     await session.execute(
         stmt.on_conflict_do_update(index_elements=["id"], set_=update)
     )
+    return dossier
 
 
 async def _upsert_scrutin(session: AsyncSession, scrutin: Scrutin) -> None:
@@ -257,9 +365,18 @@ class SyncJob:
         #    et du détail de chaque vote (table scrutin).
         async with self._sf() as session:
             for parses in par_dossier.values():
-                dossier = build_dossier(parses)
-                await _upsert_dossier(session, dossier)
+                dossier = await _upsert_dossier(session, build_dossier(parses))
+                # Le scrutin d'un amendement embarque ses sous-amendements :
+                # la fiche vote de l'amendement les liste (dossier fusionné =
+                # rattachements connus, runs précédents compris).
+                sous_par_scrutin = {
+                    a.scrutin_id: a.sous_amendements
+                    for a in dossier.amendements
+                    if a.scrutin_id and a.sous_amendements
+                }
                 for p in parses:
+                    if p.scrutin.id in sous_par_scrutin:
+                        p.scrutin.sous_amendements = sous_par_scrutin[p.scrutin.id]
                     await _upsert_scrutin(session, p.scrutin)
                 report.dossiers_upserts += 1
             await session.commit()

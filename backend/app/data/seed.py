@@ -74,6 +74,16 @@ def _sources(*types: str) -> list[SourceOfficielle]:
     return [SourceOfficielle(type=t, libelle=libelle[t], url=url[t]) for t in types]
 
 
+# Sous-amendement (fictif) de l'amendement n° 12 du dossier logement — partagé
+# entre la fiche dossier (section Sous-amendements) et le scrutin de son parent.
+_SOUS_AM_01 = Amendement(
+    id="sam-01",
+    numero="3",
+    objet="Abaisse le seuil d'encadrement aux communes de plus de 15 000 habitants",
+    sort="rejete",
+    scrutin_id="scr-2026-0412-sam1",
+)
+
 # Détail complet des votes (servis par GET /scrutins/{id}). La fiche dossier,
 # elle, n'embarque que des résumés (liste compacte cliquable). Pas de nominatif
 # dans le seed : on n'invente pas des noms de votants cohérents avec les
@@ -114,6 +124,67 @@ SEED_SCRUTINS: list[Scrutin] = [
             _grp("ECO", "pour", 33, 0, 3, 0.92),
         ],
         sources=_sources("scrutin"),
+    ),
+    # Votes d'amendement du dossier logement (apparaissent dans la section
+    # « Amendements », pas dans la liste des votes du texte).
+    Scrutin(
+        id="scr-2026-0412-am1",
+        dossier_id="dos-logement-2026",
+        date="2026-07-07T15:00:00Z",
+        objet="Amendement n° 12 — étendre l'encadrement aux communes de plus de 20 000 habitants",
+        statut="adopte",
+        scrutin_public=True,
+        resultat=ResultatGlobal(pour=276, contre=254, abstention=38, non_votants=9),
+        positions_groupes=[
+            _grp("RE", "pour", 120, 30, 10, 0.70),
+            _grp("RN", "contre", 4, 82, 2, 0.92),
+            _grp("LFI", "pour", 68, 1, 2, 0.95),
+            _grp("LR", "contre", 6, 52, 4, 0.82),
+            _grp("SOC", "pour", 61, 1, 4, 0.93),
+            _grp("ECO", "pour", 34, 0, 2, 0.94),
+        ],
+        sources=_sources("scrutin", "amendements"),
+        sous_amendements=[_SOUS_AM_01],
+    ),
+    # Sous-amendement à l'amendement n° 12 (voté avant lui, rejeté).
+    Scrutin(
+        id="scr-2026-0412-sam1",
+        dossier_id="dos-logement-2026",
+        date="2026-07-07T14:30:00Z",
+        objet=(
+            "Sous-amendement n° 3 à l'amendement n° 12 — abaisser le seuil "
+            "à 15 000 habitants"
+        ),
+        statut="rejete",
+        scrutin_public=True,
+        resultat=ResultatGlobal(pour=188, contre=268, abstention=26, non_votants=12),
+        positions_groupes=[
+            _grp("RE", "contre", 18, 130, 12, 0.81),
+            _grp("RN", "contre", 2, 84, 2, 0.95),
+            _grp("LFI", "pour", 66, 2, 2, 0.94),
+            _grp("LR", "contre", 8, 50, 4, 0.81),
+            _grp("SOC", "pour", 60, 2, 4, 0.91),
+            _grp("ECO", "pour", 34, 0, 2, 0.94),
+        ],
+        sources=_sources("scrutin", "amendements"),
+    ),
+    Scrutin(
+        id="scr-2026-0412-am2",
+        dossier_id="dos-logement-2026",
+        date="2026-07-06T17:30:00Z",
+        objet="Amendement n° 45 — exonérer les logements rénovés depuis moins de 3 ans",
+        statut="rejete",
+        scrutin_public=True,
+        resultat=ResultatGlobal(pour=232, contre=289, abstention=41, non_votants=15),
+        positions_groupes=[
+            _grp("RE", "contre", 40, 108, 12, 0.68),
+            _grp("RN", "pour", 70, 8, 4, 0.85),
+            _grp("LFI", "contre", 2, 66, 3, 0.94),
+            _grp("LR", "pour", 54, 6, 2, 0.86),
+            _grp("SOC", "contre", 3, 60, 3, 0.92),
+            _grp("ECO", "contre", 1, 33, 2, 0.94),
+        ],
+        sources=_sources("scrutin", "amendements"),
     ),
     Scrutin(
         id="scr-2026-0410",
@@ -206,18 +277,25 @@ SEED_DOSSIERS: list[Dossier] = [
         amendements=[
             Amendement(
                 id="am-01",
+                numero="12",
                 objet="Étend l'encadrement aux communes de plus de 20 000 habitants",
                 auteur="Groupe Écologiste",
                 sort="adopte",
+                scrutin_id="scr-2026-0412-am1",
+                sous_amendements=[_SOUS_AM_01],
             ),
             Amendement(
                 id="am-02",
+                numero="45",
                 objet="Exonère les logements rénovés depuis moins de 3 ans",
                 auteur="Groupe LR",
                 sort="rejete",
+                scrutin_id="scr-2026-0412-am2",
             ),
         ],
-        sources=_sources("texte", "amendements", "debats", "scrutin"),
+        # Sources de niveau dossier uniquement (texte, débats) : la source de
+        # chaque vote/amendement vit sur sa propre fiche — pas de doublon.
+        sources=_sources("texte", "debats"),
         resume=ResumeScrutin(
             titre_clair="Faciliter l'accès au logement",
             resume=[
@@ -264,7 +342,7 @@ SEED_DOSSIERS: list[Dossier] = [
         date_dernier_scrutin="2026-07-07T16:00:00Z",
         scrutins=[_resume_scrutin("scr-2026-0410")],
         amendements=[],
-        sources=_sources("texte", "debats", "scrutin"),
+        sources=_sources("texte", "debats"),
         resume=ResumeScrutin(
             titre_clair="Baisser la facture d'énergie",
             resume=[
@@ -306,7 +384,7 @@ SEED_DOSSIERS: list[Dossier] = [
                 sort="retire",
             ),
         ],
-        sources=_sources("texte", "scrutin"),
+        sources=_sources("texte"),
         resume=ResumeScrutin(
             titre_clair="Rénovation des écoles",
             resume=[
@@ -338,7 +416,7 @@ SEED_DOSSIERS: list[Dossier] = [
         date_dernier_scrutin="2026-07-03T09:45:00Z",
         scrutins=[_resume_scrutin("scr-2026-0398")],
         amendements=[],
-        sources=_sources("texte", "debats", "scrutin"),
+        sources=_sources("texte", "debats"),
         resume=ResumeScrutin(
             titre_clair="Lutter contre les déserts médicaux",
             resume=[
