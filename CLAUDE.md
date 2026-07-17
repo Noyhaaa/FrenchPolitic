@@ -92,11 +92,16 @@ et restent donc sur le seed. **Phase 1 faite** : ingestion réelle de l'open dat
 (17e législature) — scrutins publics + groupes (archive AMO) — parsée, contrôlée,
 **regroupée par dossier** et upsertée dans PostgreSQL (SQLAlchemy
 async), via `python -m app.ingestion.run`. Regroupement en cascade : `dossierRef`
-officiel quand il existe, sinon **texte de rattachement extrait de l'objet du
-vote** (« … de la proposition de loi visant à… » → dossier reconstitué à id
-stable `TXT-…`), sinon singleton (motion de censure, déclaration — événements
-autonomes légitimes dans le fil). Le fil ne montre donc que des textes/dossiers,
-jamais un amendement isolé. Les votes d'amendement sont classés à
+officiel quand il existe ; sinon **réconciliation** — le titre cité dans l'objet
+du vote (« … de la proposition de loi visant à… ») est comparé aux titres
+officiels de l'archive **dossiers législatifs** (`app/ingestion/dossiers_legislatifs.py`,
+correspondance exacte, non ambiguë, même législature) pour retrouver le vrai
+`dossierRef` (et son lien officiel §7.5) ; sinon **texte de rattachement** →
+dossier reconstitué à id stable `TXT-…` ; sinon singleton (motion de censure,
+déclaration — événements autonomes légitimes dans le fil). ~60 % des dossiers ont
+ainsi leur page officielle. On n'importe PAS les titres de l'archive (minuscules,
+fragmentés) : le libellé du scrutin est plus propre. Le fil ne montre donc que des
+textes/dossiers, jamais un amendement isolé. Les votes d'amendement sont classés à
 l'ingestion (`est_amendement` / `est_sous_amendement` sur l'objet officiel, avec
 extraction du numéro et de l'auteur quand ils sont sans ambiguïté) et chaque
 sous-amendement est **rattaché à son amendement parent** (« … à l'amendement
@@ -113,9 +118,15 @@ décisif, positions des groupes, comptes d'amendements), **sans LLM ni clé API*
 éditoriaux** (§4.4) par construction. Un LLM (AnthropicLLM derrière `LLMClient`)
 pourra fluidifier le style plus tard sans changer ce contrat ; la fusion
 inter-runs ne préserve un résumé que s'il a été **relu par un humain**
-(`relu_par_humain`), sinon elle régénère. Reste vide/non comblé (§2.5) la liste
-des **amendements enrichis** (texte complet, exposé sommaire — Phase 2 Légifrance).
-Détails dans `backend/README.md`.
+(`relu_par_humain`), sinon elle régénère. **Exposé des motifs** (le « pourquoi »
+du texte) récupéré du **PDF officiel du texte déposé** (`app/ingestion/textes_an.py`
+— URL dérivée de l'`uid` du document, extraction `pypdf`, dépôt initial d'abord)
+et stocké dans `Dossier.expose_motifs` : contenu **non neutre** (point de vue de
+l'auteur, §4.3), affiché en **bloc cité et attribué** (`ExposeMotifsCard`), jamais
+fondu dans le résumé neutre. Pas besoin de Légifrance pour ça (option a ; la
+neutralisation par LLM — option b — viendra avec le LLM). Reste vide/non comblé
+(§2.5) la liste des **amendements enrichis** (texte complet, exposé sommaire —
+Phase 2 Légifrance). Détails dans `backend/README.md`.
 
 ## Stack & commandes
 
@@ -245,12 +256,13 @@ camelCase des schémas Pydantic backend, à répercuter des deux côtés).
   client LLM Anthropic derrière `LLMClient`) au niveau du **dossier**, puis publier
   via les garde-fous / file de revue (déjà en place). Objectif : remplir le résumé
   aujourd'hui vide des dossiers Postgres.
-- **Enrichissement ingestion** : Légifrance/PISTE (texte des dossiers) et
-  **métadonnées d'amendement** (texte complet, exposé sommaire — aujourd'hui
-  l'amendement se résume à l'objet du scrutin, son numéro/auteur extraits de ce
-  libellé, et son sort), classification de thème plus fine
-  (beaucoup de dossiers ressortent en « Autre »), planification du job de synchro
-  (plusieurs fois/jour).
+- **Enrichissement ingestion** : Légifrance/PISTE pour le **texte consolidé** des
+  dossiers (ce que la loi change dans le code — l'**exposé des motifs** est déjà
+  couvert via le PDF AN, cf. `textes_an.py`) ; **métadonnées d'amendement** (texte
+  complet, exposé sommaire — aujourd'hui l'amendement se résume à l'objet du
+  scrutin, son numéro/auteur extraits de ce libellé, et son sort) ; classification
+  de thème plus fine (beaucoup de dossiers ressortent en « Autre ») ; planification
+  du job de synchro (plusieurs fois/jour).
 - **V1.1** : fiche député (lecture seule), filtres de recherche, partage.
 - **V2** : assistant IA en questions pré-cadrées.
 

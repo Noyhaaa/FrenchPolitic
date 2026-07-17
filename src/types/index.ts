@@ -113,6 +113,18 @@ export interface ResumeScrutin {
 }
 
 /**
+ * Exposé des motifs du texte, tel que rédigé par l'auteur du dépôt (§5.1).
+ *
+ * ⚠️ C'est le **point de vue du déposant**, PAS un fait neutre (§4.3) : à
+ * afficher comme un bloc **cité et attribué** (« Ce que dit l'auteur du texte »),
+ * jamais fondu dans le résumé neutre. `source` renvoie au texte officiel (§7.5).
+ */
+export interface ExposeMotifs {
+  texte: string;
+  source: SourceOfficielle;
+}
+
+/**
  * Étape précise de la navette affichée sur la fiche
  * (ex. « Adopté en 1re lecture » alors que le fil affiche « En discussion »).
  */
@@ -196,6 +208,11 @@ export interface Dossier {
   amendements: Amendement[];
   sources: SourceOfficielle[];
   resume: ResumeScrutin;
+  /**
+   * Exposé des motifs du texte (point de vue de l'auteur, bloc attribué).
+   * Absent tant que le PDF officiel n'a pas pu être récupéré (§2.5).
+   */
+  exposeMotifs?: ExposeMotifs;
 }
 
 /**

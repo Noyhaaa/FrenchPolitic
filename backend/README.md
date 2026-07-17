@@ -52,11 +52,26 @@ acteurs** : groupes + annuaire des députés pour le vote nominatif), parse,
 contrôle la cohérence des décomptes, **regroupe les scrutins par dossier** et
 upsert (idempotent) : les dossiers (liste compacte des votes) et le détail de
 chaque vote (table `scrutin`, avec les noms des votants). Regroupement en
-cascade : le `dossierRef` officiel quand il existe ; sinon le **texte de
-rattachement extrait de l'objet du vote** (« … de la proposition de loi visant
-à… » → dossier reconstitué, id stable `TXT-…`, mention de lecture ignorée) ;
-sinon le scrutin reste un dossier singleton (motion de censure, déclaration…).
-Le fil n'expose ainsi que des textes — jamais un vote d'amendement isolé.
+cascade : le `dossierRef` officiel quand il existe ; sinon **réconciliation** via
+l'archive *dossiers législatifs* (le titre cité dans l'objet, comparé aux titres
+officiels de la législature — correspondance exacte non ambiguë — retrouve le
+vrai `dossierRef` et son lien officiel) ; sinon le **texte de rattachement**
+(dossier reconstitué `TXT-…`, mention de lecture ignorée) ; sinon un dossier
+singleton (motion de censure, déclaration…). Le fil n'expose ainsi que des
+textes — jamais un vote d'amendement isolé — et ~60 % ont leur page officielle.
+L'archive sert **uniquement** à retrouver le `dossierRef` : ses titres (en
+minuscules, fragmentés) ne sont pas importés.
+**Exposé des motifs** (`app/ingestion/textes_an.py`) : l'archive ne porte pas le
+corps des textes (métadonnées seules), mais le **PDF du texte déposé** est
+public et son URL se **dérive de l'`uid`** du document (`…L17B1337` →
+`…/dyn/17/textes/l17b1337_proposition-loi.pdf`). On en extrait l'exposé des
+motifs (via `pypdf`) en essayant les textes déposés du **dépôt initial** au plus
+récent (l'exposé n'est que dans le dépôt initial ; les versions de navette ne
+l'ont pas). Contenu **non neutre** (point de vue de l'auteur, §4.3) : stocké dans
+un bloc `Dossier.expose_motifs` **cité et attribué**, jamais fondu dans le résumé
+neutre. Best-effort (§2.5) : un dossier n'en porte pas si le PDF est absent ou
+illisible. Pas besoin de Légifrance pour ça — Légifrance/PISTE ne servirait que
+pour le **texte consolidé** (ce que la loi change dans le code), besoin différent.
 Les votes d'amendement sont classés depuis l'objet officiel (amendement vs
 sous-amendement, numéro et auteur extraits quand sans ambiguïté) ; chaque
 **sous-amendement est rattaché à son amendement parent** (« … à l'amendement
@@ -117,6 +132,7 @@ app/
     review_queue.py  File de revue humaine (§4.6)
   ingestion/         Alimentation depuis les sources officielles (§5)
     assemblee.py     Open data AN : download + parse_scrutin (pur, nominatif inclus) → ScrutinParse
+    textes_an.py     Exposé des motifs : uid → URL du PDF officiel → extraction (pypdf)
     organes.py       Résolution des groupes (AMO) + couleurs + annuaire des députés
     normalize.py     Thème (heuristique), positions, décomptes
     sync.py          Job download → parse → regroupement par dossier → upsert (idempotent)
@@ -150,11 +166,16 @@ tests/               Tests API + garde-fous + génération + ingestion (+ repo p
   le style plus tard sans toucher au reste ; la fusion ne préserve un résumé que
   s'il est **relu par un humain**, sinon elle régénère depuis les faits à jour.
 
+**Exposé des motifs — bloc attribué (en place)**
+- Récupéré du PDF officiel du texte déposé (`textes_an.py`), affiché comme un bloc
+  **cité et attribué à l'auteur** — jamais fondu dans le résumé neutre (§4.3).
+  Option (a) : contenu non neutre isolé. Option (b) différée : quand un LLM sera
+  branché, l'exposé servira de **contexte** pour un « que change le texte » neutre
+  passant les garde-fous — jamais affiché tel quel.
+
 **Stubs à interface stable (Phase 2)**
-- Enrichissement Légifrance/PISTE : texte consolidé + métadonnées d'amendement
-  (le résumé pourra alors s'appuyer sur l'exposé des motifs, pas seulement les
-  scrutins).
-- Légifrance/PISTE : texte consolidé des dossiers (OAuth2 déjà esquissé).
+- Légifrance/PISTE : **texte consolidé** des dossiers (ce que la loi change dans
+  le code — besoin distinct de l'exposé des motifs, déjà couvert). OAuth2 esquissé.
 - Métadonnées d'amendement enrichies (texte complet, exposé sommaire) — pour
   l'instant un amendement = l'objet officiel de son scrutin (numéro/auteur
   extraits de ce libellé) + son sort.

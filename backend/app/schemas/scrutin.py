@@ -168,6 +168,19 @@ class RecapMensuel(CamelModel):
     textes: int
 
 
+class ExposeMotifs(CamelModel):
+    """Exposé des motifs du texte, rédigé par l'auteur du dépôt (§5.1).
+
+    ⚠️ C'est le **point de vue du déposant**, PAS un fait neutre (§4.3) : à
+    présenter comme un bloc **cité et attribué** (« Ce que dit l'auteur du
+    texte »), jamais fondu dans le résumé neutre. `source` renvoie au texte
+    officiel (réversibilité §7.5).
+    """
+
+    texte: str
+    source: SourceOfficielle
+
+
 class Dossier(CamelModel):
     """Entité centrale : un dossier législatif (un texte) et sa trajectoire."""
 
@@ -185,6 +198,9 @@ class Dossier(CamelModel):
     amendements: list[Amendement] = []
     sources: list[SourceOfficielle] = []
     resume: ResumeScrutin
+    # Exposé des motifs (point de vue de l'auteur, bloc attribué). Absent tant
+    # qu'on n'a pas pu récupérer le PDF officiel du texte (§2.5 : pas comblé).
+    expose_motifs: ExposeMotifs | None = None
 
 
 class DossierListItem(CamelModel):

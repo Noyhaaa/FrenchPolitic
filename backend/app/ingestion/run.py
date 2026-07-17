@@ -29,7 +29,8 @@ async def _main(limit: int | None, legislature: int) -> None:
 
     print(
         f"Terminé : {report.dossiers_upserts} dossiers "
-        f"({report.scrutins_vus} scrutins vus), {report.groupes} groupes."
+        f"({report.scrutins_vus} scrutins vus), {report.groupes} groupes, "
+        f"{report.exposes_recuperes} exposés des motifs récupérés."
     )
     if report.anomalies:
         print(f"⚠ {len(report.anomalies)} anomalie(s) de cohérence (non bloquantes) :")

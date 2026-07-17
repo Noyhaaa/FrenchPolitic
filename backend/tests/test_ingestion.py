@@ -217,6 +217,72 @@ def test_sans_dossier_ref_ni_texte_reste_singleton():
     assert p.dossier_id == "VTANR5L17V999"  # l'uid du scrutin
 
 
+# Documents « dossiers législatifs » factices pour la réconciliation.
+_DOCS = [
+    {
+        "document": {
+            "dossierRef": "DLR5L17N9001",
+            "denominationStructurelle": "Proposition de loi",
+            "titres": {
+                "titrePrincipal": "Proposition de loi visant à protéger la ressource en eau"
+            },
+        }
+    },
+    {
+        "document": {  # rapport : même thème mais ignoré (pas un texte de loi)
+            "dossierRef": "DLR5L17N9001",
+            "denominationStructurelle": "Rapport",
+            "titres": {"titrePrincipal": "Rapport sur la ressource en eau"},
+        }
+    },
+    {
+        "document": {  # autre législature : ne doit jamais matcher la 17e
+            "dossierRef": "DLR5L16N1234",
+            "denominationStructurelle": "Proposition de loi",
+            "titres": {"titrePrincipal": "Proposition de loi d'une autre législature"},
+        }
+    },
+]
+
+
+def test_reconciliation_retrouve_le_vrai_dossier():
+    """Un scrutin sans dossierRef dont l'objet cite un texte connu récupère son
+    vrai dossierRef (et donc son lien officiel), au lieu d'un TXT-…"""
+    from app.ingestion.dossiers_legislatifs import construire_reconciliation
+
+    resolver = build_resolver_from_organes(ORGANES)
+    reco = construire_reconciliation(_DOCS, legislature=17)
+    p = parse_scrutin(
+        _sans_dossier_ref(
+            "l'amendement n° 4 à l'article 2 de la proposition de loi visant à "
+            "protéger la ressource en eau"
+        ),
+        resolver,
+        reconciliation=reco,
+    )
+    assert p.dossier_id == "DLR5L17N9001"
+    assert p.dossier_ref == "DLR5L17N9001"
+    # Titre canonique de l'archive adopté.
+    assert p.dossier_titre == "Proposition de loi visant à protéger la ressource en eau"
+
+
+def test_reconciliation_sans_correspondance_reste_txt():
+    """Titre inconnu de l'archive → dossier reconstitué (pas d'invention)."""
+    from app.ingestion.dossiers_legislatifs import construire_reconciliation
+
+    resolver = build_resolver_from_organes(ORGANES)
+    reco = construire_reconciliation(_DOCS, legislature=17)
+    p = parse_scrutin(
+        _sans_dossier_ref(
+            "l'ensemble de la proposition de loi sur un tout autre sujet"
+        ),
+        resolver,
+        reconciliation=reco,
+    )
+    assert p.dossier_id.startswith("TXT-")
+    assert p.dossier_ref is None
+
+
 def _scrutin_derive(resolver, uid, date, objet):
     """Un ScrutinParse dérivé de SCRUTIN (même dossier), à objet/id/date choisis."""
     p = parse_scrutin(SCRUTIN, resolver)

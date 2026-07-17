@@ -14,6 +14,7 @@ import { colors, radius, spacing, typography } from '@/theme';
 import {
   AiNotice,
   AmendementRow,
+  ExposeMotifsCard,
   ErrorView,
   LoadingView,
   OfflineBanner,
@@ -246,6 +247,14 @@ export function DossierDetailScreen() {
             </Text>
           )}
         </SectionCard>
+
+        {/* 2bis. Exposé des motifs — le « pourquoi » selon l'AUTEUR du texte.
+            Bloc distinct et attribué (contenu non neutre §4.3), placé après le
+            résumé neutre. Absent tant que le PDF officiel n'a pas été récupéré
+            (§2.5). */}
+        {dossier.exposeMotifs ? (
+          <ExposeMotifsCard expose={dossier.exposeMotifs} />
+        ) : null}
 
         {/* 3. Pourquoi ce texte ? */}
         {pourquoi.length > 0 && (

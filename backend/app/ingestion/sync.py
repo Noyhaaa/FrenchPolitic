@@ -21,6 +21,12 @@ from app.ingestion.assemblee import (
     dossier_source,
     parse_scrutin,
 )
+from app.ingestion.dossiers_legislatifs import construire_reconciliation
+from app.ingestion.textes_an import (
+    construire_expose,
+    construire_index_textes,
+    url_page_texte,
+)
 from app.ingestion.normalize import (
     auteur_amendement,
     est_amendement,
@@ -45,12 +51,17 @@ from app.schemas import (
 )
 from app.utils.text import fold
 
+# Nombre max de textes déposés essayés par dossier pour récupérer l'exposé des
+# motifs (dépôt initial d'abord). Borne les requêtes réseau par dossier.
+_MAX_TENTATIVES_EXPOSE = 3
+
 
 @dataclass
 class SyncReport:
     started_at: datetime
     scrutins_vus: int = 0
     dossiers_upserts: int = 0
+    exposes_recuperes: int = 0
     groupes: int = 0
     anomalies: list[str] = field(default_factory=list)
     finished_at: datetime | None = None
@@ -251,6 +262,11 @@ def _merge_avec_existant(prev: Dossier, incoming: Dossier) -> Dossier:
     # humain (le travail éditorial ne doit pas être écrasé par une régénération).
     if prev.resume.relu_par_humain:
         incoming.resume = prev.resume
+    # Exposé des motifs : stable (texte déposé). Si ce run n'a pas pu le
+    # récupérer (réseau, PDF momentanément absent), on garde celui déjà en base
+    # plutôt que de le perdre.
+    if incoming.expose_motifs is None and prev.expose_motifs is not None:
+        incoming.expose_motifs = prev.expose_motifs
 
     if nouveaux:
         incoming.mise_a_jour = MiseAJourDossier(
@@ -337,6 +353,36 @@ class SyncJob:
         self._sf = session_factory
         self._client = client or AssembleeOpenDataClient()
 
+    async def _enrichir_expose(
+        self,
+        dossier: Dossier,
+        dossier_ref: str | None,
+        index_textes: dict[str, list[str]],
+        report: SyncReport,
+    ) -> None:
+        """Attache l'exposé des motifs du texte (PDF officiel) au dossier.
+
+        Essaie les textes déposés candidats **du dépôt initial au plus récent**
+        (l'exposé n'est que dans le dépôt initial ; les versions de navette ne
+        l'ont pas), borné à `_MAX_TENTATIVES_EXPOSE`. Best-effort et silencieux
+        en cas d'échec (§2.5) : sans exposé récupérable, le dossier n'en porte pas.
+        """
+        uids = index_textes.get(dossier_ref or "")
+        if not uids:
+            return
+        for uid in uids[:_MAX_TENTATIVES_EXPOSE]:
+            url_page = url_page_texte(uid)
+            if not url_page:
+                continue
+            pdf = await self._client.download_texte_pdf(url_page + ".pdf")
+            if not pdf:
+                continue
+            expose = construire_expose(uid, pdf)
+            if expose is not None:
+                dossier.expose_motifs = expose
+                report.exposes_recuperes += 1
+                return
+
     async def run(self, limit: int | None = None) -> SyncReport:
         report = SyncReport(started_at=datetime.now(timezone.utc))
 
@@ -348,13 +394,23 @@ class SyncJob:
             report.groupes = await _upsert_groupes(session, resolver)
             await session.commit()
 
+        # 1bis) Dossiers législatifs : titres officiels + réconciliation des
+        #       scrutins sans dossierRef vers leur vrai dossier (§5.1).
+        documents = await self._client.download_dossiers()
+        reconciliation = construire_reconciliation(
+            documents, self._client.legislature
+        )
+        # Index dossierRef → texte AN déposé, pour récupérer l'exposé des motifs
+        # (PDF officiel) au niveau du dossier — bloc attribué, option (a).
+        index_textes = construire_index_textes(documents, self._client.legislature)
+
         # 2) Scrutins → parsing (avec nominatif) → regroupement par dossier.
         bruts = await self._client.download_scrutins(limit=limit)
         report.scrutins_vus = len(bruts)
         par_dossier: dict[str, list[ScrutinParse]] = {}
         for brut in bruts:
             try:
-                parse = parse_scrutin(brut, resolver, acteurs)
+                parse = parse_scrutin(brut, resolver, acteurs, reconciliation)
             except (KeyError, TypeError) as exc:
                 report.anomalies.append(f"parsing échoué: {exc}")
                 continue
@@ -365,7 +421,11 @@ class SyncJob:
         #    et du détail de chaque vote (table scrutin).
         async with self._sf() as session:
             for parses in par_dossier.values():
-                dossier = await _upsert_dossier(session, build_dossier(parses))
+                dossier = build_dossier(parses)
+                await self._enrichir_expose(
+                    dossier, parses[0].dossier_ref, index_textes, report
+                )
+                dossier = await _upsert_dossier(session, dossier)
                 # Le scrutin d'un amendement embarque ses sous-amendements :
                 # la fiche vote de l'amendement les liste (dossier fusionné =
                 # rattachements connus, runs précédents compris).

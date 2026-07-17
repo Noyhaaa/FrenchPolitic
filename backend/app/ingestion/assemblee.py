@@ -30,6 +30,7 @@ from app.ingestion.normalize import (
     truncate,
 )
 from app.utils.text import fold
+from app.ingestion.dossiers_legislatifs import Reconciliation
 from app.ingestion.organes import GroupResolver
 from app.schemas import (
     PositionGroupe,
@@ -46,6 +47,10 @@ ORGANES_URL = (
     "https://data.assemblee-nationale.fr/static/openData/repository/"
     "{leg}/amo/deputes_actifs_mandats_actifs_organes/"
     "AMO10_deputes_actifs_mandats_actifs_organes.json.zip"
+)
+DOSSIERS_URL = (
+    "https://data.assemblee-nationale.fr/static/openData/repository/"
+    "{leg}/loi/dossiers_legislatifs/Dossiers_Legislatifs.json.zip"
 )
 
 
@@ -85,6 +90,36 @@ class AssembleeOpenDataClient:
             with zf.open(name) as f:
                 out.append(json.load(f))
         return out
+
+    async def download_dossiers(self) -> list[dict]:
+        """Télécharge l'archive des dossiers législatifs et renvoie les JSON des
+        **documents** (titre + dossierRef, pour la réconciliation)."""
+        zf = await self._download_zip(DOSSIERS_URL.format(leg=self.legislature))
+        out: list[dict] = []
+        for name in zf.namelist():
+            if name.endswith(".json") and "/document/" in name:
+                with zf.open(name) as f:
+                    out.append(json.load(f))
+        return out
+
+    async def download_texte_pdf(self, url_pdf: str) -> bytes | None:
+        """Télécharge le PDF d'un texte (exposé des motifs). None si absent ou
+        non-PDF — l'enrichissement est best-effort (§2.5 : on n'attache rien en
+        cas d'échec, pas de comblement)."""
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._timeout,
+                follow_redirects=True,
+                headers={"User-Agent": "Mozilla/5.0"},
+            ) as c:
+                resp = await c.get(url_pdf)
+            if resp.status_code != 200:
+                return None
+            if "pdf" not in resp.headers.get("content-type", "").lower():
+                return None
+            return resp.content
+        except httpx.HTTPError:
+            return None
 
     async def download_amo(self) -> tuple[list[dict], list[dict]]:
         """Télécharge l'archive AMO une seule fois : (organes, acteurs).
@@ -145,11 +180,16 @@ def _noms_votants(
 
 
 def parse_scrutin(
-    raw: dict, resolver: GroupResolver, acteurs: dict[str, str] | None = None
+    raw: dict,
+    resolver: GroupResolver,
+    acteurs: dict[str, str] | None = None,
+    reconciliation: Reconciliation | None = None,
 ) -> ScrutinParse:
     """Convertit un scrutin open data en `ScrutinParse` (fonction pure).
 
     `acteurs` (annuaire PA… → nom) active l'extraction du vote nominatif.
+    `reconciliation` (titre ↔ dossierRef) permet, quand le scrutin n'a pas de
+    dossierRef, de retrouver son vrai dossier via le titre cité dans l'objet.
     """
     s = raw["scrutin"]
     legislature = str(s.get("legislature", ""))
@@ -170,12 +210,22 @@ def parse_scrutin(
     #    dossier reconstitué, au lieu de polluer le fil en singletons ;
     # 3) sinon (motion de censure, déclaration…), le scrutin est son propre
     #    dossier : c'est un événement autonome, légitime dans le fil.
+    reco = reconciliation
+
     if dossier_ref:
         dossier_id = dossier_ref
         dossier_titre = dossier_titre_raw or objet.get("libelle") or objet_libelle
     else:
         rattachement = texte_de_rattachement(objet_libelle)
-        if rattachement:
+        ref_retrouve = reco.ref_pour_titre(rattachement) if reco else None
+        if ref_retrouve:
+            # Réconciliation : le titre cité correspond exactement à un dossier
+            # officiel → le vote rejoint son vrai dossier (et son lien officiel).
+            # On garde notre libellé (bien casé), pas celui de l'archive.
+            dossier_ref = ref_retrouve
+            dossier_id = ref_retrouve
+            dossier_titre = rattachement or objet_libelle
+        elif rattachement:
             # Id stable entre runs : dérivé du titre plié (insensible aux
             # accents / à la casse) — l'upsert fusionne les runs successifs.
             cle = fold(rattachement)
