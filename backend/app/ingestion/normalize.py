@@ -20,6 +20,10 @@ _THEME_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
 ]
 
 
+# Liste fermée des thèmes (heuristique + choix imposé au classifieur LLM).
+THEMES: tuple[str, ...] = tuple(t for t, _ in _THEME_KEYWORDS) + ("Autre",)
+
+
 def guess_theme(*textes: str) -> str:
     blob = fold(" ".join(t for t in textes if t))
     for theme, mots in _THEME_KEYWORDS:

@@ -28,6 +28,7 @@ from app.ingestion.textes_an import (
     url_page_texte,
 )
 from app.ingestion.normalize import (
+    THEMES,
     auteur_amendement,
     est_amendement,
     est_sous_amendement,
@@ -41,6 +42,8 @@ from app.ingestion.organes import (
 )
 from app.ai.faits import construire_faits
 from app.ai.generation import generer_resume
+from app.ai.llm import LLMClient
+from app.ai.theme import classifier_theme
 from app.schemas import (
     Amendement,
     Dossier,
@@ -62,6 +65,7 @@ class SyncReport:
     scrutins_vus: int = 0
     dossiers_upserts: int = 0
     exposes_recuperes: int = 0
+    themes_reclasses: int = 0
     groupes: int = 0
     anomalies: list[str] = field(default_factory=list)
     finished_at: datetime | None = None
@@ -267,6 +271,10 @@ def _merge_avec_existant(prev: Dossier, incoming: Dossier) -> Dossier:
     # plutôt que de le perdre.
     if incoming.expose_motifs is None and prev.expose_motifs is not None:
         incoming.expose_motifs = prev.expose_motifs
+    # Thème : ne pas régresser un thème déjà affiné vers « Autre » si ce run a
+    # tourné sans LLM (ou si le LLM n'a rien renvoyé de valide).
+    if incoming.theme == "Autre" and prev.theme != "Autre":
+        incoming.theme = prev.theme
 
     if nouveaux:
         incoming.mise_a_jour = MiseAJourDossier(
@@ -349,9 +357,13 @@ class SyncJob:
         self,
         session_factory: async_sessionmaker[AsyncSession],
         client: AssembleeOpenDataClient | None = None,
+        llm: LLMClient | None = None,
     ) -> None:
         self._sf = session_factory
         self._client = client or AssembleeOpenDataClient()
+        # LLM optionnel : aujourd'hui la classification de thème (tâche à faible
+        # risque). None (défaut) → l'heuristique de mots-clés fait foi.
+        self._llm = llm
 
     async def _enrichir_expose(
         self,
@@ -382,6 +394,22 @@ class SyncJob:
                 dossier.expose_motifs = expose
                 report.exposes_recuperes += 1
                 return
+
+    async def _reclasser_theme(
+        self, dossier: Dossier, report: SyncReport
+    ) -> None:
+        """Affine le thème d'un dossier « Autre » via le LLM (liste fermée).
+
+        On ne touche qu'aux dossiers que l'heuristique n'a pas su classer, et on
+        n'applique qu'un thème **valide et non « Autre »** — sinon on garde
+        l'existant (sortie LLM hors-liste/verbeuse → repli, cf. `classifier_theme`).
+        """
+        if self._llm is None or dossier.theme != "Autre":
+            return
+        nouveau = await classifier_theme(dossier.titre_officiel, self._llm, THEMES)
+        if nouveau and nouveau != "Autre":
+            dossier.theme = nouveau
+            report.themes_reclasses += 1
 
     async def run(self, limit: int | None = None) -> SyncReport:
         report = SyncReport(started_at=datetime.now(timezone.utc))
@@ -425,6 +453,7 @@ class SyncJob:
                 await self._enrichir_expose(
                     dossier, parses[0].dossier_ref, index_textes, report
                 )
+                await self._reclasser_theme(dossier, report)
                 dossier = await _upsert_dossier(session, dossier)
                 # Le scrutin d'un amendement embarque ses sous-amendements :
                 # la fiche vote de l'amendement les liste (dossier fusionné =

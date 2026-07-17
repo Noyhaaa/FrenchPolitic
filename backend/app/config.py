@@ -30,8 +30,9 @@ class Settings(BaseSettings):
     legifrance_client_secret: str | None = None
 
     # Génération IA (Phase 2).
-    llm_provider: str = "mock"
-    llm_model: str = "claude-sonnet-5"
+    llm_provider: str = "mock"  # "mock" | "ollama" | (à venir) "anthropic"
+    llm_model: str = "claude-sonnet-5"  # ex. "mistral:latest" pour Ollama
+    llm_base_url: str = "http://localhost:11434"  # Ollama local
     anthropic_api_key: str | None = None
 
 

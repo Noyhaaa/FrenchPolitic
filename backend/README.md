@@ -126,9 +126,10 @@ app/
   ai/                Pipeline de résumé (§4)
     prompts.py       Prompt système neutre (§4.1–4.3)
     rag.py           Construction du contexte ancré (RAG)
-    llm.py           Abstraction fournisseur (MockLLM ; Anthropic en Phase 2)
+    llm.py           Abstraction fournisseur (MockLLM · OllamaLLM local · Anthropic à venir)
     guardrails.py    Garde-fous : ancrage, lexique orienté, cohérence chiffres
     generation.py    Orchestration RAG → LLM → garde-fous → publier/revue
+    theme.py         Classification de thème par LLM (liste fermée, repli heuristique)
     review_queue.py  File de revue humaine (§4.6)
   ingestion/         Alimentation depuis les sources officielles (§5)
     assemblee.py     Open data AN : download + parse_scrutin (pur, nominatif inclus) → ScrutinParse
@@ -169,9 +170,21 @@ tests/               Tests API + garde-fous + génération + ingestion (+ repo p
 **Exposé des motifs — bloc attribué (en place)**
 - Récupéré du PDF officiel du texte déposé (`textes_an.py`), affiché comme un bloc
   **cité et attribué à l'auteur** — jamais fondu dans le résumé neutre (§4.3).
-  Option (a) : contenu non neutre isolé. Option (b) différée : quand un LLM sera
-  branché, l'exposé servira de **contexte** pour un « que change le texte » neutre
-  passant les garde-fous — jamais affiché tel quel.
+  Option (a) : contenu non neutre isolé. Option (b) différée : quand un LLM assez
+  fiable sera dispo, l'exposé servira de **contexte** pour un « que change le
+  texte » neutre passant les garde-fous — jamais affiché tel quel.
+
+**Classification de thème par LLM local — Ollama (en place)**
+- `app/ai/theme.py` : à l'ingestion, les dossiers que l'heuristique laisse en
+  « Autre » sont soumis à un LLM local (Ollama/Mistral) qui choisit un thème dans
+  la **liste fermée**. Tâche à **faible risque éditorial** (une étiquette de
+  rangement, pas de prose) : toute sortie hors-liste ou verbeuse est **rejetée**
+  (repli « Autre »), et le badge du dossier n'est jamais un jugement. Actif via
+  `LLM_PROVIDER=ollama` (`.env`) ; Ollama éteint → repli silencieux sur
+  l'heuristique. **On ne génère PAS de résumé neutre par LLM** : un 7B local
+  distord les faits (proposition→projet, chiffres en lettres) sans que les
+  garde-fous lexicaux le voient — le gabarit déterministe reste seul maître du
+  résumé.
 
 **Stubs à interface stable (Phase 2)**
 - Légifrance/PISTE : **texte consolidé** des dossiers (ce que la loi change dans

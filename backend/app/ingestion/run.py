@@ -11,6 +11,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 
+from app.ai.llm import get_llm_client
+from app.config import settings
 from app.db.session import init_models, make_engine, make_session_factory
 from app.ingestion.assemblee import AssembleeOpenDataClient
 from app.ingestion.sync import SyncJob
@@ -19,18 +21,24 @@ from app.ingestion.sync import SyncJob
 async def _main(limit: int | None, legislature: int) -> None:
     engine = make_engine()
     await init_models(engine)
+    # LLM optionnel (classification de thème) : actif seulement si configuré
+    # (LLM_PROVIDER=ollama). En mode « mock », on reste sur l'heuristique.
+    llm = get_llm_client() if settings.llm_provider != "mock" else None
     job = SyncJob(
         make_session_factory(engine),
         client=AssembleeOpenDataClient(legislature=legislature),
+        llm=llm,
     )
-    print(f"Ingestion (législature {legislature}, limit={limit})…")
+    llm_info = f"LLM={settings.llm_provider}:{settings.llm_model}" if llm else "LLM=off"
+    print(f"Ingestion (législature {legislature}, limit={limit}, {llm_info})…")
     report = await job.run(limit=limit)
     await engine.dispose()
 
     print(
         f"Terminé : {report.dossiers_upserts} dossiers "
         f"({report.scrutins_vus} scrutins vus), {report.groupes} groupes, "
-        f"{report.exposes_recuperes} exposés des motifs récupérés."
+        f"{report.exposes_recuperes} exposés des motifs récupérés, "
+        f"{report.themes_reclasses} thèmes reclassés."
     )
     if report.anomalies:
         print(f"⚠ {len(report.anomalies)} anomalie(s) de cohérence (non bloquantes) :")

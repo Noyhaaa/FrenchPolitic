@@ -124,9 +124,16 @@ du texte) récupéré du **PDF officiel du texte déposé** (`app/ingestion/text
 et stocké dans `Dossier.expose_motifs` : contenu **non neutre** (point de vue de
 l'auteur, §4.3), affiché en **bloc cité et attribué** (`ExposeMotifsCard`), jamais
 fondu dans le résumé neutre. Pas besoin de Légifrance pour ça (option a ; la
-neutralisation par LLM — option b — viendra avec le LLM). Reste vide/non comblé
-(§2.5) la liste des **amendements enrichis** (texte complet, exposé sommaire —
-Phase 2 Légifrance). Détails dans `backend/README.md`.
+neutralisation par LLM — option b — viendra avec un LLM assez fiable). **LLM local
+(Ollama/Mistral) branché sur une seule tâche à faible risque : la classification
+de thème** (`app/ai/theme.py`) — les dossiers « Autre » de l'heuristique reçoivent
+un thème choisi dans la **liste fermée**, sortie hors-liste/verbeuse rejetée
+(repli). ⚠️ On **ne génère PAS** de résumé/prose neutre par LLM : un 7B local
+distord les faits (proposition→projet, chiffres en lettres) sans que les
+garde-fous lexicaux le voient — le **gabarit déterministe reste seul maître du
+résumé**. Reste vide/non comblé (§2.5) la liste des **amendements enrichis**
+(texte complet, exposé sommaire — Phase 2 Légifrance). Détails dans
+`backend/README.md`.
 
 ## Stack & commandes
 
@@ -260,9 +267,9 @@ camelCase des schémas Pydantic backend, à répercuter des deux côtés).
   dossiers (ce que la loi change dans le code — l'**exposé des motifs** est déjà
   couvert via le PDF AN, cf. `textes_an.py`) ; **métadonnées d'amendement** (texte
   complet, exposé sommaire — aujourd'hui l'amendement se résume à l'objet du
-  scrutin, son numéro/auteur extraits de ce libellé, et son sort) ; classification
-  de thème plus fine (beaucoup de dossiers ressortent en « Autre ») ; planification
-  du job de synchro (plusieurs fois/jour).
+  scrutin, son numéro/auteur extraits de ce libellé, et son sort) ; planification
+  du job de synchro (plusieurs fois/jour). *(La classification de thème est déjà
+  affinée par un LLM local — cf. ci-dessous.)*
 - **V1.1** : fiche député (lecture seule), filtres de recherche, partage.
 - **V2** : assistant IA en questions pré-cadrées.
 
