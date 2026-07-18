@@ -57,7 +57,13 @@ def url_page_texte(uid: str) -> str | None:
     if not m:
         return None
     leg, num = m.group(1), m.group(2)
-    return f"https://www.assemblee-nationale.fr/dyn/{leg}/textes/l{leg}b{num}_{suffixe}"
+    # Le site AN garde les zéros de tête (4 chiffres) : « l17b0369_… » répond,
+    # « l17b369_… » renvoie 404 (vérifié — c'était la 1re cause d'exposés
+    # manquants).
+    return (
+        f"https://www.assemblee-nationale.fr/dyn/{leg}/textes/"
+        f"l{leg}b{num.zfill(4)}_{suffixe}"
+    )
 
 
 def decouper_expose(texte: str, max_chars: int = 4000) -> str | None:
@@ -147,3 +153,37 @@ def construire_index_textes(
             continue
         par_ref[ref].add(uid)
     return {ref: sorted(uids, key=_numero_uid) for ref, uids in par_ref.items()}
+
+
+# Numéro de distribution AN dans un uid de document : dépôts (« …L17B0525 »)
+# et textes de commission (« …L17BTC2866 ») partagent la même série — celle
+# que cite le compte rendu des débats (« (n° 525) »). Les textes adoptés
+# (« …BTA… », « …TAP… ») ont leur propre série : exclus (collision garantie).
+_RE_NUMERO_DOC = re.compile(r"L(\d+)B(?:TC)?0*(\d+)$")
+
+
+def construire_index_numeros(
+    documents: list[dict], legislature: int
+) -> dict[str, set[int]]:
+    """Table `dossierRef → numéros de distribution AN de ses documents`.
+
+    Sert à relier un débat en séance (dont le titre cite « (n° X) ») à son
+    dossier de façon certaine, à travers les renumérotations de la navette
+    (chaque lecture/dépôt a son numéro, tous rattachés au même dossierRef).
+    Un numéro porté par plusieurs dossiers (donnée sale) est écarté.
+    """
+    prefixe_ref = f"DLR5L{legislature}"
+    par_numero: dict[int, set[str]] = defaultdict(set)
+    for brut in documents:
+        doc = brut.get("document") or brut
+        ref = doc.get("dossierRef") or ""
+        if not ref.startswith(prefixe_ref):
+            continue
+        m = _RE_NUMERO_DOC.search(doc.get("uid") or "")
+        if m and int(m.group(1)) == legislature:
+            par_numero[int(m.group(2))].add(ref)
+    par_ref: dict[str, set[int]] = defaultdict(set)
+    for numero, refs in par_numero.items():
+        if len(refs) == 1:
+            par_ref[next(iter(refs))].add(numero)
+    return dict(par_ref)

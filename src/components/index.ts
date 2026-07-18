@@ -15,5 +15,6 @@ export type { LegendItem } from './Legend';
 export { AiNotice } from './AiNotice';
 export { AmendementRow } from './AmendementRow';
 export { ExposeMotifsCard } from './ExposeMotifsCard';
+export { QuestionsCard } from './QuestionsCard';
 export { BrandHeader } from './BrandHeader';
 export { LoadingView, ErrorView, EmptyView, OfflineBanner } from './StateViews';

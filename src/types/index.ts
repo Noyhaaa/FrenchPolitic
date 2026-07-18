@@ -95,6 +95,39 @@ export interface ChangementTexte {
 }
 
 /**
+ * La position d'un groupe dans le débat : son sens de vote (factuel, issu du
+ * scrutin) et l'argument qu'il a lui-même donné en explication de vote (§7.4).
+ * `argument` est une paraphrase courte et neutre de ses propres mots (validée
+ * côté backend) ; `sens` vient du scrutin, jamais d'une interprétation.
+ */
+export interface ArgumentGroupe {
+  groupe: string;
+  sens: PositionVote;
+  argument: string;
+}
+
+/**
+ * Les 4 questions citoyennes de la fiche dossier (§2.2 : comprendre en 30 s).
+ *
+ * Chaque réponse est optionnelle : absente = « information non disponible »
+ * (§2.5, jamais de comblement).
+ * - `resultat` est composé de façon déterministe depuis le vote décisif.
+ * - `pourquoi` / `changement` viennent de l'exposé des motifs (validés par des
+ *   contrôles déterministes côté backend). `changement` commence toujours par
+ *   « Selon l'auteur du texte » : point de vue du déposant, pas un fait (§4.3).
+ * - `desaccord` est la juxtaposition des positions que les groupes formulent
+ *   eux-mêmes en explication de vote ; `desaccordSource` renvoie au compte rendu
+ *   officiel (§7.5). Vide tant que la séance n'est pas reliée au dossier (§2.5).
+ */
+export interface QuestionsCitoyennes {
+  pourquoi?: string;
+  desaccord?: ArgumentGroupe[];
+  desaccordSource?: SourceOfficielle;
+  resultat?: string;
+  changement?: string;
+}
+
+/**
  * Résumé neutre du texte, généré et ancré aux sources (§4).
  * `champsNonDocumentes` liste les champs non renseignés par les sources
  * (règle d'or §2.5 : « information non disponible », jamais de supposition).
@@ -102,6 +135,7 @@ export interface ChangementTexte {
 export interface ResumeScrutin {
   titreClair: string;
   resume: PhraseSourcee[];
+  questions?: QuestionsCitoyennes;
   contexte?: string;
   objectif?: string;
   historique?: string;

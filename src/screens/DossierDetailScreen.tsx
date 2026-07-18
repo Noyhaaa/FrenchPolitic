@@ -15,6 +15,7 @@ import {
   AiNotice,
   AmendementRow,
   ExposeMotifsCard,
+  QuestionsCard,
   ErrorView,
   LoadingView,
   OfflineBanner,
@@ -221,7 +222,12 @@ export function DossierDetailScreen() {
           </View>
         ) : null}
 
-        {/* 2. Résumé neutre (pill « Résumé IA · neutre » comme la maquette).
+        {/* 2. Le vote en 4 questions — l'entrée de compréhension (§2.2) :
+            pourquoi / désaccord / résultat / changement, en langage simple.
+            Réponse absente = « information non disponible » (§2.5). */}
+        {resume.questions ? <QuestionsCard questions={resume.questions} /> : null}
+
+        {/* 2bis. Résumé neutre (pill « Résumé IA · neutre » comme la maquette).
             Si le résumé n'est pas encore généré, on ne comble pas (§2.5) :
             placeholder explicite renvoyant vers les sources officielles. */}
         <SectionCard>
@@ -248,7 +254,7 @@ export function DossierDetailScreen() {
           )}
         </SectionCard>
 
-        {/* 2bis. Exposé des motifs — le « pourquoi » selon l'AUTEUR du texte.
+        {/* 2ter. Exposé des motifs — le « pourquoi » selon l'AUTEUR du texte.
             Bloc distinct et attribué (contenu non neutre §4.3), placé après le
             résumé neutre. Absent tant que le PDF officiel n'a pas été récupéré
             (§2.5). */}

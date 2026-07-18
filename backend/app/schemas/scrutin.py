@@ -87,11 +87,51 @@ class PhaseScrutin(CamelModel):
     statut: StatutScrutin
 
 
+class ArgumentGroupe(CamelModel):
+    """La position d'un groupe dans le débat : son sens de vote (factuel, issu
+    du scrutin) et l'argument qu'il a lui-même donné (§7.4).
+
+    `argument` est une paraphrase courte et neutre de l'**explication de vote**
+    du groupe (ses propres mots au compte rendu), validée par des contrôles
+    déterministes. `sens` vient du **scrutin** (le vote enregistré), jamais du
+    LLM : le « pour/contre » n'est donc pas une interprétation.
+    """
+
+    groupe: str  # nom complet du groupe (pas d'abréviation jargon, §8)
+    sens: PositionVote
+    argument: str
+
+
+class QuestionsCitoyennes(CamelModel):
+    """Les 4 questions citoyennes de la fiche dossier (§2.2 : comprendre en 30 s).
+
+    Chaque réponse est optionnelle : absente = « information non disponible »
+    (§2.5, jamais de comblement).
+    - `resultat` est composé de façon **déterministe** depuis le vote décisif.
+    - `pourquoi` et `changement` sont générés par LLM depuis l'**exposé des
+      motifs**, puis validés par des contrôles déterministes (chiffres, nature
+      du texte, lexique, attribution) — repli sur None en cas d'échec.
+      `changement` commence toujours par « Selon l'auteur du texte » : c'est le
+      point de vue du déposant, jamais un fait neutre (§4.3).
+    - `desaccord` est la **juxtaposition des positions que les groupes formulent
+      eux-mêmes** en explication de vote (jamais une synthèse éditoriale). Vide
+      tant que le compte rendu de la séance n'est pas relié au dossier (§2.5).
+      `desaccord_source` renvoie au compte rendu officiel (réversibilité §7.5).
+    """
+
+    pourquoi: str | None = None
+    desaccord: list[ArgumentGroupe] | None = None
+    desaccord_source: SourceOfficielle | None = None
+    resultat: str | None = None
+    changement: str | None = None
+
+
 class ResumeScrutin(CamelModel):
     """Résumé neutre du texte (au niveau du dossier)."""
 
     titre_clair: str
     resume: list[PhraseSourcee]
+    questions: QuestionsCitoyennes | None = None
     contexte: str | None = None
     objectif: str | None = None
     historique: str | None = None

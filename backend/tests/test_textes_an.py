@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from app.ingestion.textes_an import (
+    construire_index_numeros,
     construire_index_textes,
     decouper_expose,
     url_page_texte,
@@ -17,10 +18,11 @@ _TEXTE = (
 )
 
 
-def test_url_page_texte_proposition_retire_les_zeros():
+def test_url_page_texte_garde_les_zeros_de_tete():
+    # Le site AN pagine sur 4 chiffres : « l17b0647 » répond, « l17b647 » → 404.
     assert (
         url_page_texte("PIONANR5L17B0647")
-        == "https://www.assemblee-nationale.fr/dyn/17/textes/l17b647_proposition-loi"
+        == "https://www.assemblee-nationale.fr/dyn/17/textes/l17b0647_proposition-loi"
     )
 
 
@@ -112,4 +114,35 @@ def test_index_textes_ne_garde_que_les_textes_deposes_an():
     # Un seul dossier retenu, dépôt initial en tête (tri par numéro croissant).
     assert index == {
         "DLR5L17N100": ["PIONANR5L17B1337", "PIONANR5L17B1400"]
+    }
+
+
+def test_index_numeros_tous_documents_an_du_dossier():
+    docs = [
+        {"document": {"dossierRef": "DLR5L17N100", "uid": "PIONANR5L17B0525"}},
+        # Texte de commission : même série de numérotation que les dépôts.
+        {"document": {"dossierRef": "DLR5L17N100", "uid": "PIONANR5L17BTC0611"}},
+        # Rapport : numéroté dans la même série, rattaché au dossier.
+        {"document": {"dossierRef": "DLR5L17N100", "uid": "RAPPANR5L17B0598"}},
+        # Texte adopté (série « TA » distincte) : exclu.
+        {"document": {"dossierRef": "DLR5L17N100", "uid": "PIONANR5L17BTA0163"}},
+        # Texte du Sénat (numérotation Sénat) : exclu.
+        {"document": {"dossierRef": "DLR5L17N100", "uid": "PIONSNR5S459B0143"}},
+        # Autre législature : exclue.
+        {"document": {"dossierRef": "DLR5L16N300", "uid": "PIONANR5L16B0777"}},
+    ]
+    assert construire_index_numeros(docs, legislature=17) == {
+        "DLR5L17N100": {525, 611, 598}
+    }
+
+
+def test_index_numeros_ecarte_les_numeros_ambigus():
+    docs = [
+        {"document": {"dossierRef": "DLR5L17N100", "uid": "PIONANR5L17B0525"}},
+        {"document": {"dossierRef": "DLR5L17N200", "uid": "RAPPANR5L17B0525"}},
+        {"document": {"dossierRef": "DLR5L17N200", "uid": "PIONANR5L17B0600"}},
+    ]
+    # 525 pointe deux dossiers (donnée sale) → écarté ; 600 conservé.
+    assert construire_index_numeros(docs, legislature=17) == {
+        "DLR5L17N200": {600}
     }

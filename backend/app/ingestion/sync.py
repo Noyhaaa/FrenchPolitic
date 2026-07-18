@@ -21,9 +21,11 @@ from app.ingestion.assemblee import (
     dossier_source,
     parse_scrutin,
 )
+from app.ingestion.debats import IndexDebats, url_compte_rendu
 from app.ingestion.dossiers_legislatifs import construire_reconciliation
 from app.ingestion.textes_an import (
     construire_expose,
+    construire_index_numeros,
     construire_index_textes,
     url_page_texte,
 )
@@ -36,6 +38,7 @@ from app.ingestion.normalize import (
     numero_amendement_parent,
 )
 from app.ingestion.organes import (
+    GroupInfo,
     GroupResolver,
     build_acteurs_from_amo,
     build_resolver_from_organes,
@@ -43,11 +46,13 @@ from app.ingestion.organes import (
 from app.ai.faits import construire_faits
 from app.ai.generation import generer_resume
 from app.ai.llm import LLMClient
+from app.ai.questions import generer_desaccord, generer_questions
 from app.ai.theme import classifier_theme
 from app.schemas import (
     Amendement,
     Dossier,
     MiseAJourDossier,
+    QuestionsCitoyennes,
     Scrutin,
     ScrutinResume,
     SourceOfficielle,
@@ -66,7 +71,14 @@ class SyncReport:
     dossiers_upserts: int = 0
     exposes_recuperes: int = 0
     themes_reclasses: int = 0
+    questions_generees: int = 0
+    desaccords_generes: int = 0
     groupes: int = 0
+    # LLM configuré mais injoignable au démarrage → run sans LLM (visible).
+    llm_indisponible: bool = False
+    # Appels LLM en échec définitif malgré les retries (sinon un échec réseau
+    # est indistinguable d'une réponse rejetée — vécu : 48 dossiers sans Q2).
+    llm_echecs: int = 0
     anomalies: list[str] = field(default_factory=list)
     finished_at: datetime | None = None
 
@@ -88,6 +100,15 @@ def controles_coherence(scrutin: Scrutin) -> list[str]:
                 f"{scrutin.id}: somme {champ} groupes={somme} ≠ global={total}"
             )
     return anomalies
+
+
+def _vote_ensemble(votes_texte: list[Scrutin]) -> Scrutin | None:
+    """Le vote sur l'ensemble du texte (celui que précèdent les explications de
+    vote), sinon None. Sert à relier le dossier au débat de la séance."""
+    for s in votes_texte:
+        if "ensemble" in fold(s.objet):
+            return s
+    return None
 
 
 def _dedupe_sources(sources: list[SourceOfficielle]) -> list[SourceOfficielle]:
@@ -361,9 +382,31 @@ class SyncJob:
     ) -> None:
         self._sf = session_factory
         self._client = client or AssembleeOpenDataClient()
-        # LLM optionnel : aujourd'hui la classification de thème (tâche à faible
-        # risque). None (défaut) → l'heuristique de mots-clés fait foi.
+        # LLM optionnel : classification de thème + questions citoyennes (dont le
+        # « désaccord » depuis les débats). None (défaut) → replis (heuristique,
+        # « information non disponible ») et pas de téléchargement des débats.
         self._llm = llm
+        # Renseignés en début de run() : index des débats + carte abréviation de
+        # groupe → groupe (pour joindre explication de vote et position de vote).
+        self._index_debats: IndexDebats | None = None
+        # dossierRef → numéros de distribution AN de ses documents (liaison
+        # certaine débat ↔ dossier, à travers la navette).
+        self._numeros_par_ref: dict[str, set[int]] = {}
+        self._groupes_par_abbrev: dict[str, GroupInfo] = {}
+
+    # Abréviations de groupe divergentes entre le compte rendu et l'annuaire AMO
+    # (fold appliqué de part et d'autre). À compléter si de nouveaux cas surgissent.
+    _ALIAS_ABBREV = {"udr": "uddplr"}
+
+    def _indexer_groupes(self, resolver: GroupResolver) -> None:
+        self._groupes_par_abbrev = {
+            fold(g.abrev): g for g in resolver.all() if g.abrev and g.abrev != "?"
+        }
+
+    def _groupe_par_abbrev(self, abbrev: str) -> GroupInfo | None:
+        cle = fold(abbrev)
+        cle = self._ALIAS_ABBREV.get(cle, cle)
+        return self._groupes_par_abbrev.get(cle)
 
     async def _enrichir_expose(
         self,
@@ -411,6 +454,105 @@ class SyncJob:
             dossier.theme = nouveau
             report.themes_reclasses += 1
 
+    async def _questions_en_base(
+        self, session: AsyncSession, dossier_id: str
+    ) -> QuestionsCitoyennes | None:
+        """Les questions déjà persistées pour ce dossier, s'il y en a."""
+        row = await session.get(DossierRow, dossier_id)
+        if row is None:
+            return None
+        brut = ((row.payload or {}).get("resume") or {}).get("questions")
+        return QuestionsCitoyennes.model_validate(brut) if brut else None
+
+    async def _construire_desaccord(
+        self,
+        dossier: Dossier,
+        dossier_ref: str | None,
+        votes_texte: list[Scrutin],
+        questions: QuestionsCitoyennes,
+    ) -> bool:
+        """Renseigne Q2 (« principal désaccord ») depuis les débats de la séance.
+
+        Joint la section « Explications de vote » du compte rendu (relié au vote
+        sur l'ensemble par numéro de texte, sinon date + titre) aux positions de
+        vote du scrutin : le SENS (pour/contre) vient du scrutin, l'ARGUMENT du
+        groupe est paraphrasé par le LLM et validé. Renvoie True si au moins un
+        argument a été produit."""
+        if self._llm is None or self._index_debats is None:
+            return False
+        ensemble = _vote_ensemble(votes_texte)
+        if ensemble is None:
+            return False
+        debat = self._index_debats.pour_vote(
+            ensemble.date,
+            ensemble.objet,
+            self._numeros_par_ref.get(dossier_ref or ""),
+        )
+        if debat is None:
+            return False
+        positions = {g.groupe_id: g for g in ensemble.positions_groupes}
+        interventions: list[tuple[str, object, str]] = []
+        for exp in debat.explications:
+            info = self._groupe_par_abbrev(exp.groupe)
+            if info is None:
+                continue
+            pos = positions.get(info.id)
+            if pos is None:  # groupe sans position enregistrée sur ce vote
+                continue
+            interventions.append((info.nom, pos.position_majoritaire, exp.texte))
+        arguments = await generer_desaccord(interventions, self._llm)
+        if not arguments:
+            return False
+        questions.desaccord = arguments
+        questions.desaccord_source = SourceOfficielle(
+            type="texte",
+            libelle="Compte rendu de la séance (Assemblée nationale)",
+            url=url_compte_rendu(self._client.legislature, debat.seance_uid),
+        )
+        return True
+
+    async def _generer_questions(
+        self,
+        session: AsyncSession,
+        dossier: Dossier,
+        dossier_ref: str | None,
+        votes_texte: list[Scrutin],
+        report: SyncReport,
+    ) -> None:
+        """Renseigne les 4 questions citoyennes du résumé (§2.2).
+
+        Q3 (résultat) est recomposée à chaque run — déterministe, elle suit les
+        nouveaux votes. Q1/Q4 (LLM depuis l'exposé) et Q2 (LLM depuis les débats)
+        déjà en base sont réutilisées : on ne rappelle pas le modèle pour rien.
+        """
+        prev = await self._questions_en_base(session, dossier.id)
+        deja_completes = prev is not None and prev.pourquoi and prev.changement
+        expose = dossier.expose_motifs.texte if dossier.expose_motifs else None
+        questions = await generer_questions(
+            dossier.titre_officiel,
+            dossier.scrutins,
+            expose,
+            None if deja_completes else self._llm,
+        )
+        if questions.pourquoi or questions.changement:
+            report.questions_generees += 1
+
+        # Q2 « désaccord » : on la (re)génère si elle n'est pas déjà en base.
+        if prev is not None and prev.desaccord:
+            questions.desaccord = prev.desaccord
+            questions.desaccord_source = prev.desaccord_source
+        elif await self._construire_desaccord(
+            dossier, dossier_ref, votes_texte, questions
+        ):
+            report.desaccords_generes += 1
+
+        if prev is not None:
+            # Une réponse validée en base ne se perd pas sur un run sans LLM
+            # (ou dont la sortie a été rejetée par les contrôles).
+            questions.pourquoi = questions.pourquoi or prev.pourquoi
+            questions.changement = questions.changement or prev.changement
+        dossier.resume.questions = questions
+
     async def run(self, limit: int | None = None) -> SyncReport:
         report = SyncReport(started_at=datetime.now(timezone.utc))
 
@@ -418,9 +560,30 @@ class SyncJob:
         organes, acteurs_bruts = await self._client.download_amo()
         resolver = build_resolver_from_organes(organes)
         acteurs = build_acteurs_from_amo(acteurs_bruts)
+        self._indexer_groupes(resolver)
         async with self._sf() as session:
             report.groupes = await _upsert_groupes(session, resolver)
             await session.commit()
+
+        # 1ter) LLM : health-check AVANT le long run. Un serveur configuré mais
+        #       injoignable (PC distant éteint…) rendrait chaque appel muet :
+        #       autant courir sans LLM et le dire, que semer des trous invisibles.
+        if self._llm is not None:
+            disponible = getattr(self._llm, "disponible", None)
+            if disponible is not None and not await disponible():
+                report.llm_indisponible = True
+                report.anomalies.append(
+                    "LLM configuré mais injoignable : run sans LLM "
+                    "(thèmes/questions non générés, regénérés au prochain run)"
+                )
+                self._llm = None
+
+        #       Débats en séance (comptes rendus) : explications de vote par
+        #       groupe, pour le « principal désaccord » (§2.2). Archive lourde
+        #       (~55 Mo) et utile seulement au LLM → téléchargée si LLM présent.
+        if self._llm is not None:
+            xmls = await self._client.download_debats()
+            self._index_debats = IndexDebats.depuis_xmls(xmls)
 
         # 1bis) Dossiers législatifs : titres officiels + réconciliation des
         #       scrutins sans dossierRef vers leur vrai dossier (§5.1).
@@ -431,6 +594,11 @@ class SyncJob:
         # Index dossierRef → texte AN déposé, pour récupérer l'exposé des motifs
         # (PDF officiel) au niveau du dossier — bloc attribué, option (a).
         index_textes = construire_index_textes(documents, self._client.legislature)
+        # Index dossierRef → numéros de documents, pour la liaison certaine
+        # débat ↔ dossier (le CR cite « (n° X) »).
+        self._numeros_par_ref = construire_index_numeros(
+            documents, self._client.legislature
+        )
 
         # 2) Scrutins → parsing (avec nominatif) → regroupement par dossier.
         bruts = await self._client.download_scrutins(limit=limit)
@@ -450,10 +618,18 @@ class SyncJob:
         async with self._sf() as session:
             for parses in par_dossier.values():
                 dossier = build_dossier(parses)
+                # Scrutins complets sur le texte (positions par groupe) — pour
+                # joindre les explications de vote du débat à la position votée.
+                votes_texte = [
+                    p.scrutin for p in parses if not est_amendement(p.scrutin.objet)
+                ]
                 await self._enrichir_expose(
                     dossier, parses[0].dossier_ref, index_textes, report
                 )
                 await self._reclasser_theme(dossier, report)
+                await self._generer_questions(
+                    session, dossier, parses[0].dossier_ref, votes_texte, report
+                )
                 dossier = await _upsert_dossier(session, dossier)
                 # Le scrutin d'un amendement embarque ses sous-amendements :
                 # la fiche vote de l'amendement les liste (dossier fusionné =
@@ -471,6 +647,11 @@ class SyncJob:
             await session.commit()
 
         # 4) Journal.
+        report.llm_echecs = getattr(self._llm, "echecs", 0)
+        if report.llm_echecs:
+            report.anomalies.append(
+                f"{report.llm_echecs} appel(s) LLM en échec malgré les retries"
+            )
         report.finished_at = datetime.now(timezone.utc)
         async with self._sf() as session:
             session.add(

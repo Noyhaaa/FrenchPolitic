@@ -1,6 +1,7 @@
 from app.schemas.scrutin import (
     Accueil,
     Amendement,
+    ArgumentGroupe,
     ChangementTexte,
     Dossier,
     DossierListItem,
@@ -11,6 +12,7 @@ from app.schemas.scrutin import (
     PositionGroupe,
     RecapMensuel,
     ResultatGlobal,
+    QuestionsCitoyennes,
     ResumeScrutin,
     Scrutin,
     ScrutinResume,
@@ -21,6 +23,7 @@ from app.schemas.scrutin import (
 __all__ = [
     "Accueil",
     "Amendement",
+    "ArgumentGroupe",
     "ChangementTexte",
     "Dossier",
     "DossierListItem",
@@ -31,6 +34,7 @@ __all__ = [
     "PositionGroupe",
     "RecapMensuel",
     "ResultatGlobal",
+    "QuestionsCitoyennes",
     "ResumeScrutin",
     "Scrutin",
     "ScrutinResume",

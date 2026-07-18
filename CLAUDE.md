@@ -125,13 +125,32 @@ et stocké dans `Dossier.expose_motifs` : contenu **non neutre** (point de vue d
 l'auteur, §4.3), affiché en **bloc cité et attribué** (`ExposeMotifsCard`), jamais
 fondu dans le résumé neutre. Pas besoin de Légifrance pour ça (option a ; la
 neutralisation par LLM — option b — viendra avec un LLM assez fiable). **LLM local
-(Ollama/Mistral) branché sur une seule tâche à faible risque : la classification
-de thème** (`app/ai/theme.py`) — les dossiers « Autre » de l'heuristique reçoivent
-un thème choisi dans la **liste fermée**, sortie hors-liste/verbeuse rejetée
-(repli). ⚠️ On **ne génère PAS** de résumé/prose neutre par LLM : un 7B local
-distord les faits (proposition→projet, chiffres en lettres) sans que les
-garde-fous lexicaux le voient — le **gabarit déterministe reste seul maître du
-résumé**. Reste vide/non comblé (§2.5) la liste des **amendements enrichis**
+(Ollama, `qwen3:14b`) branché sur deux tâches vérifiables** : (1) la
+**classification de thème** (`app/ai/theme.py`) — les dossiers « Autre » de
+l'heuristique reçoivent un thème choisi dans la **liste fermée**, sortie
+hors-liste/verbeuse rejetée (repli) ; (2) les **4 questions citoyennes**
+(`app/ai/questions.py`, servies dans `resume.questions`, affichées par
+`QuestionsCard` en tête de fiche dossier) : « Pourquoi ont-ils débattu ? » (Q1)
+et « Qu'est-ce que ça change ? » (Q4, toujours préfixée « Selon l'auteur du
+texte », au conditionnel) sont générées **depuis l'exposé des motifs seul** puis
+passées à des **contrôles déterministes** (`valider_reponse` : chiffres présents
+dans la source, nature du texte non inversée, lexique, caractères hors français,
+attribution) — rejet → « information non disponible » ; le **résultat** (Q3) est
+composé **déterministiquement** depuis le vote décisif ; le **désaccord** (Q2)
+vient des **comptes rendus des débats** (archive « SyceronBrut »,
+`app/ingestion/debats.py`) : la section **« Explications de vote »** (chaque
+groupe explique lui-même sa position) est reliée au dossier par le **numéro de
+texte** cité au CR (joint aux numéros de tous les documents du dossier — robuste
+à la navette et au vote solennel à J+n), sinon par **date de séance +
+recoupement du titre** avec le vote sur l'ensemble — un candidat unique le
+jour J ne suffit **jamais** sans recoupement (ambiguïtés écartées, §2.5),
+puis chaque explication est **paraphrasée en une phrase, validée et attribuée à
+son groupe** (§7.4) — le **sens pour/contre vient du scrutin**, jamais du LLM, et
+jamais de synthèse éditoriale (« qui a raison »). ⚠️ On **ne génère toujours PAS** le
+résumé/prose neutre par LLM (mistral 7B distordait les faits invisiblement ; seul
+ce qui est attribuable à une source unique ET vérifiable déterministiquement
+passe par le modèle) — le **gabarit déterministe reste seul maître du résumé**.
+Reste vide/non comblé (§2.5) la liste des **amendements enrichis**
 (texte complet, exposé sommaire — Phase 2 Légifrance). Détails dans
 `backend/README.md`.
 

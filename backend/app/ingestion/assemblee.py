@@ -52,6 +52,12 @@ DOSSIERS_URL = (
     "https://data.assemblee-nationale.fr/static/openData/repository/"
     "{leg}/loi/dossiers_legislatifs/Dossiers_Legislatifs.json.zip"
 )
+# Comptes rendus des débats en séance (« SyceronBrut ») : un XML par séance.
+# Fournit les explications de vote par groupe (§ « principal désaccord »).
+DEBATS_URL = (
+    "https://data.assemblee-nationale.fr/static/openData/repository/"
+    "{leg}/vp/syceronbrut/syseron.xml.zip"
+)
 
 
 @dataclass
@@ -120,6 +126,20 @@ class AssembleeOpenDataClient:
             return resp.content
         except httpx.HTTPError:
             return None
+
+    async def download_debats(self) -> list[str]:
+        """Télécharge l'archive des comptes rendus de séance (XML bruts).
+
+        Renvoie le contenu XML de chaque compte rendu (un par séance). Best-effort
+        au niveau de l'appelant : l'archive est volumineuse (~55 Mo) mais ne sert
+        qu'à enrichir les dossiers d'un « principal désaccord » (§2.5)."""
+        zf = await self._download_zip(DEBATS_URL.format(leg=self.legislature))
+        out: list[str] = []
+        for name in zf.namelist():
+            if name.endswith(".xml"):
+                with zf.open(name) as f:
+                    out.append(f.read().decode("utf-8"))
+        return out
 
     async def download_amo(self) -> tuple[list[dict], list[dict]]:
         """Télécharge l'archive AMO une seule fois : (organes, acteurs).

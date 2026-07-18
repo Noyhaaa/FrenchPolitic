@@ -38,8 +38,14 @@ async def _main(limit: int | None, legislature: int) -> None:
         f"Terminé : {report.dossiers_upserts} dossiers "
         f"({report.scrutins_vus} scrutins vus), {report.groupes} groupes, "
         f"{report.exposes_recuperes} exposés des motifs récupérés, "
-        f"{report.themes_reclasses} thèmes reclassés."
+        f"{report.themes_reclasses} thèmes reclassés, "
+        f"{report.questions_generees} questions citoyennes générées, "
+        f"{report.desaccords_generes} désaccords (débats) reliés."
     )
+    if report.llm_indisponible:
+        print("⚠ LLM configuré mais injoignable : run SANS LLM (relancer quand il répond).")
+    if report.llm_echecs:
+        print(f"⚠ {report.llm_echecs} appel(s) LLM en échec malgré les retries.")
     if report.anomalies:
         print(f"⚠ {len(report.anomalies)} anomalie(s) de cohérence (non bloquantes) :")
         for a in report.anomalies[:10]:

@@ -63,8 +63,9 @@ L'archive sert **uniquement** à retrouver le `dossierRef` : ses titres (en
 minuscules, fragmentés) ne sont pas importés.
 **Exposé des motifs** (`app/ingestion/textes_an.py`) : l'archive ne porte pas le
 corps des textes (métadonnées seules), mais le **PDF du texte déposé** est
-public et son URL se **dérive de l'`uid`** du document (`…L17B1337` →
-`…/dyn/17/textes/l17b1337_proposition-loi.pdf`). On en extrait l'exposé des
+public et son URL se **dérive de l'`uid`** du document (`…L17B0369` →
+`…/dyn/17/textes/l17b0369_proposition-loi.pdf` — les **zéros de tête sur
+4 chiffres sont indispensables**, sans eux le site répond 404). On en extrait l'exposé des
 motifs (via `pypdf`) en essayant les textes déposés du **dépôt initial** au plus
 récent (l'exposé n'est que dans le dépôt initial ; les versions de navette ne
 l'ont pas). Contenu **non neutre** (point de vue de l'auteur, §4.3) : stocké dans
@@ -130,9 +131,11 @@ app/
     guardrails.py    Garde-fous : ancrage, lexique orienté, cohérence chiffres
     generation.py    Orchestration RAG → LLM → garde-fous → publier/revue
     theme.py         Classification de thème par LLM (liste fermée, repli heuristique)
+    questions.py     Les 4 questions citoyennes (Q3 déterministe · Q1/Q4 LLM validées)
     review_queue.py  File de revue humaine (§4.6)
   ingestion/         Alimentation depuis les sources officielles (§5)
     assemblee.py     Open data AN : download + parse_scrutin (pur, nominatif inclus) → ScrutinParse
+    debats.py        Comptes rendus (SyceronBrut) : explications de vote par groupe + liaison au vote
     textes_an.py     Exposé des motifs : uid → URL du PDF officiel → extraction (pypdf)
     organes.py       Résolution des groupes (AMO) + couleurs + annuaire des députés
     normalize.py     Thème (heuristique), positions, décomptes
@@ -176,15 +179,53 @@ tests/               Tests API + garde-fous + génération + ingestion (+ repo p
 
 **Classification de thème par LLM local — Ollama (en place)**
 - `app/ai/theme.py` : à l'ingestion, les dossiers que l'heuristique laisse en
-  « Autre » sont soumis à un LLM local (Ollama/Mistral) qui choisit un thème dans
+  « Autre » sont soumis à un LLM local (Ollama) qui choisit un thème dans
   la **liste fermée**. Tâche à **faible risque éditorial** (une étiquette de
   rangement, pas de prose) : toute sortie hors-liste ou verbeuse est **rejetée**
   (repli « Autre »), et le badge du dossier n'est jamais un jugement. Actif via
   `LLM_PROVIDER=ollama` (`.env`) ; Ollama éteint → repli silencieux sur
-  l'heuristique. **On ne génère PAS de résumé neutre par LLM** : un 7B local
-  distord les faits (proposition→projet, chiffres en lettres) sans que les
-  garde-fous lexicaux le voient — le gabarit déterministe reste seul maître du
-  résumé.
+  l'heuristique.
+
+**Les 4 questions citoyennes — qwen3 local, sorties validées (en place)**
+- `app/ai/questions.py`, rempli à l'ingestion dans `resume.questions` : «
+  Pourquoi les députés ont-ils débattu ? · Quel était le principal désaccord ? ·
+  Quel est le résultat du vote ? · Qu'est-ce que ça change concrètement ? » (§2.2).
+- **Résultat (Q3)** : composé de façon **déterministe** depuis le vote décisif
+  (recalculé à chaque run). **Désaccord (Q2)** : issu des **comptes rendus des
+  débats** (`debats.py`, archive « SyceronBrut ») — la section « Explications de
+  vote » (variantes « Explication de vote », « … communes » comprises), où
+  chaque groupe explique lui-même sa position, est reliée au dossier d'abord par
+  le **numéro de texte** cité au CR (« (n° 525) »), joint aux numéros de tous
+  les documents du dossier (`construire_index_numeros` — robuste aux
+  renumérotations de la navette, et au **vote solennel** tenu quelques jours
+  après le débat, fenêtre 14 j) ; à défaut par **date de séance + recoupement
+  du titre** (coefficient de recouvrement — labels courts du CR). Un candidat
+  unique le jour J **ne suffit jamais** sans recoupement : plusieurs textes
+  sont votés le même jour et l'archive ne capture pas toutes les séances
+  (leçon d'un mauvais rattachement constaté en réel) ; cas ambigus écartés,
+  §2.5. Chaque
+  explication est **paraphrasée en une phrase par le LLM et validée**
+  (`generer_desaccord` → `valider_reponse`), **attribuée à son groupe** (§7.4,
+  même gabarit pour tous) ; le **sens pour/contre vient du scrutin**, jamais du
+  LLM. Aucune synthèse éditoriale (« qui a raison ») : on juxtapose les positions
+  que les groupes formulent eux-mêmes. Source = le compte rendu officiel (§7.5).
+  **Pourquoi (Q1)** et **Changement (Q4)** : générés par
+  `qwen3:14b` **uniquement depuis l'exposé des motifs** (+ titre), puis soumis à
+  des **contrôles déterministes** (`valider_reponse`) : tout chiffre de la
+  réponse doit exister dans la source, nature du texte non inversée
+  (proposition↔projet), lexique évaluatif interdit, aucun caractère hors
+  français (fuite CJK vue en épreuve), longueur bornée, et Q4 obligatoirement
+  préfixée « Selon l'auteur du texte » (point de vue du déposant, §4.3, au
+  conditionnel). Rejet → réponse absente (§2.5), jamais publiée. Les réponses
+  validées sont **persistées et réutilisées** entre runs (pas de rappel du
+  modèle sur une source stable).
+- Pourquoi qwen3 et pas mistral : épreuves comparées (2026-07-18) — mistral 7B
+  changeait la nature du texte, convertissait les chiffres en lettres et glissait
+  du cadrage ; qwen3:14b (raisonnement coupé, température 0) a tenu « information
+  non disponible », l'attribution et les chiffres exacts. **On ne génère toujours
+  PAS le résumé neutre par LLM** : le gabarit déterministe reste seul maître du
+  résumé — seules des réponses **attribuables à une source unique et vérifiables
+  déterministiquement** passent par le modèle.
 
 **Stubs à interface stable (Phase 2)**
 - Légifrance/PISTE : **texte consolidé** des dossiers (ce que la loi change dans
