@@ -95,8 +95,10 @@ async), via `python -m app.ingestion.run`. Regroupement en cascade : `dossierRef
 officiel quand il existe ; sinon **réconciliation** — le titre cité dans l'objet
 du vote (« … de la proposition de loi visant à… ») est comparé aux titres
 officiels de l'archive **dossiers législatifs** (`app/ingestion/dossiers_legislatifs.py`,
-correspondance exacte, non ambiguë, même législature) pour retrouver le vrai
-`dossierRef` (et son lien officiel §7.5) ; sinon **texte de rattachement** →
+correspondance exacte **puis par signature** — fold sans espaces/ponctuation, qui
+rattrape la saleté de l'archive : apostrophes, fautes de frappe « afin de​garantir »,
+tirets — sans confondre ordinaire/organique ; non ambiguë, même législature) pour
+retrouver le vrai `dossierRef` (et son lien officiel §7.5) ; sinon **texte de rattachement** →
 dossier reconstitué à id stable `TXT-…` ; sinon singleton (motion de censure,
 déclaration — événements autonomes légitimes dans le fil). ~60 % des dossiers ont
 ainsi leur page officielle. On n'importe PAS les titres de l'archive (minuscules,

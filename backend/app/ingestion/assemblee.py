@@ -12,6 +12,7 @@ avec une confiance « faible » (règle d'or §2.5 : jamais de comblement).
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 import json
@@ -74,15 +75,37 @@ class ScrutinParse:
 
 
 class AssembleeOpenDataClient:
+    # Les archives volumineuses (scrutins, débats ~55 Mo) subissent parfois une
+    # coupure serveur en cours de transfert (« peer closed connection ») ou un
+    # ZIP tronqué. On réessaie du début plutôt que de laisser tomber tout le run.
+    _ZIP_TENTATIVES = 4
+    _ZIP_ATTENTES_S = (3.0, 8.0, 20.0)
+
     def __init__(self, legislature: int = 17, timeout: float = 120.0) -> None:
         self.legislature = legislature
         self._timeout = timeout
 
     async def _download_zip(self, url: str) -> zipfile.ZipFile:
-        async with httpx.AsyncClient(timeout=self._timeout, follow_redirects=True) as c:
-            resp = await c.get(url)
-            resp.raise_for_status()
-            return zipfile.ZipFile(io.BytesIO(resp.content))
+        """Télécharge un ZIP avec retries sur coupure réseau / archive tronquée.
+
+        Relève la dernière exception si toutes les tentatives échouent (à
+        l'appelant de décider si c'est fatal — les débats, best-effort, ne le
+        sont pas)."""
+        derniere: Exception | None = None
+        for tentative in range(self._ZIP_TENTATIVES):
+            try:
+                async with httpx.AsyncClient(
+                    timeout=self._timeout, follow_redirects=True
+                ) as c:
+                    resp = await c.get(url)
+                    resp.raise_for_status()
+                    return zipfile.ZipFile(io.BytesIO(resp.content))
+            except (httpx.HTTPError, zipfile.BadZipFile) as exc:
+                derniere = exc
+                if tentative < len(self._ZIP_ATTENTES_S):
+                    await asyncio.sleep(self._ZIP_ATTENTES_S[tentative])
+        assert derniere is not None
+        raise derniere
 
     async def download_scrutins(self, limit: int | None = None) -> list[dict]:
         """Télécharge l'archive des scrutins et renvoie les JSON bruts."""

@@ -43,6 +43,11 @@ async def _main(limit: int | None, legislature: int) -> None:
         f"{report.questions_generees} questions citoyennes générées, "
         f"{report.desaccords_generes} désaccords (débats) reliés."
     )
+    if report.dossiers_orphelins_supprimes:
+        print(
+            f"  {report.dossiers_orphelins_supprimes} dossier(s) orphelin(s) "
+            "supprimé(s) (votes migrés vers leur vrai dossier)."
+        )
     if report.llm_indisponible:
         print("⚠ LLM configuré mais injoignable : run SANS LLM (relancer quand il répond).")
     if report.llm_echecs:

@@ -8,9 +8,12 @@ Journalise chaque exécution (table sync_run) pour l'observabilité (§8).
 """
 from __future__ import annotations
 
+import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+import httpx
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -81,6 +84,9 @@ class SyncReport:
     themes_reclasses: int = 0
     questions_generees: int = 0
     desaccords_generes: int = 0
+    # Dossiers supprimés car vidés de leurs scrutins (ex. TXT- migrés vers un
+    # dossier officiel après amélioration de la réconciliation).
+    dossiers_orphelins_supprimes: int = 0
     groupes: int = 0
     # LLM configuré mais injoignable au démarrage → run sans LLM (visible).
     llm_indisponible: bool = False
@@ -621,9 +627,18 @@ class SyncJob:
         #       Débats en séance (comptes rendus) : explications de vote par
         #       groupe, pour le « principal désaccord » (§2.2). Archive lourde
         #       (~55 Mo) et utile seulement au LLM → téléchargée si LLM présent.
+        #       Best-effort (§2.5) : un échec de téléchargement (coupure sur ce
+        #       gros fichier) ne doit PAS tuer le run — les désaccords déjà en
+        #       base sont réutilisés, l'index reste simplement vide ce run-ci.
         if self._llm is not None:
-            xmls = await self._client.download_debats()
-            self._index_debats = IndexDebats.depuis_xmls(xmls)
+            try:
+                xmls = await self._client.download_debats()
+                self._index_debats = IndexDebats.depuis_xmls(xmls)
+            except (httpx.HTTPError, zipfile.BadZipFile) as exc:
+                report.anomalies.append(
+                    f"débats non téléchargés ({type(exc).__name__}) : "
+                    "désaccords non régénérés ce run (existants préservés)"
+                )
 
         # 1bis) Dossiers législatifs : titres officiels + réconciliation des
         #       scrutins sans dossierRef vers leur vrai dossier (§5.1).
@@ -684,6 +699,22 @@ class SyncJob:
                         p.scrutin.sous_amendements = sous_par_scrutin[p.scrutin.id]
                     await _upsert_scrutin(session, p.scrutin)
                 report.dossiers_upserts += 1
+            await session.commit()
+
+        # 3bis) Nettoyage des dossiers orphelins : un dossier dont plus aucun
+        #       scrutin ne dépend a été vidé par une migration (ex. un `TXT-`
+        #       reconstitué dont tous les votes ont rejoint leur vrai dossier
+        #       officiel après amélioration de la réconciliation). On le supprime
+        #       pour ne pas laisser un doublon fantôme dans le fil. Sûr : ne
+        #       touche jamais un dossier qui a encore des scrutins (§7.7).
+        async with self._sf() as session:
+            sous_requete = select(ScrutinRow.id).where(
+                ScrutinRow.dossier_id == DossierRow.id
+            )
+            resultat = await session.execute(
+                delete(DossierRow).where(~sous_requete.exists())
+            )
+            report.dossiers_orphelins_supprimes = resultat.rowcount or 0
             await session.commit()
 
         # 4) Journal.

@@ -54,8 +54,11 @@ upsert (idempotent) : les dossiers (liste compacte des votes) et le détail de
 chaque vote (table `scrutin`, avec les noms des votants). Regroupement en
 cascade : le `dossierRef` officiel quand il existe ; sinon **réconciliation** via
 l'archive *dossiers législatifs* (le titre cité dans l'objet, comparé aux titres
-officiels de la législature — correspondance exacte non ambiguë — retrouve le
-vrai `dossierRef` et son lien officiel) ; sinon le **texte de rattachement**
+officiels de la législature — **fold exact puis signature** : fold sans espaces ni
+ponctuation, tolérant aux apostrophes et fautes de frappe de l'archive (« afin
+de​garantir »), sans confondre ordinaire/organique ; non ambigu — retrouve le
+vrai `dossierRef` et son lien officiel ; +24 dossiers récupérés) ; sinon le
+**texte de rattachement**
 (dossier reconstitué `TXT-…`, mention de lecture ignorée) ; sinon un dossier
 singleton (motion de censure, déclaration…). Le fil n'expose ainsi que des
 textes — jamais un vote d'amendement isolé — et ~60 % ont leur page officielle.

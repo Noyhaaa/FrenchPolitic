@@ -14,9 +14,20 @@ d'ambiguïté (un titre → plusieurs dossiers), on s'abstient (§2.5).
 
 On n'importe PAS les titres de l'archive : ils sont en minuscules et truffés de
 variantes/fragments, moins propres que le libellé déjà porté par le scrutin.
+
+Deux niveaux de correspondance, du plus strict au plus tolérant :
+  1. **fold exact** (casse/accents) — la voie historique ;
+  2. **signature** — fold sans espaces ni ponctuation. Elle rattrape la saleté
+     de l'archive (apostrophe droite/courbe, fautes de frappe « afin de​garantir »
+     avec espace manquant, tirets…) sans jamais confondre deux textes réellement
+     différents : deux titres n'ont la même signature que s'ils ne diffèrent que
+     par des espaces/ponctuation. La distinction de nature (« organique »…) est
+     conservée (ce sont des mots, pas de la ponctuation). Le garde-fou
+     d'ambiguïté (un titre → un seul dossier) s'applique aux deux niveaux (§2.5).
 """
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -34,18 +45,34 @@ _DENOMINATIONS_TEXTE = frozenset(
 )
 
 
+# Signature d'un titre : fold, puis on ne garde que les caractères alphanumériques
+# (espaces, apostrophes, tirets, ponctuation retirés). Sous ce seuil de longueur,
+# une signature est trop courte pour être discriminante — on ne l'indexe pas.
+_SIGNATURE_MIN = 20
+
+
+def signature_titre(titre: str) -> str:
+    """Signature normalisée d'un titre (fold sans espaces ni ponctuation)."""
+    return re.sub(r"[^a-z0-9]", "", fold(titre))
+
+
 @dataclass(frozen=True)
 class Reconciliation:
-    """Table titre → dossierRef pour une législature (correspondance exacte)."""
+    """Table titre → dossierRef pour une législature (fold exact + signature)."""
 
     _ref_par_titre: dict[str, str]  # fold(titre) -> dossierRef (sans ambiguïté)
+    _ref_par_signature: dict[str, str]  # signature -> dossierRef (sans ambiguïté)
 
     def ref_pour_titre(self, titre: str | None) -> str | None:
-        """dossierRef d'un texte à partir de son titre, si correspondance
-        exacte et non ambiguë ; None sinon (on n'infère pas)."""
+        """dossierRef d'un texte à partir de son titre : fold exact d'abord,
+        puis signature (tolérante à la saleté de l'archive). None si aucune
+        correspondance non ambiguë (§2.5 : on n'infère pas)."""
         if not titre:
             return None
-        return self._ref_par_titre.get(fold(titre))
+        ref = self._ref_par_titre.get(fold(titre))
+        if ref is not None:
+            return ref
+        return self._ref_par_signature.get(signature_titre(titre))
 
     def __len__(self) -> int:
         return len(self._ref_par_titre)
@@ -60,6 +87,7 @@ def construire_reconciliation(
     par plusieurs dossiers est écarté (ambiguïté → on ne devine pas, §2.5)."""
     prefixe_ref = f"DLR5L{legislature}"
     refs_par_titre: dict[str, set[str]] = defaultdict(set)
+    refs_par_signature: dict[str, set[str]] = defaultdict(set)
 
     for brut in documents:
         doc = brut.get("document") or brut
@@ -69,12 +97,21 @@ def construire_reconciliation(
         if (doc.get("denominationStructurelle") or "") not in _DENOMINATIONS_TEXTE:
             continue
         titre = ((doc.get("titres") or {}).get("titrePrincipal") or "").strip()
-        if titre:
-            refs_par_titre[fold(titre)].add(ref)
+        if not titre:
+            continue
+        refs_par_titre[fold(titre)].add(ref)
+        sig = signature_titre(titre)
+        if len(sig) >= _SIGNATURE_MIN:
+            refs_par_signature[sig].add(ref)
 
-    ref_par_titre = {
-        titre: next(iter(refs))
-        for titre, refs in refs_par_titre.items()
-        if len(refs) == 1
-    }
-    return Reconciliation(_ref_par_titre=ref_par_titre)
+    def _sans_ambiguite(refs_par_cle: dict[str, set[str]]) -> dict[str, str]:
+        return {
+            cle: next(iter(refs))
+            for cle, refs in refs_par_cle.items()
+            if len(refs) == 1
+        }
+
+    return Reconciliation(
+        _ref_par_titre=_sans_ambiguite(refs_par_titre),
+        _ref_par_signature=_sans_ambiguite(refs_par_signature),
+    )

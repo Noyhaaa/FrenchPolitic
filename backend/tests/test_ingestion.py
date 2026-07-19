@@ -283,6 +283,65 @@ def test_reconciliation_sans_correspondance_reste_txt():
     assert p.dossier_ref is None
 
 
+# Archive « sale » : espace manquant (« ressourceen »), apostrophe courbe.
+_DOCS_SALES = [
+    {
+        "document": {
+            "dossierRef": "DLR5L17N9100",
+            "denominationStructurelle": "Proposition de loi",
+            "titres": {  # faute de frappe de l'archive : « à protégerla ressource »
+                "titrePrincipal": "proposition de loi visant à protégerla ressource en eau"
+            },
+        }
+    },
+    {
+        "document": {  # variante organique : même sujet, dossier DISTINCT
+            "dossierRef": "DLR5L17N9101",
+            "denominationStructurelle": "Proposition de loi",
+            "titres": {
+                "titrePrincipal": "proposition de loi organique visant à protéger la ressource en eau"
+            },
+        }
+    },
+]
+
+
+def test_reconciliation_signature_rattrape_la_saleté_de_l_archive():
+    """Une faute de frappe de l'archive (espace manquant) n'empêche plus la
+    correspondance : la signature (sans espaces/ponctuation) rattrape."""
+    from app.ingestion.dossiers_legislatifs import construire_reconciliation
+
+    resolver = build_resolver_from_organes(ORGANES)
+    reco = construire_reconciliation(_DOCS_SALES, legislature=17)
+    p = parse_scrutin(
+        _sans_dossier_ref(
+            "l'article 2 de la proposition de loi visant à protéger la ressource en eau"
+        ),
+        resolver,
+        reconciliation=reco,
+    )
+    # Rattaché à la version ordinaire (N9100), PAS à l'organique (N9101) :
+    # la nature « organique » est conservée dans la signature.
+    assert p.dossier_ref == "DLR5L17N9100"
+
+
+def test_reconciliation_signature_preserve_la_distinction_organique():
+    """Le vote sur le texte organique va bien à l'organique, pas à l'ordinaire."""
+    from app.ingestion.dossiers_legislatifs import construire_reconciliation
+
+    resolver = build_resolver_from_organes(ORGANES)
+    reco = construire_reconciliation(_DOCS_SALES, legislature=17)
+    p = parse_scrutin(
+        _sans_dossier_ref(
+            "l'ensemble de la proposition de loi organique visant à protéger la "
+            "ressource en eau"
+        ),
+        resolver,
+        reconciliation=reco,
+    )
+    assert p.dossier_ref == "DLR5L17N9101"
+
+
 def _scrutin_derive(resolver, uid, date, objet):
     """Un ScrutinParse dérivé de SCRUTIN (même dossier), à objet/id/date choisis."""
     p = parse_scrutin(SCRUTIN, resolver)
