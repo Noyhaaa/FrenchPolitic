@@ -68,11 +68,18 @@ public et son URL se **dérive de l'`uid`** du document (`…L17B0369` →
 4 chiffres sont indispensables**, sans eux le site répond 404). On en extrait l'exposé des
 motifs (via `pypdf`) en essayant les textes déposés du **dépôt initial** au plus
 récent (l'exposé n'est que dans le dépôt initial ; les versions de navette ne
-l'ont pas). Contenu **non neutre** (point de vue de l'auteur, §4.3) : stocké dans
-un bloc `Dossier.expose_motifs` **cité et attribué**, jamais fondu dans le résumé
-neutre. Best-effort (§2.5) : un dossier n'en porte pas si le PDF est absent ou
-illisible. Pas besoin de Légifrance pour ça — Légifrance/PISTE ne servirait que
-pour le **texte consolidé** (ce que la loi change dans le code), besoin différent.
+l'ont pas). **Repli Sénat** (`app/ingestion/textes_senat.py`) : quand le texte
+AN n'est qu'une **transmission du Sénat** (dispositif seul, en-tête « PROPOSITION
+DE LOI ADOPTÉE PAR LE SÉNAT, TRANSMISE PAR… »), l'exposé vit sur senat.fr ; le
+PDF de transmission cite les numéros Sénat (« Sénat : 452 … (2024-2025) »), d'où
+on dérive l'URL `senat.fr/leg/{ppl|pjl}{AA}-{num}.pdf` (les deux préfixes essayés)
+et on extrait l'exposé avec le même découpage. Récupère ~38 dossiers d'origine
+sénatoriale. Contenu **non neutre** (point de vue de l'auteur, §4.3) : stocké dans
+un bloc `Dossier.expose_motifs` **cité et attribué** (source « Texte déposé » AN
+ou « Texte déposé au Sénat »), jamais fondu dans le résumé neutre. Best-effort
+(§2.5) : un dossier n'en porte pas si le PDF est absent ou illisible. Pas besoin
+de Légifrance pour ça — Légifrance/PISTE ne servirait que pour le **texte
+consolidé** (ce que la loi change dans le code), besoin différent.
 Les votes d'amendement sont classés depuis l'objet officiel (amendement vs
 sous-amendement, numéro et auteur extraits quand sans ambiguïté) ; chaque
 **sous-amendement est rattaché à son amendement parent** (« … à l'amendement
@@ -137,6 +144,7 @@ app/
     assemblee.py     Open data AN : download + parse_scrutin (pur, nominatif inclus) → ScrutinParse
     debats.py        Comptes rendus (SyceronBrut) : explications de vote par groupe + liaison au vote
     textes_an.py     Exposé des motifs : uid → URL du PDF officiel → extraction (pypdf)
+    textes_senat.py  Repli exposé : texte de transmission Sénat → PDF senat.fr → extraction
     organes.py       Résolution des groupes (AMO) + couleurs + annuaire des députés
     normalize.py     Thème (heuristique), positions, décomptes
     sync.py          Job download → parse → regroupement par dossier → upsert (idempotent)

@@ -88,17 +88,22 @@ def decouper_expose(texte: str, max_chars: int = 4000) -> str | None:
     return corps
 
 
+def lire_pdf(pdf: bytes) -> str | None:
+    """Texte brut d'un PDF (concat des pages, via pypdf). None si illisible."""
+    try:
+        reader = PdfReader(io.BytesIO(pdf))
+        return "\n".join((page.extract_text() or "") for page in reader.pages)
+    except Exception:
+        return None
+
+
 def extraire_expose(pdf: bytes, max_chars: int = 4000) -> str | None:
     """Exposé des motifs extrait du PDF (extraction pypdf + `decouper_expose`).
 
     None si le PDF est illisible ou sans exposé identifiable (§2.5).
     """
-    try:
-        reader = PdfReader(io.BytesIO(pdf))
-        texte = "\n".join((page.extract_text() or "") for page in reader.pages)
-    except Exception:
-        return None
-    return decouper_expose(texte, max_chars)
+    texte = lire_pdf(pdf)
+    return decouper_expose(texte, max_chars) if texte else None
 
 
 def source_texte(url_page: str) -> SourceOfficielle:

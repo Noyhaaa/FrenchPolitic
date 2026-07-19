@@ -37,7 +37,8 @@ async def _main(limit: int | None, legislature: int) -> None:
     print(
         f"Terminé : {report.dossiers_upserts} dossiers "
         f"({report.scrutins_vus} scrutins vus), {report.groupes} groupes, "
-        f"{report.exposes_recuperes} exposés des motifs récupérés, "
+        f"{report.exposes_recuperes} exposés des motifs récupérés "
+        f"(dont {report.exposes_senat} via le Sénat), "
         f"{report.themes_reclasses} thèmes reclassés, "
         f"{report.questions_generees} questions citoyennes générées, "
         f"{report.desaccords_generes} désaccords (débats) reliés."

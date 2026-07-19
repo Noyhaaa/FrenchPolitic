@@ -120,7 +120,9 @@ pourra fluidifier le style plus tard sans changer ce contrat ; la fusion
 inter-runs ne préserve un résumé que s'il a été **relu par un humain**
 (`relu_par_humain`), sinon elle régénère. **Exposé des motifs** (le « pourquoi »
 du texte) récupéré du **PDF officiel du texte déposé** (`app/ingestion/textes_an.py`
-— URL dérivée de l'`uid` du document, extraction `pypdf`, dépôt initial d'abord)
+— URL dérivée de l'`uid` du document, extraction `pypdf`, dépôt initial d'abord ;
+**repli Sénat** `app/ingestion/textes_senat.py` quand le texte AN n'est qu'une
+transmission du Sénat → exposé récupéré sur senat.fr via le numéro cité)
 et stocké dans `Dossier.expose_motifs` : contenu **non neutre** (point de vue de
 l'auteur, §4.3), affiché en **bloc cité et attribué** (`ExposeMotifsCard`), jamais
 fondu dans le résumé neutre. Pas besoin de Légifrance pour ça (option a ; la

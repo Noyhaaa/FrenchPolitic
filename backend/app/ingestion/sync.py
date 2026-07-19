@@ -27,7 +27,13 @@ from app.ingestion.textes_an import (
     construire_expose,
     construire_index_numeros,
     construire_index_textes,
+    lire_pdf,
     url_page_texte,
+)
+from app.ingestion.textes_senat import (
+    construire_expose_senat,
+    reference_senat,
+    urls_pdf_senat,
 )
 from app.ingestion.normalize import (
     THEMES,
@@ -70,6 +76,8 @@ class SyncReport:
     scrutins_vus: int = 0
     dossiers_upserts: int = 0
     exposes_recuperes: int = 0
+    # Sous-ensemble des exposés récupérés via senat.fr (textes d'origine Sénat).
+    exposes_senat: int = 0
     themes_reclasses: int = 0
     questions_generees: int = 0
     desaccords_generes: int = 0
@@ -419,8 +427,10 @@ class SyncJob:
 
         Essaie les textes déposés candidats **du dépôt initial au plus récent**
         (l'exposé n'est que dans le dépôt initial ; les versions de navette ne
-        l'ont pas), borné à `_MAX_TENTATIVES_EXPOSE`. Best-effort et silencieux
-        en cas d'échec (§2.5) : sans exposé récupérable, le dossier n'en porte pas.
+        l'ont pas), borné à `_MAX_TENTATIVES_EXPOSE`. Quand le texte AN n'est
+        qu'une **transmission du Sénat** (dispositif sans exposé), on va chercher
+        l'exposé sur senat.fr (§5.1). Best-effort et silencieux en cas d'échec
+        (§2.5) : sans exposé récupérable, le dossier n'en porte pas.
         """
         uids = index_textes.get(dossier_ref or "")
         if not uids:
@@ -437,6 +447,36 @@ class SyncJob:
                 dossier.expose_motifs = expose
                 report.exposes_recuperes += 1
                 return
+            # Le PDF AN est peut-être une transmission Sénat → exposé chez le Sénat.
+            if await self._enrichir_expose_senat(dossier, pdf, report):
+                return
+
+    async def _enrichir_expose_senat(
+        self, dossier: Dossier, pdf_transmission: bytes, report: SyncReport
+    ) -> bool:
+        """Récupère l'exposé sur senat.fr quand le texte AN est une transmission.
+
+        Le numéro Sénat est cité dans le PDF de transmission ; on en dérive
+        l'URL du PDF Sénat (préfixe pjl/ppl selon la nature, l'autre en repli)
+        et on y extrait l'exposé. Renvoie True si un exposé a été attaché."""
+        texte = lire_pdf(pdf_transmission)
+        if not texte:
+            return False
+        ref = reference_senat(texte)
+        if ref is None:
+            return False
+        projet = "projet de loi" in fold(dossier.titre_officiel)
+        for url in urls_pdf_senat(ref, projet=projet):
+            pdf_senat = await self._client.download_texte_pdf(url)
+            if not pdf_senat:
+                continue
+            expose = construire_expose_senat(url, pdf_senat)
+            if expose is not None:
+                dossier.expose_motifs = expose
+                report.exposes_recuperes += 1
+                report.exposes_senat += 1
+                return True
+        return False
 
     async def _reclasser_theme(
         self, dossier: Dossier, report: SyncReport
