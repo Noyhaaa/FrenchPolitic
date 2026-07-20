@@ -73,16 +73,19 @@ Quatre écrans du cœur de valeur :
    de la fiche sont de **niveau dossier** uniquement (dossier législatif…) — la
    source de chaque vote vit sur sa propre fiche, pas de doublon.
 3. **Fiche vote** (`ScrutinDetailScreen` → `useScrutin`, `GET /scrutins/{id}`) :
-   titre = type du vote en clair, **objet officiel complet en dessous**. Deux
-   visages selon le vote :
-   — **Vote sur le texte** : résultat global, puis section **Vote par groupe**
+   titre = type du vote en clair, **objet officiel complet en dessous**, puis —
+   **sur toutes les fiches, quel que soit le type de vote** — le **Résultat du
+   vote EN TÊTE** (§2.2 : voir le résultat tout de suite ; verdict, décomptes
+   pour/contre/abstention, barre combinée + échelle, décomptes officiels).
+   Ensuite, deux visages selon le vote :
+   — **Vote sur le texte** : section **Vote par groupe**
    avec la **ligne de fracture** (`LigneFracture` : quels groupes ont
    majoritairement voté pour / contre / se sont abstenus — factuel, sourcé par
    le scrutin, jamais un jugement §7.4, masquée si unanimité), la ventilation
    détaillée par groupe et les **noms des votants** dépliables groupe par
    groupe quand le nominatif est disponible (§5.2).
    — **Vote d'amendement / sous-amendement** : PAS de section « Vote par
-   groupe » — l'entrée est la carte **« L'amendement en 4 questions »**
+   groupe » — après le résultat, la carte **« L'amendement en 4 questions »**
    (`QuestionsAmendementCard`, `Scrutin.questions`) : « Pourquoi ? » (exposé
    sommaire, préfixé « Selon son auteur » §4.3), « Qu'est-ce qu'il
    changerait ? » (dispositif, conditionnel), « Qui était pour, qui était
@@ -90,7 +93,7 @@ Quatre écrans du cœur de valeur :
    unanimité affichée aussi), « Quel est le résultat ? » (déterministe, camp
    gagnant en premier). Suivent **ce qu'il change** (`dispositif`, factuel, en
    **carte** — même niveau visuel que le bloc auteur), **ce que dit l'auteur**
-   (exposé sommaire, bloc attribué non neutre §4.3), le résultat global, et
+   (exposé sommaire, bloc attribué non neutre §4.3), et
    **ses sous-amendements** (chacun ouvrant sa propre fiche vote, empilée via
    `navigation.push`).
 4. **Recherche simple** (`SearchScreen` → `useDossierSearch`, avec debounce)
@@ -124,10 +127,22 @@ du vote (« … de la proposition de loi visant à… ») est comparé aux titre
 officiels de l'archive **dossiers législatifs** (`app/ingestion/dossiers_legislatifs.py`,
 correspondance exacte **puis par signature** — fold sans espaces/ponctuation, qui
 rattrape la saleté de l'archive : apostrophes, fautes de frappe « afin de​garantir »,
-tirets — sans confondre ordinaire/organique ; non ambiguë, même législature) pour
+tirets — sans confondre ordinaire/organique ; non ambiguë) pour
 retrouver le vrai `dossierRef` (et son lien officiel §7.5) ; sinon **texte de rattachement** →
-dossier reconstitué à id stable `TXT-…` ; sinon singleton (motion de censure,
-déclaration — événements autonomes légitimes dans le fil). ~60 % des dossiers ont
+dossier reconstitué à id stable `TXT-…` (dérivé de la **signature** du titre, pas
+du simple fold — un même texte cité avec une apostrophe droite sur un scrutin et
+courbe sur un autre fusionne en un seul dossier, ne se scinde pas en deux) ;
+sinon singleton (motion de censure, déclaration — événements autonomes
+légitimes dans le fil). La réconciliation couvre la législature **courante et
+la précédente** (archive `download_dossiers` téléchargée deux fois, best-effort
+sur la précédente) : un dossier **reporté après une dissolution** garde son
+`dossierRef` d'origine (cas réel : « simplification de la vie économique »,
+ref L16, encore voté en L17) — sans ce repli, un tel texte ne serait jamais
+retrouvé par titre et se fragmenterait en `TXT-…`, perdant au passage son
+exposé des motifs et l'enrichissement de ses amendements (la clé de jointure de
+l'archive amendements est justement le `dossierRef`). Le garde-fou d'ambiguïté
+(un titre → un seul dossier, jamais deviné) protège déjà contre une collision
+de titre entre deux législatures. ~60 % des dossiers ont
 ainsi leur page officielle. On n'importe PAS les titres de l'archive (minuscules,
 fragmentés) : le libellé du scrutin est plus propre. Le fil ne montre donc que des
 textes/dossiers, jamais un amendement isolé. Les votes d'amendement sont classés à

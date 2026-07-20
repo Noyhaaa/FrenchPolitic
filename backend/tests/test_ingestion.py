@@ -251,7 +251,7 @@ def test_reconciliation_retrouve_le_vrai_dossier():
     from app.ingestion.dossiers_legislatifs import construire_reconciliation
 
     resolver = build_resolver_from_organes(ORGANES)
-    reco = construire_reconciliation(_DOCS, legislature=17)
+    reco = construire_reconciliation(_DOCS, legislatures=(17,))
     p = parse_scrutin(
         _sans_dossier_ref(
             "l'amendement n° 4 à l'article 2 de la proposition de loi visant à "
@@ -271,7 +271,7 @@ def test_reconciliation_sans_correspondance_reste_txt():
     from app.ingestion.dossiers_legislatifs import construire_reconciliation
 
     resolver = build_resolver_from_organes(ORGANES)
-    reco = construire_reconciliation(_DOCS, legislature=17)
+    reco = construire_reconciliation(_DOCS, legislatures=(17,))
     p = parse_scrutin(
         _sans_dossier_ref(
             "l'ensemble de la proposition de loi sur un tout autre sujet"
@@ -312,7 +312,7 @@ def test_reconciliation_signature_rattrape_la_saleté_de_l_archive():
     from app.ingestion.dossiers_legislatifs import construire_reconciliation
 
     resolver = build_resolver_from_organes(ORGANES)
-    reco = construire_reconciliation(_DOCS_SALES, legislature=17)
+    reco = construire_reconciliation(_DOCS_SALES, legislatures=(17,))
     p = parse_scrutin(
         _sans_dossier_ref(
             "l'article 2 de la proposition de loi visant à protéger la ressource en eau"
@@ -330,7 +330,7 @@ def test_reconciliation_signature_preserve_la_distinction_organique():
     from app.ingestion.dossiers_legislatifs import construire_reconciliation
 
     resolver = build_resolver_from_organes(ORGANES)
-    reco = construire_reconciliation(_DOCS_SALES, legislature=17)
+    reco = construire_reconciliation(_DOCS_SALES, legislatures=(17,))
     p = parse_scrutin(
         _sans_dossier_ref(
             "l'ensemble de la proposition de loi organique visant à protéger la "
@@ -340,6 +340,54 @@ def test_reconciliation_signature_preserve_la_distinction_organique():
         reconciliation=reco,
     )
     assert p.dossier_ref == "DLR5L17N9101"
+
+
+def test_reconciliation_retrouve_un_dossier_reporte_de_la_legislature_precedente():
+    """Un dossier reporté après une dissolution garde son `dossierRef` d'origine
+    (ex. réel : « simplification de la vie économique », ref L16, encore voté en
+    L17). Élargir la fenêtre à (17, 16) le retrouve ; s'en tenir à (17,) seul le
+    manque toujours (comportement historique préservé, §2.5 : pas de régression
+    silencieuse sur les autres tests qui appellent avec `legislatures=(17,)`)."""
+    from app.ingestion.dossiers_legislatifs import construire_reconciliation
+
+    resolver = build_resolver_from_organes(ORGANES)
+    scrutin = _sans_dossier_ref(
+        "l'ensemble de la proposition de loi d'une autre législature"
+    )
+
+    reco_large = construire_reconciliation(_DOCS, legislatures=(17, 16))
+    p_large = parse_scrutin(scrutin, resolver, reconciliation=reco_large)
+    assert p_large.dossier_ref == "DLR5L16N1234"
+
+    reco_etroite = construire_reconciliation(_DOCS, legislatures=(17,))
+    p_etroite = parse_scrutin(scrutin, resolver, reconciliation=reco_etroite)
+    assert p_etroite.dossier_ref is None
+    assert p_etroite.dossier_id.startswith("TXT-")
+
+
+def test_txt_id_fusionne_les_variantes_d_apostrophe():
+    """Un même texte cité avec une apostrophe droite (') sur un scrutin et
+    courbe (’) sur un autre doit fusionner en un seul dossier `TXT-…`, pas se
+    scinder en deux (vécu en production : « statut de l'élu local » dupliqué).
+    L'id est donc dérivé de la signature du titre (fold + sans ponctuation),
+    pas du simple fold — même normalisation que la réconciliation d'archive."""
+    resolver = build_resolver_from_organes(ORGANES)
+    p_droite = parse_scrutin(
+        _sans_dossier_ref(
+            "l'ensemble de la proposition de loi portant création d'un statut "
+            "de l'élu local"
+        ),
+        resolver,
+    )
+    p_courbe = parse_scrutin(
+        _sans_dossier_ref(
+            "l'ensemble de la proposition de loi portant création d’un statut "
+            "de l’élu local"
+        ),
+        resolver,
+    )
+    assert p_droite.dossier_id.startswith("TXT-")
+    assert p_droite.dossier_id == p_courbe.dossier_id
 
 
 def _scrutin_derive(resolver, uid, date, objet):

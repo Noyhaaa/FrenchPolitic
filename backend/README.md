@@ -54,16 +54,35 @@ upsert (idempotent) : les dossiers (liste compacte des votes) et le détail de
 chaque vote (table `scrutin`, avec les noms des votants). Regroupement en
 cascade : le `dossierRef` officiel quand il existe ; sinon **réconciliation** via
 l'archive *dossiers législatifs* (le titre cité dans l'objet, comparé aux titres
-officiels de la législature — **fold exact puis signature** : fold sans espaces ni
+officiels des législatures — **fold exact puis signature** : fold sans espaces ni
 ponctuation, tolérant aux apostrophes et fautes de frappe de l'archive (« afin
 de​garantir »), sans confondre ordinaire/organique ; non ambigu — retrouve le
 vrai `dossierRef` et son lien officiel ; +24 dossiers récupérés) ; sinon le
 **texte de rattachement**
-(dossier reconstitué `TXT-…`, mention de lecture ignorée) ; sinon un dossier
+(dossier reconstitué `TXT-…`, mention de lecture ignorée, id dérivé de la
+**signature** du titre plutôt que du simple fold — un même texte cité avec une
+apostrophe droite sur un scrutin et courbe sur un autre fusionne en un seul
+dossier au lieu de se scinder en deux) ; sinon un dossier
 singleton (motion de censure, déclaration…). Le fil n'expose ainsi que des
 textes — jamais un vote d'amendement isolé — et ~60 % ont leur page officielle.
 L'archive sert **uniquement** à retrouver le `dossierRef` : ses titres (en
 minuscules, fragmentés) ne sont pas importés.
+
+**Législature courante ET précédente.** `construire_reconciliation` /
+`construire_index_textes` / `construire_index_numeros` prennent désormais un
+**tuple de législatures**, pas une seule : l'archive *dossiers législatifs* est
+téléchargée pour la législature courante et, en best-effort, pour la
+précédente (`SyncJob.run`, §1bis). Un dossier **reporté après une dissolution**
+garde son `dossierRef` d'origine (cas réel constaté : « Projet de loi de
+simplification de la vie économique », `dossierRef` en `L16`, encore voté en
+`L17`) — restreindre à la seule législature courante empêchait de le
+retrouver par titre, le fragmentant en `TXT-…` et lui faisant perdre à la fois
+son exposé des motifs et l'enrichissement de ses amendements (la clé de
+jointure de l'archive amendements est le `dossierRef`). Le garde-fou
+d'ambiguïté (un titre → un seul dossier, jamais deviné) protège déjà contre une
+collision de titre entre deux législatures ; élargir la fenêtre ne l'affaiblit
+pas. Un échec de téléchargement de l'archive de la législature précédente
+n'est pas fatal (best-effort, §2.5) : le run continue sur la seule courante.
 **Exposé des motifs** (`app/ingestion/textes_an.py`) : l'archive ne porte pas le
 corps des textes (métadonnées seules), mais le **PDF du texte déposé** est
 public et son URL se **dérive de l'`uid`** du document (`…L17B0369` →

@@ -185,6 +185,43 @@ export function ScrutinDetailScreen() {
             .join(' · ')}
         </Text>
 
+        {/* Résultat global EN TÊTE (§2.2 : voir le résultat tout de suite) —
+            sur toutes les fiches vote, quel que soit le type. Verdict, grille
+            des décomptes, barre combinée + échelle. Tout est factuel :
+            décomptes officiels. */}
+        <SectionCard title="Résultat du vote" flat>
+          <VerdictCard statut={scrutin.statut} resultat={resultat} />
+
+          <View style={styles.tallyGrid}>
+            <TallyItem label="Pour" value={resultat.pour} total={totalVoix} color={colors.pour} />
+            <View style={styles.tallySep} />
+            <TallyItem label="Contre" value={resultat.contre} total={totalVoix} color={colors.contre} />
+            <View style={styles.tallySep} />
+            <TallyItem label="Abstention" value={resultat.abstention} total={totalVoix} color={colors.abstention} />
+          </View>
+
+          <View style={styles.barBlock}>
+            <ResultBar
+              height={6}
+              segments={[
+                { value: resultat.pour, color: colors.pour },
+                { value: resultat.abstention, color: colors.abstention },
+                { value: resultat.contre, color: colors.contre },
+                { value: resultat.nonVotants, color: colors.nonVotant },
+              ]}
+            />
+            <View style={styles.barScale}>
+              <Text style={styles.barScaleText}>0</Text>
+              {resultat.nonVotants > 0 ? (
+                <Text style={styles.barScaleText}>
+                  {resultat.nonVotants} non-votant{resultat.nonVotants > 1 ? 's' : ''}
+                </Text>
+              ) : null}
+              <Text style={styles.barScaleText}>{totalVoix}</Text>
+            </View>
+          </View>
+        </SectionCard>
+
         {/* Entrée de compréhension d'un vote d'amendement : ses 4 questions
             (§2.2) — le « qui était pour / contre » y est rendu depuis les
             positions de groupes du scrutin. */}
@@ -226,41 +263,6 @@ export function ScrutinDetailScreen() {
             </Text>
           </View>
         ) : null}
-
-        {/* Résultat global (format prototype) : verdict, grille des décomptes,
-            barre combinée + échelle. Tout est factuel : décomptes officiels. */}
-        <SectionCard title="Résultat du vote" flat>
-          <VerdictCard statut={scrutin.statut} resultat={resultat} />
-
-          <View style={styles.tallyGrid}>
-            <TallyItem label="Pour" value={resultat.pour} total={totalVoix} color={colors.pour} />
-            <View style={styles.tallySep} />
-            <TallyItem label="Contre" value={resultat.contre} total={totalVoix} color={colors.contre} />
-            <View style={styles.tallySep} />
-            <TallyItem label="Abstention" value={resultat.abstention} total={totalVoix} color={colors.abstention} />
-          </View>
-
-          <View style={styles.barBlock}>
-            <ResultBar
-              height={6}
-              segments={[
-                { value: resultat.pour, color: colors.pour },
-                { value: resultat.abstention, color: colors.abstention },
-                { value: resultat.contre, color: colors.contre },
-                { value: resultat.nonVotants, color: colors.nonVotant },
-              ]}
-            />
-            <View style={styles.barScale}>
-              <Text style={styles.barScaleText}>0</Text>
-              {resultat.nonVotants > 0 ? (
-                <Text style={styles.barScaleText}>
-                  {resultat.nonVotants} non-votant{resultat.nonVotants > 1 ? 's' : ''}
-                </Text>
-              ) : null}
-              <Text style={styles.barScaleText}>{totalVoix}</Text>
-            </View>
-          </View>
-        </SectionCard>
 
         {/* Vote par groupe — votes sur le TEXTE uniquement : sur la fiche d'un
             amendement, le « qui était pour / contre » vit dans la carte des

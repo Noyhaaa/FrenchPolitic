@@ -34,8 +34,7 @@ from app.ingestion.normalize import (
     to_int,
     truncate,
 )
-from app.utils.text import fold
-from app.ingestion.dossiers_legislatifs import Reconciliation
+from app.ingestion.dossiers_legislatifs import Reconciliation, signature_titre
 from app.ingestion.organes import GroupResolver
 from app.schemas import (
     PositionGroupe,
@@ -172,10 +171,15 @@ class AssembleeOpenDataClient:
                 out.append(json.load(f))
         return out
 
-    async def download_dossiers(self) -> list[dict]:
+    async def download_dossiers(self, legislature: int | None = None) -> list[dict]:
         """Télécharge l'archive des dossiers législatifs et renvoie les JSON des
-        **documents** (titre + dossierRef, pour la réconciliation)."""
-        zf = await self._download_zip(DOSSIERS_URL.format(leg=self.legislature))
+        **documents** (titre + dossierRef, pour la réconciliation). `legislature`
+        permet de récupérer l'archive d'une législature différente de la
+        courante (typiquement la précédente : un dossier reporté après une
+        dissolution garde son `dossierRef` d'origine)."""
+        zf = await self._download_zip(
+            DOSSIERS_URL.format(leg=legislature or self.legislature)
+        )
         out: list[dict] = []
         for name in zf.namelist():
             if name.endswith(".json") and "/document/" in name:
@@ -338,9 +342,13 @@ def parse_scrutin(
             dossier_id = ref_retrouve
             dossier_titre = rattachement or objet_libelle
         elif rattachement:
-            # Id stable entre runs : dérivé du titre plié (insensible aux
-            # accents / à la casse) — l'upsert fusionne les runs successifs.
-            cle = fold(rattachement)
+            # Id stable entre runs : dérivé de la SIGNATURE du titre (fold +
+            # sans espaces/ponctuation), pas du simple fold — un même texte
+            # cité avec une apostrophe droite (') sur un scrutin et courbe (’)
+            # sur un autre doit fusionner en un seul dossier, pas se scinder
+            # en deux (vécu : « statut de l'élu local » dupliqué ainsi). Même
+            # normalisation que la réconciliation d'archive (§ ci-dessus).
+            cle = signature_titre(rattachement)
             dossier_id = "TXT-" + hashlib.sha1(cle.encode()).hexdigest()[:16]
             dossier_titre = rattachement
         else:

@@ -742,19 +742,35 @@ class SyncJob:
             )
 
         # 1bis) Dossiers législatifs : titres officiels + réconciliation des
-        #       scrutins sans dossierRef vers leur vrai dossier (§5.1).
+        #       scrutins sans dossierRef vers leur vrai dossier (§5.1). On
+        #       inclut aussi l'archive de la législature PRÉCÉDENTE : un
+        #       dossier reporté après une dissolution garde son `dossierRef`
+        #       d'origine (vécu : « simplification de la vie économique »,
+        #       ref L16, encore voté en L17) — sans ce repli, un tel texte
+        #       n'est jamais retrouvé par titre et se fragmente en `TXT-…`.
+        #       Best-effort (§2.5) : un échec de téléchargement de l'archive
+        #       précédente ne tue pas le run, on reste sur la seule courante.
         documents = await self._client.download_dossiers()
-        reconciliation = construire_reconciliation(
-            documents, self._client.legislature
-        )
+        legislatures = (self._client.legislature,)
+        if self._client.legislature > 1:
+            try:
+                documents += await self._client.download_dossiers(
+                    self._client.legislature - 1
+                )
+                legislatures = (self._client.legislature, self._client.legislature - 1)
+            except (httpx.HTTPError, zipfile.BadZipFile) as exc:
+                report.anomalies.append(
+                    f"dossiers de la législature précédente non téléchargés "
+                    f"({type(exc).__name__}) : réconciliation limitée à la "
+                    "législature courante ce run"
+                )
+        reconciliation = construire_reconciliation(documents, legislatures)
         # Index dossierRef → texte AN déposé, pour récupérer l'exposé des motifs
         # (PDF officiel) au niveau du dossier — bloc attribué, option (a).
-        index_textes = construire_index_textes(documents, self._client.legislature)
+        index_textes = construire_index_textes(documents, legislatures)
         # Index dossierRef → numéros de documents, pour la liaison certaine
         # débat ↔ dossier (le CR cite « (n° X) »).
-        self._numeros_par_ref = construire_index_numeros(
-            documents, self._client.legislature
-        )
+        self._numeros_par_ref = construire_index_numeros(documents, legislatures)
 
         # 2) Scrutins → parsing (avec nominatif) → regroupement par dossier.
         bruts = await self._client.download_scrutins(limit=limit)

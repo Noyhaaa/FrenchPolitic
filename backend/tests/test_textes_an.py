@@ -110,7 +110,7 @@ def test_index_textes_ne_garde_que_les_textes_deposes_an():
             }
         },
     ]
-    index = construire_index_textes(docs, legislature=17)
+    index = construire_index_textes(docs, legislatures=(17,))
     # Un seul dossier retenu, dépôt initial en tête (tri par numéro croissant).
     assert index == {
         "DLR5L17N100": ["PIONANR5L17B1337", "PIONANR5L17B1400"]
@@ -131,7 +131,7 @@ def test_index_numeros_tous_documents_an_du_dossier():
         # Autre législature : exclue.
         {"document": {"dossierRef": "DLR5L16N300", "uid": "PIONANR5L16B0777"}},
     ]
-    assert construire_index_numeros(docs, legislature=17) == {
+    assert construire_index_numeros(docs, legislatures=(17,)) == {
         "DLR5L17N100": {525, 611, 598}
     }
 
@@ -143,6 +143,6 @@ def test_index_numeros_ecarte_les_numeros_ambigus():
         {"document": {"dossierRef": "DLR5L17N200", "uid": "PIONANR5L17B0600"}},
     ]
     # 525 pointe deux dossiers (donnée sale) → écarté ; 600 conservé.
-    assert construire_index_numeros(docs, legislature=17) == {
+    assert construire_index_numeros(docs, legislatures=(17,)) == {
         "DLR5L17N200": {600}
     }

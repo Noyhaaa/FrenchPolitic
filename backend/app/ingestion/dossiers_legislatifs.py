@@ -79,20 +79,24 @@ class Reconciliation:
 
 
 def construire_reconciliation(
-    documents: list[dict], legislature: int
+    documents: list[dict], legislatures: tuple[int, ...]
 ) -> Reconciliation:
-    """Construit la table depuis les documents de l'archive, restreinte à la
-    législature (pour ne pas raccorder un texte à un dossier d'une autre
-    législature) et aux seuls textes de loi (pas les rapports). Un titre porté
-    par plusieurs dossiers est écarté (ambiguïté → on ne devine pas, §2.5)."""
-    prefixe_ref = f"DLR5L{legislature}"
+    """Construit la table depuis les documents de l'archive, restreinte aux
+    législatures données (typiquement la courante + la précédente — un dossier
+    peut être **reporté** d'une législature à l'autre après une dissolution,
+    sous le même `dossierRef` ; sans ce repli, un tel texte n'est jamais
+    retrouvé par titre et se fragmente en dossier reconstitué `TXT-…`) et aux
+    seuls textes de loi (pas les rapports). Le garde-fou d'ambiguïté (un titre
+    → un seul dossier) protège déjà contre une collision de titre entre deux
+    législatures différentes : élargir la fenêtre ne l'affaiblit pas (§2.5)."""
+    prefixes = tuple(f"DLR5L{leg}" for leg in legislatures)
     refs_par_titre: dict[str, set[str]] = defaultdict(set)
     refs_par_signature: dict[str, set[str]] = defaultdict(set)
 
     for brut in documents:
         doc = brut.get("document") or brut
         ref = doc.get("dossierRef") or ""
-        if not ref.startswith(prefixe_ref):
+        if not ref.startswith(prefixes):
             continue
         if (doc.get("denominationStructurelle") or "") not in _DENOMINATIONS_TEXTE:
             continue

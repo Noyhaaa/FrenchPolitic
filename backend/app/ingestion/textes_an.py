@@ -128,7 +128,7 @@ def _numero_uid(uid: str) -> int:
 
 
 def construire_index_textes(
-    documents: list[dict], legislature: int
+    documents: list[dict], legislatures: tuple[int, ...]
 ) -> dict[str, list[str]]:
     """Table `dossierRef → uids des textes AN déposés` (URL dérivable), triés du
     **dépôt initial** (plus petit numéro) au plus récent.
@@ -137,14 +137,18 @@ def construire_index_textes(
     motifs. Les versions de navette (« transmise / modifiée par le Sénat »), les
     textes de commission (uid `…BTC…`, URL non dérivable) et les textes du Sénat
     (uid `PIONSN…`) sont écartés — pas d'exposé exploitable.
+
+    `legislatures` couvre typiquement la courante + la précédente : un dossier
+    reporté après une dissolution garde son `dossierRef` d'origine — sans ce
+    repli, il ne trouverait jamais son texte déposé (donc jamais d'exposé).
     """
-    prefixe_ref = f"DLR5L{legislature}"
+    prefixes = tuple(f"DLR5L{leg}" for leg in legislatures)
     par_ref: dict[str, set[str]] = defaultdict(set)
     for brut in documents:
         doc = brut.get("document") or brut
         ref = doc.get("dossierRef") or ""
         uid = doc.get("uid") or ""
-        if not ref.startswith(prefixe_ref):
+        if not ref.startswith(prefixes):
             continue
         # Textes AN uniquement (PIONAN… / PRJLAN…).
         if not (uid.startswith("PIONAN") or uid.startswith("PRJLAN")):
@@ -168,7 +172,7 @@ _RE_NUMERO_DOC = re.compile(r"L(\d+)B(?:TC)?0*(\d+)$")
 
 
 def construire_index_numeros(
-    documents: list[dict], legislature: int
+    documents: list[dict], legislatures: tuple[int, ...]
 ) -> dict[str, set[int]]:
     """Table `dossierRef → numéros de distribution AN de ses documents`.
 
@@ -176,16 +180,19 @@ def construire_index_numeros(
     dossier de façon certaine, à travers les renumérotations de la navette
     (chaque lecture/dépôt a son numéro, tous rattachés au même dossierRef).
     Un numéro porté par plusieurs dossiers (donnée sale) est écarté.
+
+    `legislatures` couvre typiquement la courante + la précédente (dossier
+    reporté après dissolution, cf. `construire_index_textes`).
     """
-    prefixe_ref = f"DLR5L{legislature}"
+    prefixes = tuple(f"DLR5L{leg}" for leg in legislatures)
     par_numero: dict[int, set[str]] = defaultdict(set)
     for brut in documents:
         doc = brut.get("document") or brut
         ref = doc.get("dossierRef") or ""
-        if not ref.startswith(prefixe_ref):
+        if not ref.startswith(prefixes):
             continue
         m = _RE_NUMERO_DOC.search(doc.get("uid") or "")
-        if m and int(m.group(1)) == legislature:
+        if m and int(m.group(1)) in legislatures:
             par_numero[int(m.group(2))].add(ref)
     par_ref: dict[str, set[int]] = defaultdict(set)
     for numero, refs in par_numero.items():
