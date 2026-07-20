@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   Pressable,
+  RefreshControl,
   ScrollView,
   Share,
   StyleSheet,
@@ -19,18 +20,23 @@ import {
   ErrorView,
   LoadingView,
   OfflineBanner,
+  ResultBar,
   SectionCard,
   SourceGrid,
   StatusBadge,
+  TrajectoireNavette,
 } from '@/components';
 import { useDossier } from '@/hooks';
+import type { ScrutinResume } from '@/types';
 import {
   formatDateLong,
   formatMicroResultat,
   formatTempsLecture,
   libelleScrutin,
   natureTexte,
+  phasesNavette,
   statutLabel,
+  voteDecisif,
 } from '@/utils/format';
 import type { RootStackParamList } from '@/navigation/types';
 
@@ -55,6 +61,61 @@ function MiniLabel({ children, color }: { children: string; color?: string }) {
   );
 }
 
+/**
+ * Le VOTE DÉCISIF du dossier, mis en avant en tête de la section des votes :
+ * le vote sur l'ensemble du texte — celui qui scelle l'adoption ou le rejet,
+ * à distinguer des votes d'articles et des motions pour que l'utilisateur
+ * sache d'un coup d'œil quel vote a tranché (§2.2). Purement factuel : même
+ * contenu qu'une ligne de vote, présentation accentuée + une phrase
+ * explicative descriptive.
+ */
+function VoteDecisifCard({
+  scrutin,
+  onPress,
+}: {
+  scrutin: ScrutinResume;
+  onPress: () => void;
+}) {
+  const lib = libelleScrutin(scrutin.objet);
+  const { resultat } = scrutin;
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.decisifCard, pressed && { opacity: 0.7 }]}
+      accessibilityRole="button"
+      accessibilityLabel={`Vote décisif : ${scrutin.objet}. ${statutLabel(
+        scrutin.statut,
+      )}, ${resultat.pour} pour, ${resultat.contre} contre. Voir le détail du vote.`}
+    >
+      <Text style={styles.decisifLabel}>Vote décisif</Text>
+      <Text style={styles.voteObjet}>{lib.titre}</Text>
+      <View style={styles.voteMeta}>
+        <StatusBadge statut={scrutin.statut} />
+        <Text style={typography.meta}>
+          {formatDateLong(scrutin.date)}
+          {lib.complement ? ` · ${lib.complement}` : ''}
+        </Text>
+      </View>
+      <Text style={typography.meta}>
+        {formatMicroResultat(resultat.pour, resultat.contre)}
+      </Text>
+      <ResultBar
+        height={6}
+        segments={[
+          { value: resultat.pour, color: colors.pour },
+          { value: resultat.abstention, color: colors.abstention },
+          { value: resultat.contre, color: colors.contre },
+          { value: resultat.nonVotants, color: colors.nonVotant },
+        ]}
+      />
+      <Text style={[typography.meta, styles.decisifExplication]}>
+        C'est ce vote, sur l'ensemble du texte, qui décide de son adoption ou
+        de son rejet.
+      </Text>
+    </Pressable>
+  );
+}
+
 /** Barre supérieure minimale (états chargement / erreur). */
 function MinimalBar({ onBack }: { onBack: () => void }) {
   return (
@@ -76,9 +137,8 @@ export function DossierDetailScreen() {
   const route = useRoute<DetailRoute>();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { data: dossier, loading, offline, error, retry } = useDossier(
-    route.params.dossierId,
-  );
+  const { data: dossier, loading, refreshing, offline, error, retry, refresh } =
+    useDossier(route.params.dossierId);
   const goBack = () => navigation.goBack();
   // Listes longues repliées par défaut (votes, amendements, sous-amendements).
   const [listesDepliees, setListesDepliees] = useState<ReadonlySet<string>>(
@@ -150,6 +210,15 @@ export function DossierDetailScreen() {
   const sousAmendements = dossier.amendements.flatMap((a) =>
     (a.sousAmendements ?? []).map((sa) => ({ sa, parentNumero: a.numero })),
   );
+  // Le vote décisif (sur l'ensemble du texte) sort de la liste : mis en avant
+  // en tête de section pour que l'utilisateur voie quel vote a tranché — les
+  // autres votes (articles, motions…) restent en liste compacte.
+  const decisif = voteDecisif(dossier.scrutins);
+  const autresVotes = decisif
+    ? dossier.scrutins.filter((s) => s.id !== decisif.id)
+    : dossier.scrutins;
+  // Frise des phases de navette documentées par les votes AN (vide → masquée).
+  const phases = phasesNavette(dossier.scrutins);
   const pourquoi = [
     resume.contexte && (['CONTEXTE', resume.contexte] as const),
     resume.objectif && (['OBJECTIF', resume.objectif] as const),
@@ -196,6 +265,13 @@ export function DossierDetailScreen() {
           { paddingBottom: insets.bottom + 104 },
         ]}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={refresh}
+            tintColor={colors.brand}
+          />
+        }
       >
         {/* 1. Statut (phase de navette si dispo) + titre + date */}
         <StatusBadge statut={badge.statut} label={badge.label} />
@@ -221,6 +297,12 @@ export function DossierDetailScreen() {
             </Text>
           </View>
         ) : null}
+
+        {/* 1bis. Trajectoire à l'Assemblée — frise des phases de navette que
+            les libellés des votes documentent (1re lecture, CMP, lecture
+            définitive…), statut d'une phase = son vote sur l'ensemble.
+            Masquée si aucune phase documentée (§2.5). */}
+        {phases.length > 0 ? <TrajectoireNavette phases={phases} /> : null}
 
         {/* 2. Le vote en 4 questions — l'entrée de compréhension (§2.2) :
             pourquoi / désaccord / résultat / changement, en langage simple.
@@ -309,10 +391,12 @@ export function DossierDetailScreen() {
           </SectionCard>
         )}
 
-        {/* 6. Les votes sur le texte — liste compacte : une ligne par scrutin
-            (objet + statut + micro-résultat), le détail (groupes, nominatif)
-            se charge au tap (écran ScrutinDetail). Les votes d'amendement, eux,
-            sont dans la section « Amendements » ci-dessous. */}
+        {/* 6. Les votes sur le texte — le VOTE DÉCISIF (sur l'ensemble) est mis
+            en avant en tête, les autres votes (articles, motions…) suivent en
+            liste compacte : une ligne par scrutin (objet + statut +
+            micro-résultat), le détail (groupes, nominatif) se charge au tap
+            (écran ScrutinDetail). Les votes d'amendement, eux, sont dans la
+            section « Amendements » ci-dessous. */}
         {dossier.scrutins.length > 0 && (
         <SectionCard
           title={
@@ -321,7 +405,18 @@ export function DossierDetailScreen() {
               : 'Le vote sur le texte'
           }
         >
-          {visibles(dossier.scrutins, 'votes').map((s, i) => {
+          {decisif ? (
+            <VoteDecisifCard
+              scrutin={decisif}
+              onPress={() =>
+                navigation.navigate('ScrutinDetail', { scrutinId: decisif.id })
+              }
+            />
+          ) : null}
+          {decisif && autresVotes.length > 0 ? (
+            <MiniLabel>LES AUTRES VOTES</MiniLabel>
+          ) : null}
+          {visibles(autresVotes, 'votes').map((s, i) => {
             // Titre = type du vote en clair (« Vote sur l'ensemble », « Motion
             // de censure »…) — le sujet, c'est le dossier lui-même ; l'objet
             // officiel complet reste sur la fiche vote (§7.5).
@@ -361,7 +456,7 @@ export function DossierDetailScreen() {
               </Pressable>
             );
           })}
-          {boutonVoirPlus(dossier.scrutins.length, 'votes', 'votes')}
+          {boutonVoirPlus(autresVotes.length, 'votes', 'votes')}
         </SectionCard>
         )}
 
@@ -543,6 +638,26 @@ const styles = StyleSheet.create({
   },
   flatSection: {
     gap: spacing.md,
+  },
+  decisifCard: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    // Accent brand : le vote mis en avant (même code visuel qu'un bloc accentué).
+    borderLeftWidth: 3,
+    borderLeftColor: colors.brand,
+    padding: spacing.lg,
+    gap: spacing.xs,
+    marginBottom: spacing.md,
+  },
+  decisifLabel: {
+    ...typography.overline,
+    color: colors.brand,
+  },
+  decisifExplication: {
+    marginTop: spacing.xs,
+    color: colors.textTertiary,
   },
   voteRow: {
     flexDirection: 'row',

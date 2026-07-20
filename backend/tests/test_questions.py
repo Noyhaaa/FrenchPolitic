@@ -3,12 +3,15 @@ from __future__ import annotations
 
 from app.ai.questions import (
     PREFIXE_AUTEUR,
+    PREFIXE_AUTEUR_AMENDEMENT,
     generer_desaccord,
     generer_questions,
+    generer_questions_amendement,
     phrase_resultat,
+    phrase_resultat_amendement,
     valider_reponse,
 )
-from app.schemas import ResultatGlobal, ScrutinResume
+from app.schemas import ResultatGlobal, Scrutin, ScrutinResume
 
 
 class _FakeLLM:
@@ -152,6 +155,111 @@ async def test_sans_expose_pas_d_appel_llm():
     q = await generer_questions(_TITRE, [_scrutin("l'ensemble…")], None, llm)
     assert q.pourquoi is None and q.changement is None
     assert llm._reponses  # la réponse n'a pas été consommée : LLM non appelé
+
+
+# --- questions d'un vote d'amendement (fiche vote) ---
+
+_OBJET_AM = "l'amendement n° 80 de M. Durand à l'article 2 de la proposition de loi"
+_DISPOSITIF = (
+    "Au premier alinéa de l'article 2, le seuil de 50 000 habitants est "
+    "remplacé par un seuil de 20 000 habitants."
+)
+_EXPOSE_AM = (
+    "Les tensions locatives ne se limitent pas aux grandes villes : cet "
+    "amendement étend l'encadrement aux communes moyennes."
+)
+
+
+def _scrutin_amendement(
+    objet: str = _OBJET_AM,
+    statut: str = "adopte",
+    public: bool = True,
+    dispositif: str | None = _DISPOSITIF,
+    expose: str | None = _EXPOSE_AM,
+) -> Scrutin:
+    return Scrutin(
+        id="SA1",
+        dossier_id="D1",
+        date="2025-05-07",
+        objet=objet,
+        statut=statut,
+        scrutin_public=public,
+        resultat=ResultatGlobal(pour=188, contre=268, abstention=26, non_votants=12),
+        dispositif=dispositif,
+        expose_sommaire=expose,
+    )
+
+
+def test_resultat_amendement_camp_gagnant_en_premier():
+    # Rejeté par 268 voix contre 188 — jamais l'inverse (trompeur).
+    p = phrase_resultat_amendement(_scrutin_amendement(statut="rejete"))
+    assert p == "L'amendement a été rejeté par 268 voix contre 188, avec 26 abstentions."
+
+
+def test_resultat_amendement_adopte():
+    p = phrase_resultat_amendement(_scrutin_amendement())
+    assert p == "L'amendement a été adopté par 188 voix contre 268, avec 26 abstentions."
+
+
+def test_resultat_sous_amendement_sujet_adapte():
+    objet = "le sous-amendement n° 3 de Mme Yon à l'amendement n° 80"
+    p = phrase_resultat_amendement(_scrutin_amendement(objet=objet, statut="rejete"))
+    assert p is not None and p.startswith("Le sous-amendement a été rejeté")
+
+
+def test_resultat_amendement_main_levee():
+    p = phrase_resultat_amendement(_scrutin_amendement(public=False))
+    assert p == "L'amendement a été adopté à main levée (pas de décompte des voix)."
+
+
+def test_resultat_amendement_absent_si_en_cours():
+    assert phrase_resultat_amendement(_scrutin_amendement(statut="en_cours")) is None
+
+
+async def test_questions_amendement_sans_llm_seul_le_resultat():
+    q = await generer_questions_amendement(_scrutin_amendement(), None)
+    assert q.resultat is not None
+    assert q.pourquoi is None and q.changement is None
+
+
+async def test_questions_amendement_avec_llm_reponses_validees():
+    llm = _FakeLLM(
+        f"{PREFIXE_AUTEUR_AMENDEMENT}, l'encadrement doit aussi couvrir les "
+        "communes moyennes.",
+        "Le seuil de 50 000 habitants passerait à 20 000 habitants.",
+    )
+    q = await generer_questions_amendement(_scrutin_amendement(), llm)
+    assert q.pourquoi is not None and q.pourquoi.startswith(PREFIXE_AUTEUR_AMENDEMENT)
+    assert q.changement is not None
+
+
+async def test_questions_amendement_pourquoi_sans_prefixe_rejete():
+    llm = _FakeLLM(
+        "L'encadrement doit aussi couvrir les communes moyennes.",  # pas d'attribution
+        "Le seuil de 50 000 habitants passerait à 20 000 habitants.",
+    )
+    q = await generer_questions_amendement(_scrutin_amendement(), llm)
+    assert q.pourquoi is None
+    assert q.changement is not None
+
+
+async def test_questions_amendement_chiffre_invente_rejete():
+    llm = _FakeLLM(
+        f"{PREFIXE_AUTEUR_AMENDEMENT}, cela concernerait 3 000 communes.",  # 3 000 absent
+        "Le seuil de 50 000 habitants passerait à 20 000 habitants.",
+    )
+    q = await generer_questions_amendement(_scrutin_amendement(), llm)
+    assert q.pourquoi is None
+    assert q.changement is not None
+
+
+async def test_questions_amendement_sans_contenu_pas_d_appel_llm():
+    llm = _FakeLLM("ne doit pas être consommé")
+    q = await generer_questions_amendement(
+        _scrutin_amendement(dispositif=None, expose=None), llm
+    )
+    assert q.pourquoi is None and q.changement is None
+    assert llm._reponses  # LLM non appelé : rien à générer sans source (§2.5)
 
 
 # --- generer_desaccord : Q2 depuis les explications de vote ---

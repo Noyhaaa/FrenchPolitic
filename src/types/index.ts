@@ -71,6 +71,16 @@ export interface Amendement {
   objet: string;
   auteur?: string;
   sort: 'adopte' | 'rejete' | 'retire';
+  /** Article/division visé (« Article 2 », « Article unique ») — factuel, neutre. */
+  cible?: string;
+  /** Contenu de l'amendement : ce qu'il propose de changer (extrait officiel). */
+  dispositif?: string;
+  /**
+   * Exposé sommaire = le « pourquoi », côté AUTEUR (non neutre, §4.3). À afficher
+   * en bloc cité et attribué, jamais fondu dans un texte neutre (comme l'exposé
+   * des motifs du dossier).
+   */
+  exposeSommaire?: string;
   /** Scrutin public correspondant, si l'amendement a été mis aux voix. */
   scrutinId?: string;
   /**
@@ -125,6 +135,25 @@ export interface QuestionsCitoyennes {
   desaccordSource?: SourceOfficielle;
   resultat?: string;
   changement?: string;
+}
+
+/**
+ * Les questions citoyennes d'un vote d'amendement (fiche vote, §2.2) —
+ * adaptation aux amendements des 4 questions de la fiche dossier.
+ *
+ * Chaque réponse est optionnelle : absente = « information non disponible »
+ * (§2.5, jamais de comblement).
+ * - `pourquoi` vient de l'exposé sommaire (validé côté backend) et commence
+ *   toujours par « Selon son auteur » : point de vue du déposant (§4.3).
+ * - `changement` vient du dispositif (l'extrait officiel), au conditionnel.
+ * - `resultat` est composé de façon déterministe depuis le vote.
+ * - Le « qui était pour / contre » n'a pas de champ ici : il est rendu depuis
+ *   `positionsGroupes` du scrutin (déterministe, sourcé par le vote).
+ */
+export interface QuestionsAmendement {
+  pourquoi?: string;
+  changement?: string;
+  resultat?: string;
 }
 
 /**
@@ -188,6 +217,20 @@ export interface Scrutin {
   scrutinPublic: boolean;
   resultat: ResultatGlobal;
   positionsGroupes: PositionGroupe[];
+  /** Pour un vote d'amendement : article visé (« Article 2 ») — factuel, neutre. */
+  cible?: string;
+  /** Pour un vote d'amendement : ce qu'il propose de changer (extrait officiel). */
+  dispositif?: string;
+  /**
+   * Pour un vote d'amendement : exposé sommaire = le « pourquoi », côté AUTEUR
+   * (non neutre, §4.3) → bloc cité et attribué, jamais présenté comme neutre.
+   */
+  exposeSommaire?: string;
+  /**
+   * Pour un vote d'amendement : ses questions citoyennes (générées à
+   * l'ingestion, affichées en tête de fiche vote). Absent sur un vote de texte.
+   */
+  questions?: QuestionsAmendement;
   /**
    * Pour le vote d'un amendement : ses sous-amendements (chacun lié à son
    * propre scrutin) — la fiche vote de l'amendement les liste.

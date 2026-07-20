@@ -422,6 +422,47 @@ def test_build_dossier_partitionne_texte_et_amendement():
     assert "/dossiers/" in dossier.sources[0].url
 
 
+def test_build_dossier_enrichit_amendement_depuis_index():
+    """Quand l'index des amendements est fourni, le vote d'amendement reçoit son
+    contenu (dispositif, exposé sommaire, article visé) — lié par (dossierRef,
+    numéro) + date."""
+    from datetime import date
+
+    from app.ingestion.amendements import AmendementEnrichi
+
+    resolver = build_resolver_from_organes(ORGANES)
+    amend = parse_scrutin(SCRUTIN, resolver)  # DLR5L17N53940, n° 80, 2026-07-02
+    index = {
+        ("DLR5L17N53940", "80"): [
+            AmendementEnrichi(
+                dispositif="Supprimer l'alinéa 2.",
+                expose_sommaire="Cet amendement clarifie le texte.",
+                cible="Article 2",
+                date_sort=date(2026, 7, 2),
+            )
+        ]
+    }
+
+    dossier = build_dossier([amend], index)
+
+    am = dossier.amendements[0]
+    assert am.cible == "Article 2"
+    assert am.dispositif == "Supprimer l'alinéa 2."
+    assert am.expose_sommaire == "Cet amendement clarifie le texte."
+
+
+def test_build_dossier_sans_index_laisse_contenu_vide():
+    """Sans index (archive non téléchargée) : pas de contenu, mais l'amendement
+    reste présent (§2.5 : rien n'est inventé)."""
+    resolver = build_resolver_from_organes(ORGANES)
+    amend = parse_scrutin(SCRUTIN, resolver)
+    dossier = build_dossier([amend])
+    am = dossier.amendements[0]
+    assert am.dispositif is None
+    assert am.expose_sommaire is None
+    assert am.cible is None
+
+
 def test_build_dossier_rattache_sous_amendements():
     """Un sous-amendement est rattaché à son amendement parent (« … à
     l'amendement n° X ») — il n'apparaît pas au premier niveau du dossier."""

@@ -18,8 +18,12 @@ import io
 import json
 import zipfile
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import httpx
+
+if TYPE_CHECKING:
+    from app.ingestion.amendements import AmendementEnrichi
 
 from app.ingestion.normalize import (
     as_list,
@@ -59,6 +63,12 @@ DEBATS_URL = (
     "https://data.assemblee-nationale.fr/static/openData/repository/"
     "{leg}/vp/syceronbrut/syseron.xml.zip"
 )
+# Amendements (~300 Mo) : contenu + exposé sommaire de chaque amendement, pour
+# enrichir les votes d'amendement du fil (§ amendements enrichis).
+AMENDEMENTS_URL = (
+    "https://data.assemblee-nationale.fr/static/openData/repository/"
+    "{leg}/loi/amendements_div_legis/Amendements.json.zip"
+)
 
 
 @dataclass
@@ -80,6 +90,11 @@ class AssembleeOpenDataClient:
     # ZIP tronqué. On réessaie du début plutôt que de laisser tomber tout le run.
     _ZIP_TENTATIVES = 4
     _ZIP_ATTENTES_S = (3.0, 8.0, 20.0)
+    # Archives très lourdes (amendements ~300 Mo) : le CDN coupe régulièrement en
+    # cours de transfert. On reprend là où on s'est arrêté (HTTP Range) plutôt que
+    # de tout retélécharger, avec davantage de tentatives.
+    _ZIP_TENTATIVES_LOURD = 8
+    _ZIP_ATTENTE_LOURD_S = 5.0
 
     def __init__(self, legislature: int = 17, timeout: float = 120.0) -> None:
         self.legislature = legislature
@@ -104,6 +119,43 @@ class AssembleeOpenDataClient:
                 derniere = exc
                 if tentative < len(self._ZIP_ATTENTES_S):
                     await asyncio.sleep(self._ZIP_ATTENTES_S[tentative])
+        assert derniere is not None
+        raise derniere
+
+    async def _download_zip_resumable(self, url: str) -> zipfile.ZipFile:
+        """Comme `_download_zip` mais **reprend** un transfert coupé (HTTP Range).
+
+        Pour les archives très lourdes (~300 Mo) que le CDN interrompt souvent :
+        on garde les octets déjà reçus et on redemande le reste (`Range`), au lieu
+        de repartir de zéro à chaque coupure. Un ZIP tronqué (`BadZipFile`) fait
+        repartir du début (les octets étaient corrompus/incomplets)."""
+        buf = bytearray()
+        derniere: Exception | None = None
+        for tentative in range(self._ZIP_TENTATIVES_LOURD):
+            try:
+                headers = {"User-Agent": "Mozilla/5.0"}
+                if buf:
+                    headers["Range"] = f"bytes={len(buf)}-"
+                async with httpx.AsyncClient(
+                    timeout=self._timeout, follow_redirects=True
+                ) as c:
+                    async with c.stream("GET", url, headers=headers) as resp:
+                        # 200 alors qu'on demandait une reprise = le serveur ignore
+                        # Range et renvoie tout → on repart du début pour ne pas
+                        # concaténer deux copies.
+                        if buf and resp.status_code == 200:
+                            buf = bytearray()
+                        resp.raise_for_status()
+                        async for chunk in resp.aiter_bytes():
+                            buf.extend(chunk)
+                return zipfile.ZipFile(io.BytesIO(bytes(buf)))
+            except zipfile.BadZipFile as exc:
+                derniere = exc
+                buf = bytearray()  # archive incomplète : on repart de zéro
+            except httpx.HTTPError as exc:
+                derniere = exc  # on garde `buf` pour reprendre au prochain essai
+            if tentative < self._ZIP_TENTATIVES_LOURD - 1:
+                await asyncio.sleep(self._ZIP_ATTENTE_LOURD_S)
         assert derniere is not None
         raise derniere
 
@@ -163,6 +215,23 @@ class AssembleeOpenDataClient:
                 with zf.open(name) as f:
                     out.append(f.read().decode("utf-8"))
         return out
+
+    async def download_amendements(
+        self,
+    ) -> "dict[tuple[str, str], list[AmendementEnrichi]]":
+        """Télécharge l'archive des amendements et en construit l'index.
+
+        Best-effort au niveau de l'appelant : l'archive est très volumineuse
+        (~300 Mo) et n'enrichit que le contenu des votes d'amendement (§2.5) —
+        un échec ne doit pas tuer le run. On indexe en flux (sans tout garder
+        décompressé en mémoire) via `amendements.construire_index`.
+        """
+        from app.ingestion.amendements import construire_index
+
+        zf = await self._download_zip_resumable(
+            AMENDEMENTS_URL.format(leg=self.legislature)
+        )
+        return construire_index(zf)
 
     async def download_amo(self) -> tuple[list[dict], list[dict]]:
         """Télécharge l'archive AMO une seule fois : (organes, acteurs).

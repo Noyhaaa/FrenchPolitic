@@ -41,7 +41,9 @@ async def _main(limit: int | None, legislature: int) -> None:
         f"(dont {report.exposes_senat} via le Sénat), "
         f"{report.themes_reclasses} thèmes reclassés, "
         f"{report.questions_generees} questions citoyennes générées, "
-        f"{report.desaccords_generes} désaccords (débats) reliés."
+        f"{report.questions_amendements_generees} questions d'amendement générées, "
+        f"{report.desaccords_generes} désaccords (débats) reliés, "
+        f"{report.amendements_enrichis} amendements enrichis (contenu)."
     )
     if report.dossiers_orphelins_supprimes:
         print(

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import zipfile
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import httpx
 from sqlalchemy import delete, select
@@ -24,6 +24,7 @@ from app.ingestion.assemblee import (
     dossier_source,
     parse_scrutin,
 )
+from app.ingestion.amendements import AmendementEnrichi, enrichir as enrichir_amendement
 from app.ingestion.debats import IndexDebats, url_compte_rendu
 from app.ingestion.dossiers_legislatifs import construire_reconciliation
 from app.ingestion.textes_an import (
@@ -55,12 +56,17 @@ from app.ingestion.organes import (
 from app.ai.faits import construire_faits
 from app.ai.generation import generer_resume
 from app.ai.llm import LLMClient
-from app.ai.questions import generer_desaccord, generer_questions
+from app.ai.questions import (
+    generer_desaccord,
+    generer_questions,
+    generer_questions_amendement,
+)
 from app.ai.theme import classifier_theme
 from app.schemas import (
     Amendement,
     Dossier,
     MiseAJourDossier,
+    QuestionsAmendement,
     QuestionsCitoyennes,
     Scrutin,
     ScrutinResume,
@@ -83,7 +89,12 @@ class SyncReport:
     exposes_senat: int = 0
     themes_reclasses: int = 0
     questions_generees: int = 0
+    # Votes d'amendement dont une question LLM (pourquoi/changement) a été
+    # générée ce run (le résultat, déterministe, n'est pas compté).
+    questions_amendements_generees: int = 0
     desaccords_generes: int = 0
+    # Votes d'amendement enrichis d'un contenu (dispositif ou exposé sommaire).
+    amendements_enrichis: int = 0
     # Dossiers supprimés car vidés de leurs scrutins (ex. TXT- migrés vers un
     # dossier officiel après amélioration de la réconciliation).
     dossiers_orphelins_supprimes: int = 0
@@ -135,23 +146,47 @@ def _dedupe_sources(sources: list[SourceOfficielle]) -> list[SourceOfficielle]:
     return out
 
 
-def _amendement_from_scrutin(scrutin: Scrutin) -> Amendement:
+IndexAmendements = dict[tuple[str, str], list[AmendementEnrichi]]
+
+
+def _amendement_from_scrutin(
+    scrutin: Scrutin, index: IndexAmendements | None = None
+) -> Amendement:
     """Un vote d'amendement → entrée d'amendement (liée à son scrutin public).
 
     Numéro et auteur sont extraits de l'objet officiel quand ils sont sans
-    ambiguïté ; sinon absents (§2.5 : on n'invente pas).
+    ambiguïté ; sinon absents (§2.5 : on n'invente pas). Quand l'archive des
+    amendements est disponible, on attache le **contenu** (dispositif), l'exposé
+    sommaire (côté auteur, attribué) et l'article visé.
     """
+    numero = numero_amendement(scrutin.objet)
+    cible = dispositif = expose = None
+    if index is not None:
+        try:
+            date_vote = date.fromisoformat(scrutin.date[:10])
+        except ValueError:
+            date_vote = None
+        enrichi = enrichir_amendement(index, scrutin.dossier_id, numero, date_vote)
+        if enrichi is not None:
+            cible = enrichi.cible
+            dispositif = enrichi.dispositif
+            expose = enrichi.expose_sommaire
     return Amendement(
         id=scrutin.id,
-        numero=numero_amendement(scrutin.objet),
+        numero=numero,
         objet=scrutin.objet,
         auteur=auteur_amendement(scrutin.objet),
         sort="adopte" if scrutin.statut.value == "adopte" else "rejete",
+        cible=cible,
+        dispositif=dispositif,
+        expose_sommaire=expose,
         scrutin_id=scrutin.id,
     )
 
 
-def _structurer_amendements(votes: list[Scrutin]) -> list[Amendement]:
+def _structurer_amendements(
+    votes: list[Scrutin], index: IndexAmendements | None = None
+) -> list[Amendement]:
     """Structure les votes d'amendement d'un dossier.
 
     Les sous-amendements sont rattachés à leur amendement parent (identifié par
@@ -159,13 +194,15 @@ def _structurer_amendements(votes: list[Scrutin]) -> list[Amendement]:
     reste au niveau du dossier (factuel, rien n'est déduit).
     """
     amendements = [
-        _amendement_from_scrutin(s) for s in votes if not est_sous_amendement(s.objet)
+        _amendement_from_scrutin(s, index)
+        for s in votes
+        if not est_sous_amendement(s.objet)
     ]
     par_numero = {a.numero: a for a in amendements if a.numero}
     for s in votes:
         if not est_sous_amendement(s.objet):
             continue
-        sous = _amendement_from_scrutin(s)
+        sous = _amendement_from_scrutin(s, index)
         parent = par_numero.get(numero_amendement_parent(s.objet) or "")
         if parent is not None:
             parent.sous_amendements.append(sous)
@@ -174,7 +211,9 @@ def _structurer_amendements(votes: list[Scrutin]) -> list[Amendement]:
     return amendements
 
 
-def build_dossier(parses: list[ScrutinParse]) -> Dossier:
+def build_dossier(
+    parses: list[ScrutinParse], index_amendements: IndexAmendements | None = None
+) -> Dossier:
     """Agrège les scrutins d'un même dossier (ordre : du plus récent au plus ancien).
 
     Les votes sur le **texte** (ensemble, articles, motions) peuplent la liste
@@ -212,7 +251,7 @@ def build_dossier(parses: list[ScrutinParse]) -> Dossier:
         date_dernier_scrutin=tous[0].date,
         mise_a_jour=None,
         scrutins=[ScrutinResume.from_scrutin(s) for s in votes_texte],
-        amendements=_structurer_amendements(votes_amendement),
+        amendements=_structurer_amendements(votes_amendement, index_amendements),
         sources=_dedupe_sources(sources),
         # Résumé neutre par gabarit, ancré sur les faits des scrutins (§4.1).
         resume=generer_resume(
@@ -266,6 +305,14 @@ def _merge_avec_existant(prev: Dossier, incoming: Dossier) -> Dossier:
             for sa in a.sous_amendements:
                 sa_by_id[sa.id] = sa
             a.sous_amendements = list(sa_by_id.values())
+            # Enrichissement (contenu/exposé/cible) : best-effort. Si l'archive
+            # des amendements n'a pas été téléchargée ce run, le build frais
+            # arrive sans contenu → on préserve celui déjà en base plutôt que de
+            # l'effacer.
+            if a.dispositif is None and a.expose_sommaire is None and a.cible is None:
+                a.cible = connu.cible
+                a.dispositif = connu.dispositif
+                a.expose_sommaire = connu.expose_sommaire
         am_by_id[a.id] = a
     amendements: list[Amendement] = []
     for a in am_by_id.values():
@@ -406,6 +453,10 @@ class SyncJob:
         # dossierRef → numéros de distribution AN de ses documents (liaison
         # certaine débat ↔ dossier, à travers la navette).
         self._numeros_par_ref: dict[str, set[int]] = {}
+        # (dossierRef, numéro) → contenu d'amendement (dispositif, exposé sommaire,
+        # article visé). Vide si l'archive (~300 Mo) n'a pas pu être téléchargée
+        # ce run (best-effort : l'enrichissement déjà en base est préservé).
+        self._index_amendements: IndexAmendements = {}
         self._groupes_par_abbrev: dict[str, GroupInfo] = {}
 
     # Abréviations de groupe divergentes entre le compte rendu et l'annuaire AMO
@@ -599,6 +650,44 @@ class SyncJob:
             questions.changement = questions.changement or prev.changement
         dossier.resume.questions = questions
 
+    async def _questions_amendement_en_base(
+        self, session: AsyncSession, scrutin_id: str
+    ) -> QuestionsAmendement | None:
+        """Les questions déjà persistées pour ce vote d'amendement, s'il y en a."""
+        row = await session.get(ScrutinRow, scrutin_id)
+        if row is None:
+            return None
+        brut = (row.payload or {}).get("questions")
+        return QuestionsAmendement.model_validate(brut) if brut else None
+
+    async def _generer_questions_amendement(
+        self, session: AsyncSession, scrutin: Scrutin, report: SyncReport
+    ) -> None:
+        """Renseigne les questions citoyennes d'un vote d'amendement (§2.2).
+
+        Le résultat (déterministe) est recomposé à chaque run. Les réponses LLM
+        (pourquoi ← exposé sommaire, changement ← dispositif) déjà en base sont
+        réutilisées — on ne rappelle le modèle que pour ce qui manque ET dont la
+        source est disponible (un amendement sans contenu enrichi n'a rien à
+        générer, §2.5).
+        """
+        prev = await self._questions_amendement_en_base(session, scrutin.id)
+        deja_completes = prev is not None and (
+            (prev.pourquoi or not scrutin.expose_sommaire)
+            and (prev.changement or not scrutin.dispositif)
+        )
+        questions = await generer_questions_amendement(
+            scrutin, None if deja_completes else self._llm
+        )
+        if questions.pourquoi or questions.changement:
+            report.questions_amendements_generees += 1
+        if prev is not None:
+            # Une réponse validée en base ne se perd pas sur un run sans LLM
+            # (ou dont la sortie a été rejetée par les contrôles).
+            questions.pourquoi = questions.pourquoi or prev.pourquoi
+            questions.changement = questions.changement or prev.changement
+        scrutin.questions = questions
+
     async def run(self, limit: int | None = None) -> SyncReport:
         report = SyncReport(started_at=datetime.now(timezone.utc))
 
@@ -640,6 +729,18 @@ class SyncJob:
                     "désaccords non régénérés ce run (existants préservés)"
                 )
 
+        #       Amendements (contenu + exposé sommaire) : archive très lourde
+        #       (~300 Mo). Best-effort (§2.5) : un échec de téléchargement ne tue
+        #       pas le run — les amendements gardent leur enrichissement déjà en
+        #       base (préservé à la fusion), l'index reste simplement vide.
+        try:
+            self._index_amendements = await self._client.download_amendements()
+        except (httpx.HTTPError, zipfile.BadZipFile) as exc:
+            report.anomalies.append(
+                f"amendements non téléchargés ({type(exc).__name__}) : "
+                "contenu non régénéré ce run (existant préservé)"
+            )
+
         # 1bis) Dossiers législatifs : titres officiels + réconciliation des
         #       scrutins sans dossierRef vers leur vrai dossier (§5.1).
         documents = await self._client.download_dossiers()
@@ -672,7 +773,7 @@ class SyncJob:
         #    et du détail de chaque vote (table scrutin).
         async with self._sf() as session:
             for parses in par_dossier.values():
-                dossier = build_dossier(parses)
+                dossier = build_dossier(parses, self._index_amendements or None)
                 # Scrutins complets sur le texte (positions par groupe) — pour
                 # joindre les explications de vote du débat à la position votée.
                 votes_texte = [
@@ -686,6 +787,12 @@ class SyncJob:
                     session, dossier, parses[0].dossier_ref, votes_texte, report
                 )
                 dossier = await _upsert_dossier(session, dossier)
+                report.amendements_enrichis += sum(
+                    1
+                    for a in dossier.amendements
+                    for am in (a, *a.sous_amendements)
+                    if am.dispositif or am.expose_sommaire
+                )
                 # Le scrutin d'un amendement embarque ses sous-amendements :
                 # la fiche vote de l'amendement les liste (dossier fusionné =
                 # rattachements connus, runs précédents compris).
@@ -694,9 +801,31 @@ class SyncJob:
                     for a in dossier.amendements
                     if a.scrutin_id and a.sous_amendements
                 }
+                # Le contenu enrichi (dispositif/exposé/cible) doit aussi vivre
+                # sur le scrutin servi par GET /scrutins/{id} : c'est là que la
+                # fiche vote d'un amendement (ou sous-amendement, empilé) l'affiche.
+                # On le reprend du dossier fusionné (enrichissement préservé).
+                enrichi_par_scrutin = {
+                    am.id: am
+                    for a in dossier.amendements
+                    for am in (a, *a.sous_amendements)
+                    if am.dispositif or am.expose_sommaire or am.cible
+                }
                 for p in parses:
                     if p.scrutin.id in sous_par_scrutin:
                         p.scrutin.sous_amendements = sous_par_scrutin[p.scrutin.id]
+                    enrichi = enrichi_par_scrutin.get(p.scrutin.id)
+                    if enrichi is not None:
+                        p.scrutin.cible = enrichi.cible
+                        p.scrutin.dispositif = enrichi.dispositif
+                        p.scrutin.expose_sommaire = enrichi.expose_sommaire
+                    # Questions citoyennes du vote d'amendement (fiche vote) —
+                    # après l'enrichissement : elles s'appuient sur le
+                    # dispositif / l'exposé sommaire tout juste attachés.
+                    if est_amendement(p.scrutin.objet):
+                        await self._generer_questions_amendement(
+                            session, p.scrutin, report
+                        )
                     await _upsert_scrutin(session, p.scrutin)
                 report.dossiers_upserts += 1
             await session.commit()

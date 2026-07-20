@@ -14,6 +14,7 @@ from app.schemas import (
     PhaseScrutin,
     PhraseSourcee,
     PositionGroupe,
+    QuestionsAmendement,
     ResultatGlobal,
     ResumeScrutin,
     Scrutin,
@@ -93,7 +94,7 @@ SEED_SCRUTINS: list[Scrutin] = [
         id="scr-2026-0412b",
         dossier_id="dos-logement-2026",
         date="2026-07-08T14:30:00Z",
-        objet="Vote sur l'ensemble du texte",
+        objet="Vote sur l'ensemble du texte (première lecture)",
         statut="adopte",
         scrutin_public=True,
         resultat=ResultatGlobal(pour=310, contre=231, abstention=24, non_votants=12),
@@ -134,6 +135,34 @@ SEED_SCRUTINS: list[Scrutin] = [
         objet="Amendement n° 12 — étendre l'encadrement aux communes de plus de 20 000 habitants",
         statut="adopte",
         scrutin_public=True,
+        # Contenu enrichi (fictif) : ce que l'ingestion réelle tire de l'open
+        # data AN. Le dispositif est factuel ; l'exposé sommaire est le point de
+        # vue de l'auteur (bloc attribué, §4.3).
+        cible="Article 2",
+        dispositif=(
+            "Au premier alinéa de l'article 2, le seuil de 50 000 habitants "
+            "est remplacé par un seuil de 20 000 habitants."
+        ),
+        expose_sommaire=(
+            "Les tensions locatives ne se limitent pas aux grandes villes : "
+            "cet amendement étend l'encadrement des loyers aux communes "
+            "moyennes."
+        ),
+        questions=QuestionsAmendement(
+            pourquoi=(
+                "Selon son auteur, les tensions sur les loyers ne se limitent "
+                "pas aux grandes villes : l'amendement vise à couvrir aussi "
+                "les communes moyennes."
+            ),
+            changement=(
+                "L'encadrement des loyers s'appliquerait aussi aux communes "
+                "de plus de 20 000 habitants."
+            ),
+            resultat=(
+                "L'amendement a été adopté par 276 voix contre 254, avec "
+                "38 abstentions."
+            ),
+        ),
         resultat=ResultatGlobal(pour=276, contre=254, abstention=38, non_votants=9),
         positions_groupes=[
             _grp("RE", "pour", 120, 30, 10, 0.70),
@@ -157,6 +186,15 @@ SEED_SCRUTINS: list[Scrutin] = [
         ),
         statut="rejete",
         scrutin_public=True,
+        # Questions partielles : sans contenu enrichi, seules les réponses
+        # déterministes existent — l'app affiche « information non
+        # disponible » pour le reste (§2.5).
+        questions=QuestionsAmendement(
+            resultat=(
+                "Le sous-amendement a été rejeté par 268 voix contre 188, "
+                "avec 26 abstentions."
+            ),
+        ),
         resultat=ResultatGlobal(pour=188, contre=268, abstention=26, non_votants=12),
         positions_groupes=[
             _grp("RE", "contre", 18, 130, 12, 0.81),
@@ -175,6 +213,12 @@ SEED_SCRUTINS: list[Scrutin] = [
         objet="Amendement n° 45 — exonérer les logements rénovés depuis moins de 3 ans",
         statut="rejete",
         scrutin_public=True,
+        questions=QuestionsAmendement(
+            resultat=(
+                "L'amendement a été rejeté par 289 voix contre 232, avec "
+                "41 abstentions."
+            ),
+        ),
         resultat=ResultatGlobal(pour=232, contre=289, abstention=41, non_votants=15),
         positions_groupes=[
             _grp("RE", "contre", 40, 108, 12, 0.68),
@@ -281,6 +325,16 @@ SEED_DOSSIERS: list[Dossier] = [
                 objet="Étend l'encadrement aux communes de plus de 20 000 habitants",
                 auteur="Groupe Écologiste",
                 sort="adopte",
+                cible="Article 2",
+                dispositif=(
+                    "Au premier alinéa de l'article 2, le seuil de 50 000 "
+                    "habitants est remplacé par un seuil de 20 000 habitants."
+                ),
+                expose_sommaire=(
+                    "Les tensions locatives ne se limitent pas aux grandes "
+                    "villes : cet amendement étend l'encadrement des loyers "
+                    "aux communes moyennes."
+                ),
                 scrutin_id="scr-2026-0412-am1",
                 sous_amendements=[_SOUS_AM_01],
             ),

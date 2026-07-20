@@ -64,6 +64,13 @@ class Amendement(CamelModel):
     objet: str
     auteur: str | None = None
     sort: SortAmendement
+    # Article/division visé (« Article 2 », « Article unique ») — factuel, neutre.
+    cible: str | None = None
+    # Contenu de l'amendement : ce qu'il propose de changer (extrait officiel).
+    dispositif: str | None = None
+    # Exposé sommaire = le « pourquoi », côté AUTEUR (non neutre, §4.3) : à
+    # afficher en bloc cité et attribué, jamais fondu dans le résumé neutre.
+    expose_sommaire: str | None = None
     # Scrutin public de l'amendement, si mis aux voix (détail + nominatif là-bas).
     scrutin_id: str | None = None
     # Sous-amendements rattachés (« … à l'amendement n° X »). Un sous-amendement
@@ -126,6 +133,28 @@ class QuestionsCitoyennes(CamelModel):
     changement: str | None = None
 
 
+class QuestionsAmendement(CamelModel):
+    """Les questions citoyennes d'un vote d'amendement (fiche vote, §2.2).
+
+    Adaptation aux amendements des 4 questions de la fiche dossier. Chaque
+    réponse est optionnelle : absente = « information non disponible » (§2.5).
+    - `pourquoi` est généré par LLM depuis l'**exposé sommaire** (validé par les
+      mêmes contrôles déterministes que les questions dossier). Il commence
+      toujours par « Selon l'auteur de l'amendement » : c'est le point de vue du
+      déposant, jamais un fait neutre (§4.3).
+    - `changement` est généré par LLM depuis le **dispositif** (l'extrait
+      officiel de ce que l'amendement change), au conditionnel — validé
+      déterministiquement contre ce dispositif.
+    - `resultat` est composé de façon **déterministe** depuis le vote.
+    - Le « qui était pour / contre » n'a pas de champ ici : il est rendu côté
+      app depuis `positions_groupes` (déterministe, sourcé par le scrutin).
+    """
+
+    pourquoi: str | None = None
+    changement: str | None = None
+    resultat: str | None = None
+
+
 class ResumeScrutin(CamelModel):
     """Résumé neutre du texte (au niveau du dossier)."""
 
@@ -157,6 +186,15 @@ class Scrutin(CamelModel):
     scrutin_public: bool
     resultat: ResultatGlobal
     positions_groupes: list[PositionGroupe] = []
+    # Pour un vote d'amendement/sous-amendement : son contenu enrichi (open data
+    # AN). `cible`/`dispositif` sont factuels ; `expose_sommaire` est le point de
+    # vue de l'auteur (non neutre, §4.3) → bloc attribué sur la fiche vote.
+    cible: str | None = None
+    dispositif: str | None = None
+    expose_sommaire: str | None = None
+    # Pour un vote d'amendement : ses questions citoyennes (générées à
+    # l'ingestion, affichées en tête de fiche vote). None sur un vote de texte.
+    questions: QuestionsAmendement | None = None
     # Pour le vote d'un amendement : ses sous-amendements (chacun lié à son
     # propre scrutin) — la fiche vote de l'amendement peut ainsi les lister.
     sous_amendements: list[Amendement] = []

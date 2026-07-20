@@ -1,4 +1,4 @@
-import { Amendement, StatutScrutin, PositionVote } from '@/types';
+import { Amendement, ScrutinResume, StatutScrutin, PositionVote } from '@/types';
 
 /** Libellé texte du statut (jamais la couleur seule — RGAA §8). */
 export function statutLabel(statut: StatutScrutin): string {
@@ -155,6 +155,85 @@ export function natureTexte(titre: string): string | undefined {
   if (t.startsWith('proposition de resolution'))
     return 'Proposition de résolution';
   return undefined;
+}
+
+/** Phases de la navette reconnues dans les objets officiels des votes AN.
+ * (Les « parties » du budget ne sont pas des phases de navette — exclues.) */
+const PHASES_NAVETTE: ReadonlyArray<[RegExp, string]> = [
+  [/premiere lecture/, 'Première lecture'],
+  [/deuxieme lecture/, 'Deuxième lecture'],
+  [/troisieme lecture/, 'Troisième lecture'],
+  [/commission mixte paritaire/, 'Commission mixte paritaire'],
+  [/nouvelle lecture/, 'Nouvelle lecture'],
+  [/lecture definitive/, 'Lecture définitive'],
+];
+
+/** Une étape de la trajectoire du texte À L'ASSEMBLÉE (frise de la fiche). */
+export interface PhaseNavette {
+  label: string;
+  /** Statut du vote sur l'ensemble de cette phase — absent si la phase n'a pas
+   * (encore) de vote d'ensemble documenté (§2.5 : on n'infère pas). */
+  statut?: StatutScrutin;
+  /** Date du vote le plus récent de la phase (ISO). */
+  date: string;
+}
+
+/**
+ * Trajectoire du texte à l'Assemblée : les phases de navette que les libellés
+ * officiels des votes documentent, dans l'ordre chronologique. 100 % factuel :
+ * une phase n'apparaît que si un vote la mentionne, et son statut ne vient que
+ * du vote sur l'ensemble de cette phase. Les étapes hors AN (Sénat) ne sont
+ * pas couvertes par nos données — elles ne sont donc pas affichées (§2.5).
+ * Vide si aucun vote ne porte de mention de phase.
+ */
+export function phasesNavette(scrutins: ScrutinResume[]): PhaseNavette[] {
+  const parLabel = new Map<string, PhaseNavette & { ordre: number }>();
+  // La liste arrive du plus récent au plus ancien → on remonte le fil.
+  const chrono = [...scrutins].reverse();
+  chrono.forEach((s, ordre) => {
+    const t = plier(s.objet);
+    for (const [re, label] of PHASES_NAVETTE) {
+      if (!re.test(t)) continue;
+      const estEnsemble = t.includes('ensemble');
+      const connu = parLabel.get(label);
+      if (!connu) {
+        parLabel.set(label, {
+          label,
+          date: s.date,
+          ordre,
+          statut: estEnsemble ? s.statut : undefined,
+        });
+      } else {
+        connu.date = s.date;
+        if (estEnsemble) connu.statut = s.statut;
+      }
+    }
+  });
+  return [...parLabel.values()]
+    .sort((a, b) => a.ordre - b.ordre)
+    .map(({ ordre: _ordre, ...phase }) => phase);
+}
+
+/**
+ * Le vote DÉCISIF d'un dossier : le vote sur l'ensemble du texte le plus
+ * récent (la liste arrive triée du plus récent au plus ancien) — c'est lui qui
+ * scelle l'adoption ou le rejet, contrairement aux votes d'articles ou aux
+ * motions. Miroir de `_vote_decisif` côté backend. undefined si le texte n'a
+ * pas (encore) été voté dans son ensemble — on ne désigne alors rien (§2.5).
+ */
+export function voteDecisif(scrutins: ScrutinResume[]): ScrutinResume | undefined {
+  return scrutins.find((s) => plier(s.objet).includes('ensemble'));
+}
+
+/** Le vote porte-t-il sur un amendement (ou sous-amendement) ? Miroir de
+ * `est_amendement` côté backend (heuristique sur l'objet officiel). */
+export function estVoteAmendement(objet: string): boolean {
+  return plier(objet).includes('amendement');
+}
+
+/** Le vote porte-t-il sur un sous-amendement ? Miroir de `est_sous_amendement`. */
+export function estVoteSousAmendement(objet: string): boolean {
+  return plier(objet).includes('sous-amendement');
 }
 
 /** Titre compact d'un amendement : « Amendement n° 80 » (ou l'objet complet

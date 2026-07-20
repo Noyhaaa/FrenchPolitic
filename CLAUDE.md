@@ -28,8 +28,10 @@ Toute évolution du modèle doit être répercutée **des deux côtés**.
 ## État actuel
 
 **Frontend** — parcours en or de la V1 (§2.2 du MVP), **branché sur l'API**
-(`src/api` + hooks `src/hooks`), avec cache offline (AsyncStorage) et états
-chargement / erreur / hors-ligne.
+(`src/api` + hooks `src/hooks`), avec cache offline (AsyncStorage), états
+chargement / erreur / hors-ligne, et **pull-to-refresh** sur l'accueil comme
+sur les fiches (les hooks exposent `refresh` — état `refreshing` distinct,
+les données restent affichées pendant le rafraîchissement).
 
 > **Unité centrale = le Dossier (texte de loi)**, pas le scrutin. Un dossier
 > agrège ses **scrutins** successifs (navette), ses amendements et un résumé
@@ -46,10 +48,21 @@ Quatre écrans du cœur de valeur :
    thème**. Pas de défilement infini : la recherche sert à aller au-delà.
    Les vignettes affichent la **nature du texte** (« Projet de loi »…) quand
    le titre la porte (`natureTexte` — rien d'affiché sinon, on ne déduit pas).
-2. **Fiche dossier** (`DossierDetailScreen` → `useDossier`) : résumé du texte,
-   puis **trois sections distinctes** — la **liste compacte des votes sur le
-   texte** (titre = **type du vote en clair** via `libelleScrutin` : « Vote sur
-   l'ensemble », « Motion de censure », « Article 2 »… + statut +
+2. **Fiche dossier** (`DossierDetailScreen` → `useDossier`) : en tête, la
+   **frise « Trajectoire à l'Assemblée »** (`TrajectoireNavette` +
+   `phasesNavette` dans `format.ts`) — les phases de navette documentées par
+   les libellés officiels des votes (1re lecture, CMP, lecture définitive…),
+   statut d'une phase = son vote sur l'ensemble uniquement ; pas de données
+   Sénat → pas d'étape Sénat, frise masquée si aucune phase documentée (§2.5).
+   Puis résumé du texte,
+   et **trois sections distinctes** — les **votes sur le texte**, avec le
+   **vote décisif mis en avant** (`VoteDecisifCard` + `voteDecisif` dans
+   `format.ts`, miroir de `_vote_decisif` backend : le vote sur l'ensemble le
+   plus récent, carte accentuée + phrase explicative factuelle — c'est lui qui
+   scelle l'adoption/le rejet, pas les votes d'articles ni les motions ; sans
+   vote sur l'ensemble, rien n'est désigné §2.5) suivi de la **liste compacte
+   des autres votes** (titre = **type du vote en clair** via `libelleScrutin` :
+   « Vote sur l'ensemble », « Motion de censure », « Article 2 »… + statut +
    micro-résultat ; objet non reconnu restitué tel quel, §2.5), les
    **Amendements** (ligne compacte via `AmendementRow` : numéro + sort + auteur,
    sans répéter la formule « l'amendement n° X de M. Y »), et les
@@ -60,12 +73,26 @@ Quatre écrans du cœur de valeur :
    de la fiche sont de **niveau dossier** uniquement (dossier législatif…) — la
    source de chaque vote vit sur sa propre fiche, pas de doublon.
 3. **Fiche vote** (`ScrutinDetailScreen` → `useScrutin`, `GET /scrutins/{id}`) :
-   titre = type du vote en clair, **objet officiel complet en dessous**, puis
-   résultat global, ventilation par groupe, et **noms des votants** dépliables
-   groupe par groupe quand le nominatif est disponible (§5.2). Sert aussi bien un
-   vote sur le texte qu'un vote d'amendement ; le vote d'un amendement liste en
-   plus **ses sous-amendements** (chacun ouvrant sa propre fiche vote, empilée
-   via `navigation.push`).
+   titre = type du vote en clair, **objet officiel complet en dessous**. Deux
+   visages selon le vote :
+   — **Vote sur le texte** : résultat global, puis section **Vote par groupe**
+   avec la **ligne de fracture** (`LigneFracture` : quels groupes ont
+   majoritairement voté pour / contre / se sont abstenus — factuel, sourcé par
+   le scrutin, jamais un jugement §7.4, masquée si unanimité), la ventilation
+   détaillée par groupe et les **noms des votants** dépliables groupe par
+   groupe quand le nominatif est disponible (§5.2).
+   — **Vote d'amendement / sous-amendement** : PAS de section « Vote par
+   groupe » — l'entrée est la carte **« L'amendement en 4 questions »**
+   (`QuestionsAmendementCard`, `Scrutin.questions`) : « Pourquoi ? » (exposé
+   sommaire, préfixé « Selon son auteur » §4.3), « Qu'est-ce qu'il
+   changerait ? » (dispositif, conditionnel), « Qui était pour, qui était
+   contre ? » (rendu déterministe depuis `positionsGroupes` via `LigneFracture`,
+   unanimité affichée aussi), « Quel est le résultat ? » (déterministe, camp
+   gagnant en premier). Suivent **ce qu'il change** (`dispositif`, factuel, en
+   **carte** — même niveau visuel que le bloc auteur), **ce que dit l'auteur**
+   (exposé sommaire, bloc attribué non neutre §4.3), le résultat global, et
+   **ses sous-amendements** (chacun ouvrant sa propre fiche vote, empilée via
+   `navigation.push`).
 4. **Recherche simple** (`SearchScreen` → `useDossierSearch`, avec debounce)
 
 L'URL de l'API est dérivée de l'hôte Metro en dev (`src/api/config.ts`),
@@ -154,9 +181,29 @@ jamais de synthèse éditoriale (« qui a raison »). ⚠️ On **ne génère to
 résumé/prose neutre par LLM (mistral 7B distordait les faits invisiblement ; seul
 ce qui est attribuable à une source unique ET vérifiable déterministiquement
 passe par le modèle) — le **gabarit déterministe reste seul maître du résumé**.
-Reste vide/non comblé (§2.5) la liste des **amendements enrichis**
-(texte complet, exposé sommaire — Phase 2 Légifrance). Détails dans
-`backend/README.md`.
+Les **votes d'amendement sont enrichis** de leur **contenu** (dispositif : ce que
+l'amendement change), de leur **exposé sommaire** et de l'**article visé**, tirés
+de l'open data AN (`app/ingestion/amendements.py` — archive
+`amendements_div_legis`, ~300 Mo, **sans Légifrance**). Liaison au vote par
+**(dossierRef, numéro)** parmi les amendements de **séance** (préfixe d'organe
+« AN », numéro numérique = celui cité dans l'objet du vote) ; l'ambiguïté entre
+lectures d'une même navette est levée par la **date** du vote (fenêtre ± 3 j),
+sinon on n'attache rien (§2.5). ~77 % des votes d'amendement (5,5 k) reçoivent
+ainsi leur contenu. Le **dispositif** est un extrait officiel factuel ; l'**exposé
+sommaire** est le point de vue de l'auteur (non neutre, §4.3), affiché en **bloc
+attribué** — déplié à la demande dans la liste (`AmendementRow`) **et** sur la
+**fiche vote** de l'amendement/sous-amendement (`ScrutinDetailScreen`, où le
+contenu est aussi porté par le `Scrutin`) —, jamais fondu dans le résumé neutre —
+même traitement que l'exposé des motifs. Best-effort : un échec de
+téléchargement de l'archive préserve l'enrichissement déjà en base. Chaque **vote
+d'amendement porte aussi ses questions citoyennes** (`Scrutin.questions`,
+générées à l'ingestion par `generer_questions_amendement`) : « pourquoi » (LLM ←
+exposé sommaire, préfixe vérifié « Selon son auteur »), « changement » (LLM ←
+dispositif, conditionnel) — mêmes contrôles déterministes (`valider_reponse`) —
+et « résultat » déterministe (**camp gagnant en premier** : « rejeté par 268
+voix contre 188 », jamais l'inverse) ; réponses validées réutilisées entre runs.
+Le « qui était pour / contre » n'est pas généré : l'app le rend depuis
+`positionsGroupes` (`LigneFracture`). Détails dans `backend/README.md`.
 
 ## Stack & commandes
 
@@ -264,7 +311,9 @@ Défini dans `src/types/index.ts`. **Entité centrale `Dossier`** (un texte de l
 `resume` (résumé neutre ancré + confiance + `champsNonDocumentes`), `scrutins`
 (les **votes sur le texte**, résumés), `amendements` (les **votes d'amendement** :
 `numero?` + `auteur?` extraits de l'objet officiel quand sans ambiguïté, objet,
-sort, `scrutinId` vers la fiche vote, et `sousAmendements?` — les
+sort, `cible?` (article visé) + `dispositif?` (ce que l'amendement change) +
+`exposeSommaire?` (le « pourquoi » côté auteur, non neutre) tirés de l'open data
+AN quand disponibles, `scrutinId` vers la fiche vote, et `sousAmendements?` — les
 **sous-amendements rattachés** à cet amendement, même forme), `sources`,
 `statut`, `theme`, `dateDernierScrutin`, `miseAJour?` (badge §7.7). La partition
 texte / amendement / sous-amendement se fait à l'ingestion (`est_amendement`,
@@ -273,6 +322,10 @@ Un `Scrutin` est **vote-niveau** : `dossierId`, `objet` (ce sur quoi on a voté)
 `statut`, `scrutinPublic`, `resultat`, `positionsGroupes` (avec `nomsPour` /
 `nomsContre` / `nomsAbstention` optionnels — le **nominatif**, absent = masqué,
 §2.5), `sousAmendements?` (pour le vote d'un amendement : ses sous-amendements),
+`cible?` / `dispositif?` / `exposeSommaire?` (pour un vote d'amendement : son
+contenu enrichi, cf. `amendements.py` — miroir des mêmes champs sur `Amendement`),
+`questions?` (`QuestionsAmendement` : les questions citoyennes du vote
+d'amendement — `pourquoi` / `changement` / `resultat`, générées à l'ingestion),
 `sources`. La fiche dossier n'embarque que des `ScrutinResume` (liste
 compacte) ; le `Scrutin` complet est servi par `GET /scrutins/{id}`. Le fil et la
 recherche renvoient un `DossierListItem` allégé (dont `nombreScrutins` et
@@ -288,11 +341,10 @@ camelCase des schémas Pydantic backend, à répercuter des deux côtés).
   aujourd'hui vide des dossiers Postgres.
 - **Enrichissement ingestion** : Légifrance/PISTE pour le **texte consolidé** des
   dossiers (ce que la loi change dans le code — l'**exposé des motifs** est déjà
-  couvert via le PDF AN, cf. `textes_an.py`) ; **métadonnées d'amendement** (texte
-  complet, exposé sommaire — aujourd'hui l'amendement se résume à l'objet du
-  scrutin, son numéro/auteur extraits de ce libellé, et son sort) ; planification
-  du job de synchro (plusieurs fois/jour). *(La classification de thème est déjà
-  affinée par un LLM local — cf. ci-dessous.)*
+  couvert via le PDF AN, cf. `textes_an.py`, et le **contenu des amendements** via
+  l'open data AN, cf. `amendements.py`) ; planification du job de synchro
+  (plusieurs fois/jour). *(La classification de thème est déjà affinée par un LLM
+  local — cf. ci-dessous.)*
 - **V1.1** : fiche député (lecture seule), filtres de recherche, partage.
 - **V2** : assistant IA en questions pré-cadrées.
 

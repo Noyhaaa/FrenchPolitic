@@ -82,7 +82,7 @@ def test_get_scrutin_detail(client):
     assert r.status_code == 200
     body = r.json()
     assert body["dossierId"] == "dos-logement-2026"
-    assert body["objet"] == "Vote sur l'ensemble du texte"
+    assert body["objet"] == "Vote sur l'ensemble du texte (première lecture)"
     assert len(body["positionsGroupes"]) >= 1
 
 

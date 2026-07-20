@@ -87,6 +87,19 @@ Les votes d'amendement sont classés depuis l'objet officiel (amendement vs
 sous-amendement, numéro et auteur extraits quand sans ambiguïté) ; chaque
 **sous-amendement est rattaché à son amendement parent** (« … à l'amendement
 n° X »), et le scrutin du parent embarque ses sous-amendements.
+
+**Contenu des amendements** (`amendements.py`) : l'archive open data
+`amendements_div_legis` (~300 Mo) fournit, par amendement, son **dispositif** (ce
+qu'il change), son **exposé sommaire** (le pourquoi, côté auteur) et l'**article
+visé** — sans Légifrance. Liaison au vote par **(dossierRef, numéro)** parmi les
+amendements de **séance** (préfixe d'organe « AN », `numeroLong` numérique =
+numéro cité dans l'objet du vote) ; deux lectures d'une même navette peuvent
+partager la clé → désambiguïsation par la **date** du vote (fenêtre ± 3 j), sinon
+rien n'est attaché (§2.5). Le HTML des champs est nettoyé (entités, `<p>`, espace
+insécable). ~77 % des votes d'amendement (5,5 k) sont ainsi enrichis. L'exposé
+sommaire est **non neutre** (§4.3) : affiché en bloc attribué côté app, jamais
+fondu dans le résumé. Best-effort : un échec de téléchargement (archive lourde)
+n'est pas fatal et **préserve l'enrichissement déjà en base** (fusion inter-runs).
 Les sources du dossier se limitent au **niveau dossier** (page du dossier
 législatif) — la source de chaque vote reste sur son scrutin, pas de doublon.
 Lorsqu'un nouveau scrutin rejoint un dossier déjà en base, celui-ci est marqué
@@ -141,11 +154,12 @@ app/
     guardrails.py    Garde-fous : ancrage, lexique orienté, cohérence chiffres
     generation.py    Orchestration RAG → LLM → garde-fous → publier/revue
     theme.py         Classification de thème par LLM (liste fermée, repli heuristique)
-    questions.py     Les 4 questions citoyennes (Q3 déterministe · Q1/Q4 LLM validées)
+    questions.py     Les 4 questions citoyennes (Q3 déterministe · Q1/Q4 LLM validées) + questions d'un vote d'amendement
     review_queue.py  File de revue humaine (§4.6)
   ingestion/         Alimentation depuis les sources officielles (§5)
     assemblee.py     Open data AN : download + parse_scrutin (pur, nominatif inclus) → ScrutinParse
     debats.py        Comptes rendus (SyceronBrut) : explications de vote par groupe + liaison au vote
+    amendements.py   Contenu des amendements (dispositif + exposé sommaire + article visé) : archive AN → index (dossierRef, numéro)
     textes_an.py     Exposé des motifs : uid → URL du PDF officiel → extraction (pypdf)
     textes_senat.py  Repli exposé : texte de transmission Sénat → PDF senat.fr → extraction
     organes.py       Résolution des groupes (AMO) + couleurs + annuaire des députés
@@ -230,6 +244,17 @@ tests/               Tests API + garde-fous + génération + ingestion (+ repo p
   conditionnel). Rejet → réponse absente (§2.5), jamais publiée. Les réponses
   validées sont **persistées et réutilisées** entre runs (pas de rappel du
   modèle sur une source stable).
+- **Questions d'un vote d'amendement** (fiche vote) : mêmes principes,
+  adaptés — `generer_questions_amendement` remplit `questions` sur le **scrutin**
+  de chaque vote d'amendement (servi par `GET /scrutins/{id}`). **Pourquoi** :
+  LLM depuis l'**exposé sommaire**, préfixe imposé et vérifié « Selon son
+  auteur » (§4.3). **Changement** : LLM depuis le **dispositif** (extrait
+  officiel), au conditionnel. **Résultat** : déterministe, camp **gagnant en
+  premier** (« rejeté par 268 voix contre 188 » — jamais l'inverse, trompeur).
+  Le « qui était pour / contre » n'est **pas** généré : l'app le rend depuis
+  `positionsGroupes` (déterministe, sourcé par le scrutin). Réponses validées
+  persistées et réutilisées entre runs ; sans contenu enrichi, seules les
+  réponses déterministes existent (§2.5).
 - Pourquoi qwen3 et pas mistral : épreuves comparées (2026-07-18) — mistral 7B
   changeait la nature du texte, convertissait les chiffres en lettres et glissait
   du cadrage ; qwen3:14b (raisonnement coupé, température 0) a tenu « information
@@ -241,9 +266,9 @@ tests/               Tests API + garde-fous + génération + ingestion (+ repo p
 **Stubs à interface stable (Phase 2)**
 - Légifrance/PISTE : **texte consolidé** des dossiers (ce que la loi change dans
   le code — besoin distinct de l'exposé des motifs, déjà couvert). OAuth2 esquissé.
-- Métadonnées d'amendement enrichies (texte complet, exposé sommaire) — pour
-  l'instant un amendement = l'objet officiel de son scrutin (numéro/auteur
-  extraits de ce libellé) + son sort.
+  *(Le **contenu** des amendements — dispositif, exposé sommaire, article visé —
+  est désormais couvert par l'open data AN, cf. `amendements.py`, sans
+  Légifrance.)*
 
 ## Règles produit qui contraignent le backend
 

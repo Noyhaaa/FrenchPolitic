@@ -1,5 +1,12 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -10,8 +17,10 @@ import {
   ErrorView,
   GroupVoteRow,
   Legend,
+  LigneFracture,
   LoadingView,
   OfflineBanner,
+  QuestionsAmendementCard,
   ResultBar,
   SectionCard,
   SourceGrid,
@@ -19,7 +28,13 @@ import {
 } from '@/components';
 import { useScrutin } from '@/hooks';
 import { PositionGroupe, StatutScrutin } from '@/types';
-import { formatDateLong, libelleScrutin, statutLabel } from '@/utils/format';
+import {
+  estVoteAmendement,
+  estVoteSousAmendement,
+  formatDateLong,
+  libelleScrutin,
+  statutLabel,
+} from '@/utils/format';
 import type { RootStackParamList } from '@/navigation/types';
 
 type DetailRoute = RouteProp<RootStackParamList, 'ScrutinDetail'>;
@@ -65,9 +80,8 @@ export function ScrutinDetailScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const insets = useSafeAreaInsets();
-  const { data: scrutin, loading, offline, error, retry } = useScrutin(
-    route.params.scrutinId,
-  );
+  const { data: scrutin, loading, refreshing, offline, error, retry, refresh } =
+    useScrutin(route.params.scrutinId);
   const [ouverts, setOuverts] = useState<ReadonlySet<string>>(new Set());
   const goBack = () => navigation.goBack();
 
@@ -126,8 +140,17 @@ export function ScrutinDetailScreen() {
   // Titre = type du vote en clair ; l'objet officiel complet (le sujet exact)
   // reste affiché dessous — rien n'est perdu, tout reste sourcé (§2.5).
   const lib = libelleScrutin(scrutin.objet);
+  // Fiche d'un vote d'amendement : entrée par les « 4 questions » (le « qui
+  // était pour / contre » y vit) — pas de section « Vote par groupe ».
+  const estAmendement = estVoteAmendement(scrutin.objet);
+  const estSous = estVoteSousAmendement(scrutin.objet);
+  const quoi = estSous ? 'le sous-amendement' : "l'amendement";
   const totalVoix =
     resultat.pour + resultat.contre + resultat.abstention + resultat.nonVotants;
+  // Fracture à montrer seulement si les groupes ne sont pas unanimes.
+  const campsDistincts = new Set(
+    scrutin.positionsGroupes.map((g) => g.positionMajoritaire),
+  ).size;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -140,6 +163,13 @@ export function ScrutinDetailScreen() {
           { paddingBottom: insets.bottom + spacing.xl },
         ]}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={refresh}
+            tintColor={colors.brand}
+          />
+        }
       >
         {/* Type du vote + statut + date, puis l'objet officiel complet */}
         <StatusBadge statut={scrutin.statut} />
@@ -154,6 +184,48 @@ export function ScrutinDetailScreen() {
             .filter(Boolean)
             .join(' · ')}
         </Text>
+
+        {/* Entrée de compréhension d'un vote d'amendement : ses 4 questions
+            (§2.2) — le « qui était pour / contre » y est rendu depuis les
+            positions de groupes du scrutin. */}
+        {estAmendement ? (
+          <QuestionsAmendementCard
+            questions={scrutin.questions}
+            positionsGroupes={scrutin.positionsGroupes}
+            scrutinPublic={scrutin.scrutinPublic}
+            sous={estSous}
+          />
+        ) : null}
+
+        {/* Contenu de l'amendement (open data AN) : ce qu'il change (factuel) et
+            son exposé sommaire — le « pourquoi » côté AUTEUR, donc en bloc
+            attribué (§4.3), jamais présenté comme neutre. Masqué si absent (§2.5).
+            Fond carte (pas le fond de page) : même niveau visuel que le bloc
+            « Ce que dit l'auteur ». */}
+        {scrutin.dispositif ? (
+          <SectionCard title={`Ce que ${quoi} change`}>
+            {scrutin.cible ? (
+              <View style={styles.ciblePill}>
+                <Text style={typography.badge}>{scrutin.cible}</Text>
+              </View>
+            ) : null}
+            <Text style={typography.body}>{scrutin.dispositif}</Text>
+          </SectionCard>
+        ) : null}
+
+        {scrutin.exposeSommaire ? (
+          <View style={styles.exposeCard}>
+            <Text style={[typography.overline, styles.exposeTitle]}>
+              Ce que dit l'auteur {estSous ? 'du sous-amendement' : "de l'amendement"}
+            </Text>
+            <View style={styles.pill}>
+              <Text style={styles.pillText}>👤 Point de vue de l'auteur</Text>
+            </View>
+            <Text style={[typography.body, styles.exposeQuote]}>
+              « {scrutin.exposeSommaire} »
+            </Text>
+          </View>
+        ) : null}
 
         {/* Résultat global (format prototype) : verdict, grille des décomptes,
             barre combinée + échelle. Tout est factuel : décomptes officiels. */}
@@ -190,10 +262,20 @@ export function ScrutinDetailScreen() {
           </View>
         </SectionCard>
 
-        {/* Vote par groupe — scrutins publics uniquement (§3.2, §5.2).
+        {/* Vote par groupe — votes sur le TEXTE uniquement : sur la fiche d'un
+            amendement, le « qui était pour / contre » vit dans la carte des
+            4 questions. Scrutins publics seulement (§3.2, §5.2).
             Tap sur un groupe (si nominatif dispo) → noms des votants. */}
-        {scrutin.scrutinPublic ? (
+        {estAmendement ? null : scrutin.scrutinPublic ? (
           <SectionCard title="Vote par groupe" flat>
+            {/* Ligne de fracture : qui s'est opposé à qui, en un coup d'œil.
+                Position majoritaire de chaque groupe — factuel, sourcé par le
+                scrutin (§5.2), jamais un jugement. */}
+            {campsDistincts >= 2 ? (
+              <View style={styles.fracture}>
+                <LigneFracture positionsGroupes={scrutin.positionsGroupes} />
+              </View>
+            ) : null}
             <View style={{ gap: spacing.sm }}>
               {scrutin.positionsGroupes.map((g) => {
                 const depliable = aDesNoms(g);
@@ -498,5 +580,47 @@ const styles = StyleSheet.create({
   },
   flatSection: {
     gap: spacing.md,
+  },
+  fracture: {
+    marginBottom: spacing.lg,
+    paddingBottom: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  ciblePill: {
+    alignSelf: 'flex-start',
+    borderRadius: radius.pill,
+    paddingVertical: 2,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: colors.surfaceMuted,
+    marginBottom: spacing.sm,
+  },
+  exposeCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    // Accent ambre : contenu « point de vue », comme l'exposé des motifs.
+    borderLeftWidth: 3,
+    borderLeftColor: colors.accentWarm,
+  },
+  exposeTitle: {
+    marginBottom: spacing.md,
+  },
+  pill: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.accentWarmSoft,
+    borderRadius: radius.pill,
+    paddingVertical: 4,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.md,
+  },
+  pillText: {
+    ...typography.badge,
+    color: colors.accentWarm,
+  },
+  exposeQuote: {
+    fontStyle: 'italic',
   },
 });

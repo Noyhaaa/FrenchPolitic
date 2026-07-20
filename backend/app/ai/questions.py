@@ -16,6 +16,12 @@ lexique évaluatif interdit, attribution imposée pour la Q4. Réponse en échec
 None (§2.5), jamais publiée. Épreuves qwen3:14b (2026-07-18) : consignes tenues
 (« information non disponible » respecté, attribution respectée, chiffres exacts)
 là où mistral 7B fabriquait — d'où le passage à qwen3 (voir README §IA).
+
+Le module porte aussi les questions d'un **vote d'amendement** (fiche vote) :
+même logique — LLM uniquement sur ce qui est attribuable à une source unique
+(exposé sommaire, dispositif) et validé déterministiquement ; résultat composé
+déterministiquement ; le « qui était pour / contre » reste rendu côté app depuis
+les positions de groupes du scrutin (jamais généré).
 """
 from __future__ import annotations
 
@@ -23,10 +29,19 @@ import re
 
 from app.ai.guardrails import LEXIQUE_ORIENTE
 from app.ai.llm import LLMClient
-from app.schemas import ArgumentGroupe, QuestionsCitoyennes, ScrutinResume
+from app.schemas import (
+    ArgumentGroupe,
+    QuestionsAmendement,
+    QuestionsCitoyennes,
+    Scrutin,
+    ScrutinResume,
+)
 from app.utils.text import fold
 
 PREFIXE_AUTEUR = "Selon l'auteur du texte"
+# Attribution des réponses tirées de l'exposé sommaire d'un amendement (§4.3).
+# « Selon son auteur » vaut pour un amendement comme pour un sous-amendement.
+PREFIXE_AUTEUR_AMENDEMENT = "Selon son auteur"
 
 # Une réponse doit rester lisible en un coup d'œil (§8) ; au-delà, le modèle
 # a probablement brodé — on rejette plutôt que de tronquer une phrase.
@@ -61,6 +76,22 @@ _SYS_CHANGEMENT = (
     f"Commence obligatoirement ta réponse par « {PREFIXE_AUTEUR}, ».\n"
     "Utilise le conditionnel (« permettrait », « créerait ») : le changement "
     "n'est qu'annoncé par l'auteur.\n" + _CONSIGNES_COMMUNES
+)
+
+_SYS_POURQUOI_AMENDEMENT = (
+    "Tu expliques à un citoyen pourquoi un député a proposé un amendement à un "
+    "texte de loi, uniquement à partir de l'exposé sommaire de l'amendement "
+    "(écrit par son auteur, donc non neutre).\n"
+    f"Commence obligatoirement ta réponse par « {PREFIXE_AUTEUR_AMENDEMENT}, ».\n"
+    + _CONSIGNES_COMMUNES
+)
+
+_SYS_CHANGEMENT_AMENDEMENT = (
+    "Tu expliques à un citoyen ce qu'un amendement changerait dans un texte de "
+    "loi, uniquement à partir du dispositif de l'amendement (le texte officiel "
+    "de ce qu'il propose de modifier).\n"
+    "Utilise le conditionnel (« ajouterait », « supprimerait ») : l'amendement "
+    "n'est qu'une proposition de modification.\n" + _CONSIGNES_COMMUNES
 )
 
 # Une explication de vote paraphrasée doit tenir en une phrase courte (§8).
@@ -172,8 +203,16 @@ def phrase_resultat(scrutins: list[ScrutinResume]) -> str | None:
     )
     if not d.scrutin_public:
         return f"{sujet} {statut} à main levée (pas de décompte des voix)."
-    r = d.resultat
-    phrase = f"{sujet} {statut} par {r.pour} voix contre {r.contre}"
+    return _decompte(sujet, statut, d.statut.value, d.resultat)
+
+
+def _decompte(sujet: str, statut: str, statut_brut: str, r) -> str:
+    """« … par X voix contre Y » avec le camp GAGNANT en premier : « rejeté par
+    268 voix contre 188 » (et non l'inverse, trompeur quand pour < contre)."""
+    gagnant, perdant = (
+        (r.pour, r.contre) if statut_brut == "adopte" else (r.contre, r.pour)
+    )
+    phrase = f"{sujet} {statut} par {gagnant} voix contre {perdant}"
     if r.abstention:
         phrase += f", avec {r.abstention} abstention{_s(r.abstention)}"
     return phrase + "."
@@ -200,6 +239,64 @@ async def generer_questions(
 
     reponse = await llm.generate_text(_SYS_CHANGEMENT, user)
     questions.changement = valider_reponse(reponse, sources, prefixe=PREFIXE_AUTEUR)
+
+    return questions
+
+
+def phrase_resultat_amendement(scrutin: Scrutin) -> str | None:
+    """Résultat du vote d'un amendement, déterministe, en une phrase (§8).
+
+    Sans statut tranché → None (§2.5). Sans décompte public (main levée, §5.2),
+    on le dit sans chiffres."""
+    statut = _STATUT_FR.get(scrutin.statut.value)
+    if statut is None:
+        return None
+    sujet = (
+        "Le sous-amendement a été"
+        if "sous-amendement" in fold(scrutin.objet)
+        else "L'amendement a été"
+    )
+    if not scrutin.scrutin_public:
+        return f"{sujet} {statut} à main levée (pas de décompte des voix)."
+    return _decompte(sujet, statut, scrutin.statut.value, scrutin.resultat)
+
+
+async def generer_questions_amendement(
+    scrutin: Scrutin, llm: LLMClient | None
+) -> QuestionsAmendement:
+    """Compose les questions citoyennes d'un vote d'amendement (fiche vote).
+
+    - `resultat` : déterministe, depuis le vote lui-même.
+    - `pourquoi` : LLM depuis l'**exposé sommaire** (point de vue de l'auteur →
+      attribution « Selon son auteur » imposée et vérifiée, §4.3).
+    - `changement` : LLM depuis le **dispositif** (extrait officiel), au
+      conditionnel.
+    Chaque réponse LLM passe les contrôles déterministes (`valider_reponse`) ;
+    rejet → None (§2.5). Le « qui était pour / contre » n'est pas généré ici :
+    l'app le rend depuis les positions de groupes du scrutin (déterministe).
+    """
+    questions = QuestionsAmendement(resultat=phrase_resultat_amendement(scrutin))
+    if llm is None:
+        return questions
+
+    # L'objet officiel fait partie des sources : le numéro de l'amendement (ou
+    # un article cité) peut légitimement apparaître dans la réponse.
+    if scrutin.expose_sommaire:
+        sources = f"{scrutin.objet}\n{scrutin.expose_sommaire}"
+        user = (
+            f"VOTE : {scrutin.objet}\n\n"
+            f"EXPOSÉ SOMMAIRE :\n{scrutin.expose_sommaire}"
+        )
+        reponse = await llm.generate_text(_SYS_POURQUOI_AMENDEMENT, user)
+        questions.pourquoi = valider_reponse(
+            reponse, sources, prefixe=PREFIXE_AUTEUR_AMENDEMENT
+        )
+
+    if scrutin.dispositif:
+        sources = f"{scrutin.objet}\n{scrutin.dispositif}"
+        user = f"VOTE : {scrutin.objet}\n\nDISPOSITIF :\n{scrutin.dispositif}"
+        reponse = await llm.generate_text(_SYS_CHANGEMENT_AMENDEMENT, user)
+        questions.changement = valider_reponse(reponse, sources)
 
     return questions
 
