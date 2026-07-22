@@ -175,7 +175,7 @@ export function ScrutinDetailScreen() {
         <StatusBadge statut={scrutin.statut} />
         <Text style={[typography.title, styles.title]}>{lib.titre}</Text>
         {lib.titre !== scrutin.objet ? (
-          <Text style={[typography.bodySecondary, styles.objetOfficiel]}>
+          <Text style={[typography.readingBody, styles.objetOfficiel]}>
             {scrutin.objet}
           </Text>
         ) : null}
@@ -246,7 +246,7 @@ export function ScrutinDetailScreen() {
                 <Text style={typography.badge}>{scrutin.cible}</Text>
               </View>
             ) : null}
-            <Text style={typography.body}>{scrutin.dispositif}</Text>
+            <Text style={typography.readingBody}>{scrutin.dispositif}</Text>
           </SectionCard>
         ) : null}
 
@@ -258,7 +258,7 @@ export function ScrutinDetailScreen() {
             <View style={styles.pill}>
               <Text style={styles.pillText}>👤 Point de vue de l'auteur</Text>
             </View>
-            <Text style={[typography.body, styles.exposeQuote]}>
+            <Text style={typography.readingQuote}>
               « {scrutin.exposeSommaire} »
             </Text>
           </View>
@@ -330,7 +330,7 @@ export function ScrutinDetailScreen() {
           </SectionCard>
         ) : (
           <SectionCard title="Vote par groupe">
-            <Text style={typography.bodySecondary}>
+            <Text style={typography.readingBody}>
               Ce vote s'est fait à main levée : il n'existe pas de ventilation
               par groupe ni par député. Seul le résultat global est disponible.
             </Text>
@@ -621,8 +621,5 @@ const styles = StyleSheet.create({
   pillText: {
     ...typography.badge,
     color: colors.accentWarm,
-  },
-  exposeQuote: {
-    fontStyle: 'italic',
   },
 });

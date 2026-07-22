@@ -309,33 +309,6 @@ export function DossierDetailScreen() {
             Réponse absente = « information non disponible » (§2.5). */}
         {resume.questions ? <QuestionsCard questions={resume.questions} /> : null}
 
-        {/* 2bis. Résumé neutre (pill « Résumé IA · neutre » comme la maquette).
-            Si le résumé n'est pas encore généré, on ne comble pas (§2.5) :
-            placeholder explicite renvoyant vers les sources officielles. */}
-        <SectionCard>
-          <View style={styles.resumePill}>
-            <Text style={styles.resumePillText}>✦ Résumé IA · neutre</Text>
-          </View>
-          {resume.resume.length > 0 ? (
-            resume.resume.map((p, i) => (
-              <Text
-                key={i}
-                style={[
-                  typography.body,
-                  i < resume.resume.length - 1 && styles.resumeGap,
-                ]}
-              >
-                {p.phrase}
-              </Text>
-            ))
-          ) : (
-            <Text style={[typography.bodySecondary, styles.resumePending]}>
-              Résumé en préparation. En attendant, les votes du dossier et les
-              sources officielles ci-dessous sont disponibles.
-            </Text>
-          )}
-        </SectionCard>
-
         {/* 2ter. Exposé des motifs — le « pourquoi » selon l'AUTEUR du texte.
             Bloc distinct et attribué (contenu non neutre §4.3), placé après le
             résumé neutre. Absent tant que le PDF officiel n'a pas été récupéré
@@ -351,7 +324,7 @@ export function DossierDetailScreen() {
               {pourquoi.map(([label, value]) => (
                 <View key={label}>
                   <MiniLabel>{label}</MiniLabel>
-                  <Text style={typography.bodySecondary}>{value}</Text>
+                  <Text style={typography.readingBody}>{value}</Text>
                 </View>
               ))}
             </View>
@@ -612,24 +585,6 @@ const styles = StyleSheet.create({
   updateBannerText: {
     ...typography.badge,
     color: colors.brand,
-  },
-  resumePill: {
-    alignSelf: 'flex-start',
-    backgroundColor: colors.brandSoft,
-    borderRadius: radius.pill,
-    paddingVertical: 4,
-    paddingHorizontal: spacing.md,
-    marginBottom: spacing.md,
-  },
-  resumePillText: {
-    ...typography.badge,
-    color: colors.brand,
-  },
-  resumeGap: {
-    marginBottom: spacing.md,
-  },
-  resumePending: {
-    fontStyle: 'italic',
   },
   miniLabel: {
     ...typography.overline,

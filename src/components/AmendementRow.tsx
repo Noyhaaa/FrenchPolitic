@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { colors, radius, serif, spacing, typography } from '@/theme';
+import { colors, radius, serifDisplaySemi, spacing, typography } from '@/theme';
 import type { Amendement } from '@/types';
 import { detailObjetAmendement, titreAmendement } from '@/utils/format';
 
@@ -22,14 +22,15 @@ interface Props {
 }
 
 /**
- * Ligne compacte d'amendement (ou de sous-amendement) : numéro + sort + auteur,
- * la partie descriptive de l'objet officiel en dessous (§4.5). Tout provient du
- * libellé officiel du scrutin — rien n'est reformulé (§2.5).
+ * Ligne compacte d'amendement (ou de sous-amendement) : numéro + sort + auteur.
+ * Tout provient du libellé officiel du scrutin — rien n'est reformulé (§2.5).
  *
- * Quand l'ingestion a récupéré le **contenu** de l'amendement (open data AN), un
- * dépliant « Contenu » montre ce qu'il change (dispositif, factuel) et son
- * **exposé sommaire** — le « pourquoi » côté AUTEUR, donc en bloc **attribué**
- * (§4.3), jamais présenté comme neutre.
+ * Quand l'ingestion a récupéré le **contenu** (open data AN), le dépliant
+ * « Contenu » n'est plus deux cartes grises empilées mais une **colonne de
+ * lecture** (§8, « donner envie de lire ») : un fil vertical relie deux temps —
+ * d'abord le FAIT (« ce que ça change », dispositif, neutre), puis la VOIX
+ * (« selon l'auteur », exposé sommaire, point de vue → accent ambre, italique,
+ * jamais présenté comme neutre, §4.3). Texte de lecture en serif de labeur.
  */
 export function AmendementRow({ amendement: a, sous, parentNumero, onPress }: Props) {
   const [ouvert, setOuvert] = useState(false);
@@ -113,24 +114,29 @@ export function AmendementRow({ amendement: a, sous, parentNumero, onPress }: Pr
       </Pressable>
 
       {ouvert ? (
-        <View style={styles.detail}>
-          {/* Mini-cartes à fond distinct : même hiérarchie visuelle que la
-              fiche vote (dispositif = carte neutre, exposé = carte attribuée
-              à accent ambre). */}
+        <View style={styles.lecture}>
+          {/* Le fil qui relie les deux temps de lecture. */}
+          <View style={styles.rail} />
+
           {a.dispositif ? (
-            <View style={styles.detailCard}>
-              <Text style={[typography.overline, styles.detailTitre]}>
+            <View style={styles.temps}>
+              <View style={[styles.dot, { backgroundColor: sort.color }]} />
+              <Text style={[typography.overline, styles.tempsLabel]}>
                 Ce que {sous ? 'le sous-amendement' : "l'amendement"} change
               </Text>
-              <Text style={typography.bodySecondary}>{a.dispositif}</Text>
+              <Text style={[typography.readingBody, styles.tempsTexte]}>
+                {a.dispositif}
+              </Text>
             </View>
           ) : null}
+
           {a.exposeSommaire ? (
-            <View style={[styles.detailCard, styles.expose]}>
-              <View style={styles.pill}>
-                <Text style={styles.pillText}>👤 Selon l'auteur</Text>
-              </View>
-              <Text style={[typography.bodySecondary, styles.exposeQuote]}>
+            <View style={[styles.temps, a.dispositif && styles.tempsGap]}>
+              <View style={[styles.dot, styles.dotWarm]} />
+              <Text style={[typography.overline, styles.tempsLabelWarm]}>
+                Pourquoi · Selon l'auteur
+              </Text>
+              <Text style={[typography.readingQuote, styles.tempsTexte]}>
                 « {a.exposeSommaire} »
               </Text>
             </View>
@@ -157,11 +163,10 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   titre: {
-    ...typography.body,
-    fontWeight: '700',
-    fontFamily: serif,
-    fontSize: 14,
-    lineHeight: 20,
+    ...typography.cardTitle,
+    fontFamily: serifDisplaySemi,
+    fontSize: 15,
+    lineHeight: 21,
   },
   meta: {
     flexDirection: 'row',
@@ -193,36 +198,45 @@ const styles = StyleSheet.create({
     color: colors.brand,
     fontWeight: '600',
   },
-  detail: {
+  // --- Colonne de lecture ---
+  lecture: {
+    position: 'relative',
     marginLeft: spacing.md,
-    gap: spacing.sm,
+    marginTop: spacing.sm,
+    paddingLeft: 30,
   },
-  detailCard: {
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: radius.lg,
-    padding: spacing.md,
+  rail: {
+    position: 'absolute',
+    left: 5,
+    top: 6,
+    bottom: 6,
+    width: 2,
+    backgroundColor: colors.borderStrong,
   },
-  detailTitre: {
-    marginBottom: spacing.xs,
+  temps: {
+    position: 'relative',
   },
-  expose: {
-    // Accent ambre : contenu « point de vue », comme l'exposé des motifs.
-    borderLeftWidth: 3,
-    borderLeftColor: colors.accentWarm,
+  tempsGap: {
+    marginTop: spacing.xl,
   },
-  pill: {
-    alignSelf: 'flex-start',
-    backgroundColor: colors.accentWarmSoft,
-    borderRadius: radius.pill,
-    paddingVertical: 4,
-    paddingHorizontal: spacing.md,
-    marginBottom: spacing.sm,
+  dot: {
+    position: 'absolute',
+    left: -25,
+    top: 2,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
   },
-  pillText: {
-    ...typography.badge,
+  dotWarm: {
+    backgroundColor: colors.accentWarm,
+  },
+  tempsLabel: {
+    color: colors.textSecondary,
+  },
+  tempsLabelWarm: {
     color: colors.accentWarm,
   },
-  exposeQuote: {
-    fontStyle: 'italic',
+  tempsTexte: {
+    marginTop: spacing.sm,
   },
 });

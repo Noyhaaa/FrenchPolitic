@@ -1,3 +1,4 @@
+import { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { colors, radius, spacing, typography } from '@/theme';
 import type { ArgumentGroupe, PositionVote, QuestionsCitoyennes } from '@/types';
@@ -8,13 +9,6 @@ interface Props {
   questions: QuestionsCitoyennes;
 }
 
-/** Les 3 questions à réponse textuelle (Q2 « désaccord » est rendue à part). */
-const ENTREES_TEXTE: { cle: 'pourquoi' | 'resultat' | 'changement'; question: string }[] = [
-  { cle: 'pourquoi', question: 'Pourquoi les députés ont-ils débattu ?' },
-  { cle: 'resultat', question: 'Quel est le résultat du vote ?' },
-  { cle: 'changement', question: 'Qu’est-ce que ça change concrètement ?' },
-];
-
 const COULEUR_SENS: Record<PositionVote, string> = {
   pour: colors.pour,
   contre: colors.contre,
@@ -22,49 +16,40 @@ const COULEUR_SENS: Record<PositionVote, string> = {
   non_votant: colors.textSecondary,
 };
 
-/** Une réponse texte (Q1/Q3/Q4) ou « information non disponible » (§2.5). */
-function ReponseTexte({ question, reponse }: { question: string; reponse?: string }) {
+/** Pastille numérotée (1..4) devant chaque question. */
+function Numero({ n }: { n: number }) {
   return (
-    <View>
-      <Text style={styles.question}>{question}</Text>
-      {reponse ? (
-        <Text style={typography.body}>{reponse}</Text>
-      ) : (
-        <Text style={[typography.bodySecondary, styles.indisponible]}>
-          Information non disponible.
-        </Text>
-      )}
+    <View style={styles.numero}>
+      <Text style={styles.numeroTexte}>{n}</Text>
     </View>
   );
 }
 
-/**
- * Q2 « principal désaccord » : les positions que **les groupes formulent
- * eux-mêmes** en explication de vote. Même gabarit pour chaque groupe (§7.4) :
- * pastille de sens (jamais la couleur seule — libellé texte, §8/RGAA), nom du
- * groupe, puis son argument. Le sens vient du scrutin ; l'argument est la
- * paraphrase neutre validée de ses mots. Aucune synthèse de notre part.
- */
-function Desaccord({ arguments: args }: { arguments: ArgumentGroupe[] }) {
+/** Une ligne question + réponse (Q1/Q3/Q4). */
+function QARow({
+  n,
+  question,
+  reponse,
+  children,
+}: {
+  n: number;
+  question: string;
+  reponse?: string;
+  children?: ReactNode;
+}) {
   return (
-    <View>
-      <Text style={styles.question}>Quel était le principal désaccord ?</Text>
-      <View style={styles.positions}>
-        {args.map((a, i) => (
-          <View key={`${a.groupe}-${i}`} style={styles.position}>
-            <View style={styles.positionEntete}>
-              <View
-                style={[styles.pastille, { backgroundColor: COULEUR_SENS[a.sens] }]}
-                importantForAccessibility="no"
-              />
-              <Text style={styles.groupe}>{a.groupe}</Text>
-              <Text style={[styles.sens, { color: COULEUR_SENS[a.sens] }]}>
-                {positionLabel(a.sens)}
-              </Text>
-            </View>
-            <Text style={typography.body}>{a.argument}</Text>
-          </View>
-        ))}
+    <View style={styles.qrow}>
+      <Numero n={n} />
+      <View style={styles.qbody}>
+        <Text style={styles.question}>{question}</Text>
+        {children ??
+          (reponse ? (
+            <Text style={styles.reponse}>{reponse}</Text>
+          ) : (
+            <Text style={[styles.reponse, styles.indispo]}>
+              Information non disponible.
+            </Text>
+          ))}
       </View>
     </View>
   );
@@ -72,13 +57,14 @@ function Desaccord({ arguments: args }: { arguments: ArgumentGroupe[] }) {
 
 /**
  * « Le vote en 4 questions » — l'entrée de compréhension de la fiche dossier
- * (§2.2 : comprendre en 30 s, langage simple §8).
+ * (§2.2 : comprendre en 30 s, §8 langage simple).
  *
- * Réponses ancrées sur une source officielle ; une réponse absente affiche
- * « Information non disponible » (§2.5). « Changement » commence par « Selon
- * l'auteur du texte » (point de vue du déposant, §4.3) ; « désaccord » juxtapose
- * les explications de vote **attribuées** aux groupes (§7.4), avec lien vers le
- * compte rendu (§7.5).
+ * Refonte lisibilité : chaque question est **numérotée** (pastille 1..4) et
+ * suivie de sa réponse aérée, séparées par un filet fin — fini le mur de petits
+ * labels. Le désaccord (Q2) devient des **cartes de groupe** : pastille de sens
+ * + LIBELLÉ (jamais la couleur seule, §8/RGAA), nom du groupe, puis l'argument
+ * qu'il a lui-même donné (§7.4), avec lien vers le compte rendu (§7.5).
+ * Réponse absente → « Information non disponible » (§2.5).
  */
 export function QuestionsCard({ questions }: Props) {
   const desaccord = questions.desaccord;
@@ -87,25 +73,53 @@ export function QuestionsCard({ questions }: Props) {
       <Text style={[typography.overline, styles.title]}>
         Le vote en 4 questions
       </Text>
-      <View style={styles.list}>
-        <ReponseTexte question={ENTREES_TEXTE[0].question} reponse={questions.pourquoi} />
 
+      <QARow n={1} question="Pourquoi les députés ont-ils débattu ?" reponse={questions.pourquoi} />
+
+      <View style={styles.sep} />
+
+      <QARow n={2} question="Quel était le principal désaccord ?">
         {desaccord && desaccord.length > 0 ? (
-          <View>
-            <Desaccord arguments={desaccord} />
+          <>
+            <View style={styles.groupes}>
+              {desaccord.map((a: ArgumentGroupe, i) => (
+                <View key={`${a.groupe}-${i}`} style={styles.groupe}>
+                  <View style={styles.groupeEntete}>
+                    <View
+                      style={[styles.dot, { backgroundColor: COULEUR_SENS[a.sens] }]}
+                      importantForAccessibility="no"
+                    />
+                    <Text style={styles.groupeNom} numberOfLines={1}>
+                      {a.groupe}
+                    </Text>
+                    <Text style={[styles.sens, { color: COULEUR_SENS[a.sens] }]}>
+                      {positionLabel(a.sens)}
+                    </Text>
+                  </View>
+                  <Text style={styles.argument}>{a.argument}</Text>
+                </View>
+              ))}
+            </View>
             {questions.desaccordSource ? (
               <View style={styles.source}>
                 <SourceLink source={questions.desaccordSource} />
               </View>
             ) : null}
-          </View>
+          </>
         ) : (
-          <ReponseTexte question="Quel était le principal désaccord ?" />
+          <Text style={[styles.reponse, styles.indispo]}>
+            Information non disponible.
+          </Text>
         )}
+      </QARow>
 
-        <ReponseTexte question={ENTREES_TEXTE[1].question} reponse={questions.resultat} />
-        <ReponseTexte question={ENTREES_TEXTE[2].question} reponse={questions.changement} />
-      </View>
+      <View style={styles.sep} />
+
+      <QARow n={3} question="Quel est le résultat du vote ?" reponse={questions.resultat} />
+
+      <View style={styles.sep} />
+
+      <QARow n={4} question="Qu'est-ce que ça change concrètement ?" reponse={questions.changement} />
     </View>
   );
 }
@@ -119,46 +133,85 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   title: {
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
   },
-  list: {
-    gap: spacing.lg,
+  sep: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: spacing.lg,
   },
-  question: {
-    ...typography.label,
-    color: colors.brand,
-    marginBottom: spacing.xs,
-  },
-  indisponible: {
-    fontStyle: 'italic',
-  },
-  positions: {
+  qrow: {
+    flexDirection: 'row',
     gap: spacing.md,
   },
-  position: {
-    gap: 2,
+  qbody: {
+    flex: 1,
   },
-  positionEntete: {
+  numero: {
+    width: 26,
+    height: 26,
+    borderRadius: radius.pill,
+    backgroundColor: colors.brandSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  numeroTexte: {
+    ...typography.badge,
+    fontSize: 12,
+    color: colors.brand,
+  },
+  question: {
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: '600',
+    color: colors.textPrimary,
+  },
+  reponse: {
+    marginTop: spacing.xs,
+    fontSize: 15,
+    lineHeight: 23,
+    color: colors.textSecondary,
+  },
+  indispo: {
+    fontStyle: 'italic',
+  },
+  groupes: {
+    marginTop: spacing.sm,
+    gap: spacing.sm,
+  },
+  groupe: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm + 3,
+    paddingHorizontal: spacing.md,
+  },
+  groupeEntete: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
   },
-  pastille: {
-    width: 10,
-    height: 10,
+  dot: {
+    width: 9,
+    height: 9,
     borderRadius: 5,
   },
-  groupe: {
+  groupeNom: {
     ...typography.label,
+    color: colors.textPrimary,
     flexShrink: 1,
   },
   sens: {
-    ...typography.meta,
+    ...typography.badge,
     marginLeft: 'auto',
-    fontWeight: '600',
+  },
+  argument: {
+    marginTop: spacing.xs + 2,
+    fontSize: 13.5,
+    lineHeight: 20,
+    color: colors.textSecondary,
   },
   source: {
-    marginTop: spacing.md,
+    marginTop: spacing.sm,
     alignSelf: 'flex-start',
   },
 });

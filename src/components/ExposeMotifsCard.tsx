@@ -40,7 +40,7 @@ export function ExposeMotifsCard({ expose }: Props) {
       </Text>
 
       <Text
-        style={[typography.body, styles.quote]}
+        style={typography.readingQuote}
         numberOfLines={repliable && !deplie ? 6 : undefined}
       >
         « {expose.texte} »
@@ -95,9 +95,6 @@ const styles = StyleSheet.create({
   },
   intro: {
     marginBottom: spacing.md,
-  },
-  quote: {
-    fontStyle: 'italic',
   },
   toggle: {
     ...typography.meta,

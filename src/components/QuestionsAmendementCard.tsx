@@ -1,3 +1,4 @@
+import { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { colors, radius, spacing, typography } from '@/theme';
 import type { PositionGroupe, QuestionsAmendement } from '@/types';
@@ -14,18 +15,41 @@ interface Props {
   sous?: boolean;
 }
 
-/** Une réponse texte ou « information non disponible » (§2.5). */
-function ReponseTexte({ question, reponse }: { question: string; reponse?: string }) {
+/** Pastille numérotée (1..4) devant chaque question — miroir de QuestionsCard. */
+function Numero({ n }: { n: number }) {
   return (
-    <View>
-      <Text style={styles.question}>{question}</Text>
-      {reponse ? (
-        <Text style={typography.body}>{reponse}</Text>
-      ) : (
-        <Text style={[typography.bodySecondary, styles.indisponible]}>
-          Information non disponible.
-        </Text>
-      )}
+    <View style={styles.numero}>
+      <Text style={styles.numeroTexte}>{n}</Text>
+    </View>
+  );
+}
+
+/** Une ligne question + réponse (texte, ou contenu libre via children). */
+function QARow({
+  n,
+  question,
+  reponse,
+  children,
+}: {
+  n: number;
+  question: string;
+  reponse?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <View style={styles.qrow}>
+      <Numero n={n} />
+      <View style={styles.qbody}>
+        <Text style={styles.question}>{question}</Text>
+        {children ??
+          (reponse ? (
+            <Text style={styles.reponse}>{reponse}</Text>
+          ) : (
+            <Text style={[styles.reponse, styles.indispo]}>
+              Information non disponible.
+            </Text>
+          ))}
+      </View>
     </View>
   );
 }
@@ -33,7 +57,9 @@ function ReponseTexte({ question, reponse }: { question: string; reponse?: strin
 /**
  * « L'amendement en 4 questions » — l'entrée de compréhension de la fiche vote
  * d'un amendement ou sous-amendement (§2.2 : comprendre en 30 s), adaptation
- * de la carte « Le vote en 4 questions » de la fiche dossier.
+ * de la carte « Le vote en 4 questions » de la fiche dossier. Même refonte
+ * lisibilité : questions **numérotées** (pastille 1..4), réponse aérée, filet
+ * fin entre chacune.
  *
  * - « Pourquoi » vient de l'exposé sommaire : point de vue de l'auteur, la
  *   réponse commence par « Selon son auteur » (§4.3).
@@ -57,38 +83,35 @@ export function QuestionsAmendementCard({
       <Text style={[typography.overline, styles.title]}>
         {sous ? 'Le sous-amendement' : "L'amendement"} en 4 questions
       </Text>
-      <View style={styles.list}>
-        <ReponseTexte
-          question={`Pourquoi ${quoi} ?`}
-          reponse={questions?.pourquoi}
-        />
-        <ReponseTexte
-          question="Qu'est-ce qu'il changerait ?"
-          reponse={questions?.changement}
-        />
 
-        <View>
-          <Text style={styles.question}>Qui était pour, qui était contre ?</Text>
-          {scrutinPublic && positionsGroupes.length > 0 ? (
-            <View style={styles.fracture}>
-              <LigneFracture
-                positionsGroupes={positionsGroupes}
-                afficherUnanimite
-              />
-            </View>
-          ) : (
-            <Text style={typography.bodySecondary}>
-              Ce vote s'est fait à main levée : il n'existe pas de ventilation
-              par groupe ni par député.
-            </Text>
-          )}
-        </View>
+      <QARow n={1} question={`Pourquoi ${quoi} ?`} reponse={questions?.pourquoi} />
 
-        <ReponseTexte
-          question="Quel est le résultat ?"
-          reponse={questions?.resultat}
-        />
-      </View>
+      <View style={styles.sep} />
+
+      <QARow
+        n={2}
+        question="Qu'est-ce qu'il changerait ?"
+        reponse={questions?.changement}
+      />
+
+      <View style={styles.sep} />
+
+      <QARow n={3} question="Qui était pour, qui était contre ?">
+        {scrutinPublic && positionsGroupes.length > 0 ? (
+          <View style={styles.fracture}>
+            <LigneFracture positionsGroupes={positionsGroupes} afficherUnanimite />
+          </View>
+        ) : (
+          <Text style={styles.reponse}>
+            Ce vote s'est fait à main levée : il n'existe pas de ventilation par
+            groupe ni par député.
+          </Text>
+        )}
+      </QARow>
+
+      <View style={styles.sep} />
+
+      <QARow n={4} question="Quel est le résultat ?" reponse={questions?.resultat} />
     </View>
   );
 }
@@ -102,20 +125,49 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   title: {
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
   },
-  list: {
-    gap: spacing.lg,
+  sep: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: spacing.lg,
+  },
+  qrow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  qbody: {
+    flex: 1,
+  },
+  numero: {
+    width: 26,
+    height: 26,
+    borderRadius: radius.pill,
+    backgroundColor: colors.brandSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  numeroTexte: {
+    ...typography.badge,
+    fontSize: 12,
+    color: colors.brand,
   },
   question: {
-    ...typography.label,
-    color: colors.brand,
-    marginBottom: spacing.xs,
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: '600',
+    color: colors.textPrimary,
   },
-  indisponible: {
+  reponse: {
+    marginTop: spacing.xs,
+    fontSize: 15,
+    lineHeight: 23,
+    color: colors.textSecondary,
+  },
+  indispo: {
     fontStyle: 'italic',
   },
   fracture: {
-    marginTop: spacing.xs,
+    marginTop: spacing.sm,
   },
 });

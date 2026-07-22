@@ -15,20 +15,21 @@ const confianceLabel: Record<NiveauConfiance, string> = {
 };
 
 /**
- * Transparence sur l'IA (§7 point 6) : mention explicite que le résumé est
- * généré à partir des sources officielles + relu, et bouton « signaler ».
+ * Transparence sur l'IA (§7 point 6) : mention explicite que les réponses
+ * générées (les 4 questions) le sont à partir des sources officielles + relu,
+ * et bouton « signaler ».
  */
 export function AiNotice({ confiance, reluParHumain, onSignaler }: Props) {
   return (
     <View style={styles.wrap}>
       <Text style={typography.meta}>
-        Résumé généré automatiquement à partir des sources officielles
-        {reluParHumain ? ', relu par un humain' : ''} · {confianceLabel[confiance]}.
+        Réponses générées automatiquement à partir des sources officielles
+        {reluParHumain ? ', relues par un humain' : ''} · {confianceLabel[confiance]}.
       </Text>
       <Pressable
         onPress={onSignaler}
         accessibilityRole="button"
-        accessibilityLabel="Signaler une erreur dans ce résumé"
+        accessibilityLabel="Signaler une erreur"
         hitSlop={8}
       >
         <Text style={styles.signaler}>Signaler une erreur</Text>
