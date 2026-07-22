@@ -15,6 +15,7 @@ export type { LegendItem } from './Legend';
 export { LigneFracture } from './LigneFracture';
 export { AiNotice } from './AiNotice';
 export { AmendementRow } from './AmendementRow';
+export { AmendementsSection } from './AmendementsSection';
 export { ExposeMotifsCard } from './ExposeMotifsCard';
 export { QuestionsCard } from './QuestionsCard';
 export { QuestionsAmendementCard } from './QuestionsAmendementCard';

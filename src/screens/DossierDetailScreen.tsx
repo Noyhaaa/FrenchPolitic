@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, spacing, typography } from '@/theme';
 import {
   AiNotice,
-  AmendementRow,
+  AmendementsSection,
   ExposeMotifsCard,
   QuestionsCard,
   ErrorView,
@@ -205,11 +205,6 @@ export function DossierDetailScreen() {
 
   const { resume } = dossier;
   const badge = dossier.phase ?? { label: undefined, statut: dossier.statut };
-  // Sous-amendements du dossier, à plat, avec le numéro de leur amendement
-  // parent pour les situer (section dédiée, distincte des amendements).
-  const sousAmendements = dossier.amendements.flatMap((a) =>
-    (a.sousAmendements ?? []).map((sa) => ({ sa, parentNumero: a.numero })),
-  );
   // Le vote décisif (sur l'ensemble du texte) sort de la liste : mis en avant
   // en tête de section pour que l'utilisateur voie quel vote a tranché — les
   // autres votes (articles, motions…) restent en liste compacte.
@@ -433,66 +428,20 @@ export function DossierDetailScreen() {
         </SectionCard>
         )}
 
-        {/* 7. Amendements — lignes compactes (numéro + sort + auteur), sans
-            répéter la formule « l'amendement n° X de M. Y » de chaque objet.
-            Si l'amendement a été mis aux voix (scrutinId), la ligne ouvre la
-            page du vote (qui a voté pour/contre) — ses sous-amendements y sont
-            aussi listés. Sinon (amendement retiré…), la ligne est informative. */}
+        {/* 7. Amendements — liste dé-densifiée : barre de synthèse + filtres,
+            une ligne calme par amendement qui se déplie à la demande. Ses
+            sous-amendements sont révélés dans le dépliage (plus de seconde
+            liste séparée), chacun tappable vers son propre vote. */}
         {dossier.amendements.length > 0 && (
-          <SectionCard title={`Amendements (${dossier.amendements.length})`}>
-            <View style={{ gap: spacing.md }}>
-              {visibles(dossier.amendements, 'amendements').map((a) => (
-                <AmendementRow
-                  key={a.id}
-                  amendement={a}
-                  onPress={
-                    a.scrutinId
-                      ? () =>
-                          navigation.navigate('ScrutinDetail', {
-                            scrutinId: a.scrutinId!,
-                          })
-                      : undefined
-                  }
-                />
-              ))}
-              {boutonVoirPlus(dossier.amendements.length, 'amendements', 'amendements')}
-            </View>
-          </SectionCard>
+          <AmendementsSection
+            amendements={dossier.amendements}
+            onOpenScrutin={(scrutinId) =>
+              navigation.navigate('ScrutinDetail', { scrutinId })
+            }
+          />
         )}
 
-        {/* 8. Sous-amendements — section dédiée (distincte des amendements),
-            chaque ligne rappelle l'amendement visé et ouvre son propre vote. */}
-        {sousAmendements.length > 0 && (
-          <SectionCard title={`Sous-amendements (${sousAmendements.length})`}>
-            <View style={{ gap: spacing.md }}>
-              {visibles(sousAmendements, 'sous-amendements').map(
-                ({ sa, parentNumero }) => (
-                  <AmendementRow
-                    key={sa.id}
-                    amendement={sa}
-                    sous
-                    parentNumero={parentNumero}
-                    onPress={
-                      sa.scrutinId
-                        ? () =>
-                            navigation.navigate('ScrutinDetail', {
-                              scrutinId: sa.scrutinId!,
-                            })
-                        : undefined
-                    }
-                  />
-                ),
-              )}
-              {boutonVoirPlus(
-                sousAmendements.length,
-                'sous-amendements',
-                'sous-amendements',
-              )}
-            </View>
-          </SectionCard>
-        )}
-
-        {/* 9. Sources officielles du DOSSIER (dossier législatif…). La source
+        {/* 8. Sources officielles du DOSSIER (dossier législatif…). La source
             de chaque vote ou amendement vit sur sa propre fiche — pas de
             doublon ici. Masqué si rien au niveau dossier (§2.5). */}
         {dossier.sources.length > 0 && (

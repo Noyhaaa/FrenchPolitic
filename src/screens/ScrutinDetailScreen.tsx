@@ -13,7 +13,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, mono, radius, serif, spacing, typography } from '@/theme';
 import {
-  AmendementRow,
   ErrorView,
   GroupVoteRow,
   Legend,
@@ -29,6 +28,7 @@ import {
 import { useScrutin } from '@/hooks';
 import { PositionGroupe, StatutScrutin } from '@/types';
 import {
+  detailObjetAmendement,
   estVoteAmendement,
   estVoteSousAmendement,
   formatDateLong,
@@ -38,6 +38,13 @@ import {
 import type { RootStackParamList } from '@/navigation/types';
 
 type DetailRoute = RouteProp<RootStackParamList, 'ScrutinDetail'>;
+
+/** Sort d'un (sous-)amendement → libellé + couleur (jamais la couleur seule §8). */
+const SORT_SOUS = {
+  adopte: { label: 'Adopté', color: colors.adopte },
+  rejete: { label: 'Rejeté', color: colors.contre },
+  retire: { label: 'Retiré', color: colors.textTertiary },
+} as const;
 
 /** Un groupe a-t-il un détail nominatif à montrer ? (§5.2, absent = masqué §2.5) */
 function aDesNoms(g: PositionGroupe): boolean {
@@ -337,28 +344,61 @@ export function ScrutinDetailScreen() {
           </SectionCard>
         )}
 
-        {/* Sous-amendements de cet amendement (le cas échéant) — chacun ouvre
-            la fiche de son propre vote. */}
+        {/* Sous-amendements de cet amendement (le cas échéant) — liste compacte
+            (connecteur ↳, même langage visuel que le dépliage de la fiche
+            dossier), chaque ligne ouvre la fiche de son propre vote (§7.5). */}
         {scrutin.sousAmendements && scrutin.sousAmendements.length > 0 && (
           <SectionCard
             title={`Sous-amendements (${scrutin.sousAmendements.length})`}
           >
-            <View style={{ gap: spacing.md }}>
-              {scrutin.sousAmendements.map((sa) => (
-                <AmendementRow
-                  key={sa.id}
-                  amendement={sa}
-                  sous
-                  onPress={
-                    sa.scrutinId
-                      ? () =>
-                          navigation.push('ScrutinDetail', {
-                            scrutinId: sa.scrutinId!,
-                          })
-                      : undefined
-                  }
-                />
-              ))}
+            <View style={styles.sousListe}>
+              {scrutin.sousAmendements.map((sa) => {
+                const s = SORT_SOUS[sa.sort];
+                // Extrait factuel (partie descriptive de l'objet), jamais
+                // reformulé — restitué tel quel si pas de découpe nette (§2.5).
+                const texte = detailObjetAmendement(sa) || sa.objet;
+                const contenu = (
+                  <View style={styles.sousRow}>
+                    <Text style={styles.connecteur} importantForAccessibility="no">
+                      ↳
+                    </Text>
+                    <View
+                      style={[styles.dotPetit, { backgroundColor: s.color }]}
+                      importantForAccessibility="no"
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.sousTexte} numberOfLines={2}>
+                        {texte}
+                      </Text>
+                      <Text style={typography.meta}>
+                        n° {sa.numero ?? '—'} · {s.label.toLowerCase()}
+                      </Text>
+                    </View>
+                    {sa.scrutinId ? (
+                      <Text style={styles.sousChevron} importantForAccessibility="no">
+                        ›
+                      </Text>
+                    ) : null}
+                  </View>
+                );
+                return sa.scrutinId ? (
+                  <Pressable
+                    key={sa.id}
+                    onPress={() =>
+                      navigation.push('ScrutinDetail', {
+                        scrutinId: sa.scrutinId!,
+                      })
+                    }
+                    style={({ pressed }) => pressed && { opacity: 0.7 }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${sa.objet}. ${s.label}. Voir le vote.`}
+                  >
+                    {contenu}
+                  </Pressable>
+                ) : (
+                  <View key={sa.id}>{contenu}</View>
+                );
+              })}
             </View>
           </SectionCard>
         )}
@@ -621,5 +661,37 @@ const styles = StyleSheet.create({
   pillText: {
     ...typography.badge,
     color: colors.accentWarm,
+  },
+  sousListe: {
+    gap: spacing.xs,
+  },
+  sousRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+  },
+  connecteur: {
+    color: colors.textTertiary,
+    fontFamily: mono,
+    fontSize: 13,
+    lineHeight: 22,
+  },
+  dotPetit: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    marginTop: 8,
+  },
+  sousTexte: {
+    ...typography.readingBody,
+    fontSize: 15,
+    lineHeight: 21,
+  },
+  sousChevron: {
+    color: colors.textTertiary,
+    fontSize: 20,
+    fontWeight: '600',
+    marginTop: 4,
   },
 });
