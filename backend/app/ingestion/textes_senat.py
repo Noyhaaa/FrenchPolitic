@@ -56,11 +56,15 @@ def urls_pdf_senat(ref: ReferenceSenat, *, projet: bool) -> list[str]:
 
     Le préfixe dépend de la nature (`pjl` projet / `ppl` proposition) ; on tente
     l'autre en repli car l'en-tête du PDF de transmission n'est pas toujours
-    fiable (projet transmis annoncé « proposition »…)."""
+    fiable (projet transmis annoncé « proposition »…). Le **numéro doit être
+    zéro-paddé sur 3 chiffres** (« pjl25-024.pdf », pas « pjl25-24.pdf » → 404) —
+    même piège que les zéros de tête obligatoires côté AN (`textes_an.py`),
+    vérifié en pratique sur plusieurs références réelles (senat.fr)."""
+    numero = f"{ref.numero:03d}"
     primaire, secondaire = ("pjl", "ppl") if projet else ("ppl", "pjl")
     return [
-        f"{_BASE}/{primaire}{ref.annee}-{ref.numero}.pdf",
-        f"{_BASE}/{secondaire}{ref.annee}-{ref.numero}.pdf",
+        f"{_BASE}/{primaire}{ref.annee}-{numero}.pdf",
+        f"{_BASE}/{secondaire}{ref.annee}-{numero}.pdf",
     ]
 
 

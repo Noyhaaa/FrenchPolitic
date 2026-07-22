@@ -390,6 +390,77 @@ def test_txt_id_fusionne_les_variantes_d_apostrophe():
     assert p_droite.dossier_id == p_courbe.dossier_id
 
 
+# Titre officiel long ; l'objet du vote le cite tronqué (l'API AN tronque
+# parfois l'objet d'un scrutin aux alentours de 90 caractères — vécu en
+# production sur plusieurs dossiers `TXT-` réels).
+_DOCS_LONG_TITRE = [
+    {
+        "document": {
+            "dossierRef": "DLR5L17N9300",
+            "denominationStructurelle": "Proposition de loi",
+            "titres": {
+                "titrePrincipal": (
+                    "Proposition de loi visant à mettre en place un dispositif "
+                    "exceptionnel de soutien aux exploitations agricoles sinistrées"
+                )
+            },
+        }
+    },
+]
+
+
+def test_reconciliation_par_prefixe_rattrape_un_objet_tronque():
+    """Un objet de vote tronqué en plein mot (avant la fin du titre officiel)
+    est quand même reconnu, via correspondance par préfixe — non ambiguë ici
+    (un seul dossier commence par ce préfixe)."""
+    from app.ingestion.dossiers_legislatifs import construire_reconciliation
+
+    resolver = build_resolver_from_organes(ORGANES)
+    reco = construire_reconciliation(_DOCS_LONG_TITRE, legislatures=(17,))
+    p = parse_scrutin(
+        _sans_dossier_ref(
+            "l'ensemble de la proposition de loi visant à mettre en place un "
+            "dispositif exceptionnel de sou"  # coupé en plein mot, comme l'API AN
+        ),
+        resolver,
+        reconciliation=reco,
+    )
+    assert p.dossier_ref == "DLR5L17N9300"
+
+
+def test_reconciliation_par_prefixe_abstient_si_ambigu():
+    """Deux dossiers différents partagent le même préfixe (assez long) →
+    abstention plutôt que deviner (§2.5)."""
+    from app.ingestion.dossiers_legislatifs import construire_reconciliation
+
+    docs = _DOCS_LONG_TITRE + [
+        {
+            "document": {
+                "dossierRef": "DLR5L17N9301",
+                "denominationStructurelle": "Proposition de loi",
+                "titres": {
+                    "titrePrincipal": (
+                        "Proposition de loi visant à mettre en place un dispositif "
+                        "exceptionnel de soutien aux pêcheurs sinistrés"
+                    )
+                },
+            }
+        },
+    ]
+    resolver = build_resolver_from_organes(ORGANES)
+    reco = construire_reconciliation(docs, legislatures=(17,))
+    p = parse_scrutin(
+        _sans_dossier_ref(
+            "l'ensemble de la proposition de loi visant à mettre en place un "
+            "dispositif exceptionnel de sou"
+        ),
+        resolver,
+        reconciliation=reco,
+    )
+    assert p.dossier_ref is None
+    assert p.dossier_id.startswith("TXT-")
+
+
 def _scrutin_derive(resolver, uid, date, objet):
     """Un ScrutinParse dérivé de SCRUTIN (même dossier), à objet/id/date choisis."""
     p = parse_scrutin(SCRUTIN, resolver)

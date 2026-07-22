@@ -30,6 +30,16 @@ def test_url_page_texte_projet():
     assert url_page_texte("PRJLANR5L17B1154").endswith("l17b1154_projet-loi")
 
 
+def test_url_page_texte_proposition_de_resolution():
+    # uid des propositions de résolution déposées : préfixe PNREAN…, pas
+    # PION…/PRJL… — suffixe d'URL dédié (vérifié en pratique sur senat.fr : le
+    # même piège que « proposition-loi » vs « projet-loi » existe ici aussi).
+    assert (
+        url_page_texte("PNREANR5L17B0924")
+        == "https://www.assemblee-nationale.fr/dyn/17/textes/l17b0924_proposition-resolution"
+    )
+
+
 def test_url_page_texte_senat_ou_hors_motif_est_none():
     assert url_page_texte("PIONSNR5S459B0861") is None  # texte du Sénat
     assert url_page_texte("PIONANR5L17BTC2866") is None  # pas de B{num}
@@ -114,6 +124,26 @@ def test_index_textes_ne_garde_que_les_textes_deposes_an():
     # Un seul dossier retenu, dépôt initial en tête (tri par numéro croissant).
     assert index == {
         "DLR5L17N100": ["PIONANR5L17B1337", "PIONANR5L17B1400"]
+    }
+
+
+def test_index_textes_inclut_les_propositions_de_resolution():
+    """Une proposition de résolution déposée (uid PNREAN…) doit être indexée —
+    oubliée jusqu'ici (seuls PIONAN/PRJLAN étaient reconnus), ce qui privait
+    tout dossier de résolution de son exposé des motifs malgré un dossierRef
+    officiel."""
+    docs = [
+        {
+            "document": {
+                "dossierRef": "DLR5L17N500",
+                "uid": "PNREANR5L17B0924",
+                "denominationStructurelle": "Proposition de résolution",
+                "provenance": "Texte Déposé",
+            }
+        },
+    ]
+    assert construire_index_textes(docs, legislatures=(17,)) == {
+        "DLR5L17N500": ["PNREANR5L17B0924"]
     }
 
 

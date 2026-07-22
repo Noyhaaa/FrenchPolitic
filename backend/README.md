@@ -54,11 +54,15 @@ upsert (idempotent) : les dossiers (liste compacte des votes) et le détail de
 chaque vote (table `scrutin`, avec les noms des votants). Regroupement en
 cascade : le `dossierRef` officiel quand il existe ; sinon **réconciliation** via
 l'archive *dossiers législatifs* (le titre cité dans l'objet, comparé aux titres
-officiels des législatures — **fold exact puis signature** : fold sans espaces ni
-ponctuation, tolérant aux apostrophes et fautes de frappe de l'archive (« afin
-de​garantir »), sans confondre ordinaire/organique ; non ambigu — retrouve le
-vrai `dossierRef` et son lien officiel ; +24 dossiers récupérés) ; sinon le
-**texte de rattachement**
+officiels des législatures — **fold exact, puis signature, puis préfixe** : fold
+sans espaces ni ponctuation, tolérant aux apostrophes et fautes de frappe de
+l'archive (« afin de​garantir »), sans confondre ordinaire/organique ; le
+troisième niveau (préfixe) rattrape les cas où l'**objet du vote lui-même est
+tronqué** côté open data AN (constaté aux alentours de 90 caractères sur
+plusieurs dossiers réels) — le titre cité s'arrête net en plein mot avant la
+fin du titre officiel, plus long ; non ambigu à chaque niveau — retrouve le
+vrai `dossierRef` et son lien officiel ; +24 dossiers récupérés via la
+signature, +4 via le préfixe) ; sinon le **texte de rattachement**
 (dossier reconstitué `TXT-…`, mention de lecture ignorée, id dérivé de la
 **signature** du titre plutôt que du simple fold — un même texte cité avec une
 apostrophe droite sur un scrutin et courbe sur un autre fusionne en un seul
@@ -87,15 +91,25 @@ n'est pas fatal (best-effort, §2.5) : le run continue sur la seule courante.
 corps des textes (métadonnées seules), mais le **PDF du texte déposé** est
 public et son URL se **dérive de l'`uid`** du document (`…L17B0369` →
 `…/dyn/17/textes/l17b0369_proposition-loi.pdf` — les **zéros de tête sur
-4 chiffres sont indispensables**, sans eux le site répond 404). On en extrait l'exposé des
+4 chiffres sont indispensables**, sans eux le site répond 404). Les
+**propositions de résolution** ont leur propre famille d'uid (`PNREAN…`, ni
+`PION…` ni `PRJL…`) et leur propre suffixe d'URL (`…_proposition-resolution.pdf`) —
+absents jusqu'ici de `url_page_texte`/`construire_index_textes`, ce qui privait
+**tous** les dossiers de résolution de leur exposé malgré un `dossierRef`
+officiel (bug corrigé ; ~31 dossiers concernés). On en extrait l'exposé des
 motifs (via `pypdf`) en essayant les textes déposés du **dépôt initial** au plus
 récent (l'exposé n'est que dans le dépôt initial ; les versions de navette ne
 l'ont pas). **Repli Sénat** (`app/ingestion/textes_senat.py`) : quand le texte
 AN n'est qu'une **transmission du Sénat** (dispositif seul, en-tête « PROPOSITION
 DE LOI ADOPTÉE PAR LE SÉNAT, TRANSMISE PAR… »), l'exposé vit sur senat.fr ; le
 PDF de transmission cite les numéros Sénat (« Sénat : 452 … (2024-2025) »), d'où
-on dérive l'URL `senat.fr/leg/{ppl|pjl}{AA}-{num}.pdf` (les deux préfixes essayés)
-et on extrait l'exposé avec le même découpage. Récupère ~38 dossiers d'origine
+on dérive l'URL `senat.fr/leg/{ppl|pjl}{AA}-{numéro sur 3 chiffres}.pdf` (les
+deux préfixes essayés) et on extrait l'exposé avec le même découpage. **Le
+numéro doit être zéro-paddé sur 3 chiffres** (« pjl25-024.pdf », pas
+« pjl25-24.pdf » → 404) — même piège que les zéros de tête côté AN, repéré en
+creusant les dossiers sans exposé (bug corrigé : sans le padding, la récupération
+échouait pour 100 % des références Sénat à numéro court, silencieusement —
+best-effort, §2.5, donc invisible sans creuser). Récupère ~38 dossiers d'origine
 sénatoriale. Contenu **non neutre** (point de vue de l'auteur, §4.3) : stocké dans
 un bloc `Dossier.expose_motifs` **cité et attribué** (source « Texte déposé » AN
 ou « Texte déposé au Sénat »), jamais fondu dans le résumé neutre. Best-effort
@@ -123,6 +137,20 @@ Les sources du dossier se limitent au **niveau dossier** (page du dossier
 législatif) — la source de chaque vote reste sur son scrutin, pas de doublon.
 Lorsqu'un nouveau scrutin rejoint un dossier déjà en base, celui-ci est marqué
 « mis à jour » (§7.7). Chaque exécution est journalisée dans la table `sync_run`.
+
+**Robustesse d'un run long (`SyncJob.run`, plusieurs heures sur la législature
+complète).** Un **commit par dossier** (pas un commit unique en fin de run) :
+une interruption (crash, redémarrage, Ctrl-C) ne perd que le dossier en cours
+de traitement — tout ce qui est déjà committé (résumés, questions LLM
+validées…) survit, au lieu de tout reperdre. La CLI affiche une **ligne de
+progression** par dossier (`[i/total] titre`) via `on_progress` (callback
+optionnel de `SyncJob`, découplé de la CLI). Deux caches évitent du travail
+redondant à chaque run : l'**exposé des motifs** n'est retéléchargé/reparsé que
+s'il n'est pas déjà en base pour ce dossier (un texte déposé ne change pas,
+`_expose_en_base`) ; la **reclassification de thème** LLM n'est retentée que si
+le thème en base n'est pas déjà résolu (`_theme_en_base`) — sans ce cache, un
+dossier déjà classé était quand même repassé au LLM à chaque run (la fusion
+finissait par préserver le bon thème, mais après un appel gaspillé).
 
 > Le modèle de tables a évolué (dossiers allégés + table `scrutin` au format
 > vote-détaillé). Après mise à jour du code, **relancer l'ingestion** pour

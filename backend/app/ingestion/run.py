@@ -24,10 +24,15 @@ async def _main(limit: int | None, legislature: int) -> None:
     # LLM optionnel (classification de thème) : actif seulement si configuré
     # (LLM_PROVIDER=ollama). En mode « mock », on reste sur l'heuristique.
     llm = get_llm_client() if settings.llm_provider != "mock" else None
+
+    def _on_progress(i: int, total: int, titre: str) -> None:
+        print(f"  [{i}/{total}] {titre[:70]}")
+
     job = SyncJob(
         make_session_factory(engine),
         client=AssembleeOpenDataClient(legislature=legislature),
         llm=llm,
+        on_progress=_on_progress,
     )
     llm_info = f"LLM={settings.llm_provider}:{settings.llm_model}" if llm else "LLM=off"
     print(f"Ingestion (législature {legislature}, limit={limit}, {llm_info})…")

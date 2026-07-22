@@ -50,6 +50,23 @@ def test_urls_projet_essaie_pjl_puis_ppl():
     ]
 
 
+def test_urls_numero_court_est_zero_padde():
+    """Un numéro Sénat < 100 doit être zéro-paddé sur 3 chiffres (« pjl25-024.pdf »,
+    pas « pjl25-24.pdf ») — sans ça, l'URL répond 404 sur senat.fr (vécu en
+    production : les 5 URLs testées avec un numéro court échouaient toutes ;
+    même piège que les zéros de tête obligatoires côté AN, `textes_an.py`)."""
+    ref = ReferenceSenat(annee="25", numero=24)
+    assert urls_pdf_senat(ref, projet=True) == [
+        "https://www.senat.fr/leg/pjl25-024.pdf",
+        "https://www.senat.fr/leg/ppl25-024.pdf",
+    ]
+    ref_tres_court = ReferenceSenat(annee="24", numero=7)
+    assert urls_pdf_senat(ref_tres_court, projet=False) == [
+        "https://www.senat.fr/leg/ppl24-007.pdf",
+        "https://www.senat.fr/leg/pjl24-007.pdf",
+    ]
+
+
 def test_source_senat_pointe_la_page_lisible():
     src = source_senat("https://www.senat.fr/leg/ppl24-452.pdf")
     assert src.url == "https://www.senat.fr/leg/ppl24-452"

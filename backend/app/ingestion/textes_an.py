@@ -44,13 +44,16 @@ def url_page_texte(uid: str) -> str | None:
     """URL de la page officielle du texte déposé, dérivée de l'`uid` du document.
 
     None si l'uid ne porte pas le motif `L{leg}B{num}` ou n'est pas un texte AN
-    (proposition `PION…` / projet `PRJL…`). Le PDF est cette URL suffixée
-    `.pdf` ; la page (sans suffixe) sert de source lisible (§7.5).
+    (proposition `PION…` / projet `PRJL…` / proposition de résolution `PNREAN…`).
+    Le PDF est cette URL suffixée `.pdf` ; la page (sans suffixe) sert de source
+    lisible (§7.5).
     """
     if uid.startswith("PION"):
         suffixe = "proposition-loi"
     elif uid.startswith("PRJL"):
         suffixe = "projet-loi"
+    elif uid.startswith("PNREAN"):
+        suffixe = "proposition-resolution"
     else:
         return None
     m = _RE_UID.search(uid)
@@ -150,8 +153,12 @@ def construire_index_textes(
         uid = doc.get("uid") or ""
         if not ref.startswith(prefixes):
             continue
-        # Textes AN uniquement (PIONAN… / PRJLAN…).
-        if not (uid.startswith("PIONAN") or uid.startswith("PRJLAN")):
+        # Textes AN uniquement (PIONAN… / PRJLAN… / PNREAN… pour les résolutions).
+        if not (
+            uid.startswith("PIONAN")
+            or uid.startswith("PRJLAN")
+            or uid.startswith("PNREAN")
+        ):
             continue
         if (doc.get("denominationStructurelle") or "") not in _DENOMINATIONS_TEXTE:
             continue

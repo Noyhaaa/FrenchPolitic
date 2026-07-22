@@ -15,21 +15,30 @@ d'ambiguïté (un titre → plusieurs dossiers), on s'abstient (§2.5).
 On n'importe PAS les titres de l'archive : ils sont en minuscules et truffés de
 variantes/fragments, moins propres que le libellé déjà porté par le scrutin.
 
-Deux niveaux de correspondance, du plus strict au plus tolérant :
+Trois niveaux de correspondance, du plus strict au plus tolérant :
   1. **fold exact** (casse/accents) — la voie historique ;
   2. **signature** — fold sans espaces ni ponctuation. Elle rattrape la saleté
      de l'archive (apostrophe droite/courbe, fautes de frappe « afin de​garantir »
      avec espace manquant, tirets…) sans jamais confondre deux textes réellement
      différents : deux titres n'ont la même signature que s'ils ne diffèrent que
      par des espaces/ponctuation. La distinction de nature (« organique »…) est
-     conservée (ce sont des mots, pas de la ponctuation). Le garde-fou
-     d'ambiguïté (un titre → un seul dossier) s'applique aux deux niveaux (§2.5).
+     conservée (ce sont des mots, pas de la ponctuation) ;
+  3. **préfixe** — le titre cité par l'objet du vote est un préfixe strict d'un
+     titre officiel plus long. L'objet d'un scrutin, côté open data AN, est
+     parfois tronqué aux alentours de 90 caractères (vérifié en pratique sur
+     plusieurs dossiers `TXT-` réels) : le titre cité s'arrête net en plein mot,
+     bien avant la fin du titre officiel. Seul le sens de comparaison
+     query-préfixe-de-archive est tenté (jamais l'inverse : on ne devine pas la
+     fin d'un titre officiel court à partir d'une citation plus longue).
+Le garde-fou d'ambiguïté (un titre → un seul dossier) s'applique aux trois
+niveaux (§2.5) : à signature égale ou en préfixe, si plusieurs `dossierRef`
+sont candidats, on s'abstient plutôt que de deviner.
 """
 from __future__ import annotations
 
 import re
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.utils.text import fold
 
@@ -50,6 +59,14 @@ _DENOMINATIONS_TEXTE = frozenset(
 # une signature est trop courte pour être discriminante — on ne l'indexe pas.
 _SIGNATURE_MIN = 20
 
+# Longueur minimale de la signature du titre CITÉ (côté vote) pour tenter une
+# correspondance par préfixe. Plus haute que `_SIGNATURE_MIN` : la troncature
+# observée sur l'objet des votes tombe autour de 90 caractères bruts, un
+# préfixe plus court serait trop générique (risque de préfixes communs entre
+# textes réellement différents — mitigé de toute façon par le garde-fou
+# d'ambiguïté, mais inutile de le solliciter sur des cas non pertinents).
+_PREFIXE_MIN = 40
+
 
 def signature_titre(titre: str) -> str:
     """Signature normalisée d'un titre (fold sans espaces ni ponctuation)."""
@@ -58,21 +75,42 @@ def signature_titre(titre: str) -> str:
 
 @dataclass(frozen=True)
 class Reconciliation:
-    """Table titre → dossierRef pour une législature (fold exact + signature)."""
+    """Table titre → dossierRef pour une législature (fold exact + signature +
+    préfixe)."""
 
     _ref_par_titre: dict[str, str]  # fold(titre) -> dossierRef (sans ambiguïté)
     _ref_par_signature: dict[str, str]  # signature -> dossierRef (sans ambiguïté)
+    # signature brute (NON filtrée par ambiguïté) -> dossierRefs candidats ;
+    # sert uniquement au repli préfixe, qui doit voir toutes les collisions
+    # potentielles pour s'abstenir correctement (§2.5).
+    _refs_par_signature_brute: dict[str, frozenset[str]] = field(default_factory=dict)
 
     def ref_pour_titre(self, titre: str | None) -> str | None:
         """dossierRef d'un texte à partir de son titre : fold exact d'abord,
-        puis signature (tolérante à la saleté de l'archive). None si aucune
-        correspondance non ambiguë (§2.5 : on n'infère pas)."""
+        puis signature (tolérante à la saleté de l'archive), puis préfixe
+        (objet de vote tronqué côté open data). None si aucune correspondance
+        non ambiguë (§2.5 : on n'infère pas)."""
         if not titre:
             return None
         ref = self._ref_par_titre.get(fold(titre))
         if ref is not None:
             return ref
-        return self._ref_par_signature.get(signature_titre(titre))
+        sig = signature_titre(titre)
+        ref = self._ref_par_signature.get(sig)
+        if ref is not None:
+            return ref
+        return self._ref_par_prefixe(sig)
+
+    def _ref_par_prefixe(self, sig: str) -> str | None:
+        if len(sig) < _PREFIXE_MIN:
+            return None
+        refs: set[str] = set()
+        for cle, candidats in self._refs_par_signature_brute.items():
+            if cle.startswith(sig):
+                refs |= candidats
+                if len(refs) > 1:
+                    return None
+        return next(iter(refs)) if len(refs) == 1 else None
 
     def __len__(self) -> int:
         return len(self._ref_par_titre)
@@ -118,4 +156,7 @@ def construire_reconciliation(
     return Reconciliation(
         _ref_par_titre=_sans_ambiguite(refs_par_titre),
         _ref_par_signature=_sans_ambiguite(refs_par_signature),
+        _refs_par_signature_brute={
+            cle: frozenset(refs) for cle, refs in refs_par_signature.items()
+        },
     )

@@ -121,7 +121,10 @@ pour que l'API serve la base ; **les tests forcent `memory`** (`tests/conftest.p
 et restent donc sur le seed. **Phase 1 faite** : ingestion réelle de l'open data AN
 (17e législature) — scrutins publics + groupes (archive AMO) — parsée, contrôlée,
 **regroupée par dossier** et upsertée dans PostgreSQL (SQLAlchemy
-async), via `python -m app.ingestion.run`. Regroupement en cascade : `dossierRef`
+async), via `python -m app.ingestion.run` (**commit par dossier** + ligne de
+progression `[i/total]` — un run interrompu ne perd que le dossier en cours ;
+exposé des motifs et thème sont mis en cache par dossier pour ne pas refaire
+un travail déjà acquis à chaque run, cf. `backend/README.md`). Regroupement en cascade : `dossierRef`
 officiel quand il existe ; sinon **réconciliation** — le titre cité dans l'objet
 du vote (« … de la proposition de loi visant à… ») est comparé aux titres
 officiels de l'archive **dossiers législatifs** (`app/ingestion/dossiers_legislatifs.py`,

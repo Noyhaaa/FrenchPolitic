@@ -9,6 +9,7 @@ Journalise chaque exécution (table sync_run) pour l'observabilité (§8).
 from __future__ import annotations
 
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 
@@ -65,6 +66,7 @@ from app.ai.theme import classifier_theme
 from app.schemas import (
     Amendement,
     Dossier,
+    ExposeMotifs,
     MiseAJourDossier,
     QuestionsAmendement,
     QuestionsCitoyennes,
@@ -440,9 +442,14 @@ class SyncJob:
         session_factory: async_sessionmaker[AsyncSession],
         client: AssembleeOpenDataClient | None = None,
         llm: LLMClient | None = None,
+        on_progress: Callable[[int, int, str], None] | None = None,
     ) -> None:
         self._sf = session_factory
         self._client = client or AssembleeOpenDataClient()
+        # Appelé après chaque dossier committé (index 1-based, total, titre) —
+        # observabilité pendant un run long (des heures) sans autre signal
+        # avant le rapport final. Optionnel : None (défaut) ne change rien.
+        self._on_progress = on_progress
         # LLM optionnel : classification de thème + questions citoyennes (dont le
         # « désaccord » depuis les débats). None (défaut) → replis (heuristique,
         # « information non disponible ») et pas de téléchargement des débats.
@@ -473,8 +480,19 @@ class SyncJob:
         cle = self._ALIAS_ABBREV.get(cle, cle)
         return self._groupes_par_abbrev.get(cle)
 
+    async def _expose_en_base(
+        self, session: AsyncSession, dossier_id: str
+    ) -> ExposeMotifs | None:
+        """L'exposé des motifs déjà persisté pour ce dossier, s'il y en a un."""
+        row = await session.get(DossierRow, dossier_id)
+        if row is None:
+            return None
+        brut = (row.payload or {}).get("exposeMotifs")
+        return ExposeMotifs.model_validate(brut) if brut else None
+
     async def _enrichir_expose(
         self,
+        session: AsyncSession,
         dossier: Dossier,
         dossier_ref: str | None,
         index_textes: dict[str, list[str]],
@@ -482,13 +500,20 @@ class SyncJob:
     ) -> None:
         """Attache l'exposé des motifs du texte (PDF officiel) au dossier.
 
-        Essaie les textes déposés candidats **du dépôt initial au plus récent**
+        Un texte déposé ne change pas : si un exposé est déjà en base pour ce
+        dossier, on le réutilise **sans réseau** — évite de retélécharger et
+        reparser un PDF à chaque run pour un résultat identique. Sinon, essaie
+        les textes déposés candidats **du dépôt initial au plus récent**
         (l'exposé n'est que dans le dépôt initial ; les versions de navette ne
         l'ont pas), borné à `_MAX_TENTATIVES_EXPOSE`. Quand le texte AN n'est
         qu'une **transmission du Sénat** (dispositif sans exposé), on va chercher
         l'exposé sur senat.fr (§5.1). Best-effort et silencieux en cas d'échec
         (§2.5) : sans exposé récupérable, le dossier n'en porte pas.
         """
+        prev = await self._expose_en_base(session, dossier.id)
+        if prev is not None:
+            dossier.expose_motifs = prev
+            return
         uids = index_textes.get(dossier_ref or "")
         if not uids:
             return
@@ -536,20 +561,33 @@ class SyncJob:
         return False
 
     async def _reclasser_theme(
-        self, dossier: Dossier, report: SyncReport
+        self, session: AsyncSession, dossier: Dossier, report: SyncReport
     ) -> None:
         """Affine le thème d'un dossier « Autre » via le LLM (liste fermée).
 
         On ne touche qu'aux dossiers que l'heuristique n'a pas su classer, et on
         n'applique qu'un thème **valide et non « Autre »** — sinon on garde
         l'existant (sortie LLM hors-liste/verbeuse → repli, cf. `classifier_theme`).
+        Si un run précédent a déjà résolu ce dossier (thème en base ≠ « Autre »),
+        on ne rappelle pas le LLM pour rien : la fusion (`_merge_avec_existant`)
+        préserve de toute façon ce thème déjà acquis.
         """
         if self._llm is None or dossier.theme != "Autre":
+            return
+        deja_resolu = await self._theme_en_base(session, dossier.id)
+        if deja_resolu is not None and deja_resolu != "Autre":
             return
         nouveau = await classifier_theme(dossier.titre_officiel, self._llm, THEMES)
         if nouveau and nouveau != "Autre":
             dossier.theme = nouveau
             report.themes_reclasses += 1
+
+    async def _theme_en_base(
+        self, session: AsyncSession, dossier_id: str
+    ) -> str | None:
+        """Le thème déjà persisté pour ce dossier, s'il existe déjà en base."""
+        row = await session.get(DossierRow, dossier_id)
+        return row.theme if row is not None else None
 
     async def _questions_en_base(
         self, session: AsyncSession, dossier_id: str
@@ -786,9 +824,14 @@ class SyncJob:
             par_dossier.setdefault(parse.dossier_id, []).append(parse)
 
         # 3) Upsert des dossiers (fusion avec l'existant → badge « mis à jour »)
-        #    et du détail de chaque vote (table scrutin).
+        #    et du détail de chaque vote (table scrutin). Un COMMIT PAR DOSSIER
+        #    (pas un commit unique en fin de run) : un run de plusieurs heures
+        #    interrompu (crash, redémarrage, Ctrl-C) ne perd que le dossier en
+        #    cours de traitement — tout ce qui est déjà committé (résumés,
+        #    questions LLM validées…) survit, au lieu de tout reperdre.
+        total = len(par_dossier)
         async with self._sf() as session:
-            for parses in par_dossier.values():
+            for i, parses in enumerate(par_dossier.values(), start=1):
                 dossier = build_dossier(parses, self._index_amendements or None)
                 # Scrutins complets sur le texte (positions par groupe) — pour
                 # joindre les explications de vote du débat à la position votée.
@@ -796,9 +839,9 @@ class SyncJob:
                     p.scrutin for p in parses if not est_amendement(p.scrutin.objet)
                 ]
                 await self._enrichir_expose(
-                    dossier, parses[0].dossier_ref, index_textes, report
+                    session, dossier, parses[0].dossier_ref, index_textes, report
                 )
-                await self._reclasser_theme(dossier, report)
+                await self._reclasser_theme(session, dossier, report)
                 await self._generer_questions(
                     session, dossier, parses[0].dossier_ref, votes_texte, report
                 )
@@ -844,7 +887,9 @@ class SyncJob:
                         )
                     await _upsert_scrutin(session, p.scrutin)
                 report.dossiers_upserts += 1
-            await session.commit()
+                await session.commit()
+                if self._on_progress:
+                    self._on_progress(i, total, dossier.titre_clair)
 
         # 3bis) Nettoyage des dossiers orphelins : un dossier dont plus aucun
         #       scrutin ne dépend a été vidé par une migration (ex. un `TXT-`
