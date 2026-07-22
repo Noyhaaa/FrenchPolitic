@@ -257,3 +257,79 @@ export function detailObjetAmendement(a: Amendement): string {
     ? ''
     : a.objet;
 }
+
+/**
+ * Repère compact de l'article visé pour une ligne d'amendement : « Article 2 »
+ * → « Art. 2 ». Tout libellé qui n'est pas un article (« ÉTAT B »…) est
+ * restitué tel quel, en casse d'origine — on n'invente pas de forme courte
+ * pour ce qu'on ne reconnaît pas (§2.5).
+ */
+export function cibleCourte(cible: string): string {
+  const t = cible.trim();
+  return /^articles?\s+/i.test(t) ? t.replace(/^articles?\s+/i, 'Art. ') : t;
+}
+
+/** Une substitution de valeur repérée dans le dispositif officiel. */
+export interface SubstitutionValeur {
+  avant: string;
+  apres: string;
+}
+
+/**
+ * Termes de la formule officielle de substitution. C'est le texte lui-même qui
+ * dit qu'on remplace une VALEUR (« substituer au taux : … ») : on ne s'appuie
+ * pas sur l'allure du contenu. Une substitution de mots (« substituer aux
+ * mots : … ») n'est pas une valeur et retombe sur l'affichage brut.
+ */
+const TERME_VALEUR =
+  '(?:taux|nombres?|montants?|chiffres?|sommes?|dates?|années?)';
+
+const RE_SUBSTITUTION = new RegExp(
+  `substituer\\s+aux?\\s+${TERME_VALEUR}\\s*:?\\s*[«"]\\s*([^»"]+?)\\s*[»"]\\s*,?\\s*` +
+    `(?:les?|la|aux?)\\s+(?:${TERME_VALEUR}|mots?)\\s*:?\\s*[«"]\\s*([^»"]+?)\\s*[»"]`,
+  'i',
+);
+
+/**
+ * Extrait l'« avant → après » d'un dispositif quand il applique la formule
+ * officielle de substitution (« substituer au taux : « 20 % » le taux :
+ * « 25 % » »). Les deux valeurs sont des **extraits verbatim** du texte
+ * officiel : rien n'est reformulé, et on ne renvoie rien dès que la lecture
+ * n'est pas certaine (§2.5) — pas de chiffre dans la valeur remplacée, ou
+ * termes trop longs pour tenir la comparaison, qui s'affichent alors tels quels.
+ */
+export function substitutionValeur(
+  dispositif: string,
+): SubstitutionValeur | undefined {
+  const m = RE_SUBSTITUTION.exec(dispositif.replace(/\s+/g, ' '));
+  if (!m) return undefined;
+  const [, avant, apres] = m;
+  if (avant.length > 24 || apres.length > 24) return undefined;
+  if (!/\d/.test(avant)) return undefined;
+  return { avant, apres };
+}
+
+/** Marqueurs d'énumération du texte législatif : « I. – », « 1° », « a) ». */
+const RE_POINT = /^\s*(?:[IVX]+\s*[.°]|\d+°|[a-z]\))\s*[–—-]?\s*/;
+
+/**
+ * Découpe un dispositif en ses instructions successives quand il en énumère
+ * plusieurs (« I. – … », « II. – En conséquence, … », « 1° … »). Chaque point
+ * est un **extrait verbatim**, marqueur retiré. Renvoie `[]` si le dispositif
+ * n'énumère rien : il s'affiche alors d'un seul tenant.
+ */
+export function pointsDispositif(dispositif: string): string[] {
+  const points = dispositif
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .reduce<string[]>((acc, ligne) => {
+      // Une ligne sans marqueur poursuit le point précédent (citations « … »).
+      if (RE_POINT.test(ligne) || acc.length === 0) acc.push(ligne);
+      else acc[acc.length - 1] += ` ${ligne}`;
+      return acc;
+    }, []);
+  const marques = points.filter((p) => RE_POINT.test(p));
+  if (marques.length < 2) return [];
+  return points.map((p) => p.replace(RE_POINT, '').trim()).filter(Boolean);
+}
