@@ -1,4 +1,10 @@
-import { Amendement, ScrutinResume, StatutScrutin, PositionVote } from '@/types';
+import {
+  Amendement,
+  ObjetVote,
+  PositionVote,
+  ScrutinResume,
+  StatutScrutin,
+} from '@/types';
 
 /** Libellé texte du statut (jamais la couleur seule — RGAA §8). */
 export function statutLabel(statut: StatutScrutin): string {
@@ -332,4 +338,42 @@ export function pointsDispositif(dispositif: string): string[] {
   const marques = points.filter((p) => RE_POINT.test(p));
   if (marques.length < 2) return [];
   return points.map((p) => p.replace(RE_POINT, '').trim()).filter(Boolean);
+}
+
+/** « Juillet 2026 » — en-tête de mois du fil de votes d'un député. */
+export function moisAnnee(iso: string): string {
+  const label = new Date(iso).toLocaleDateString('fr-FR', {
+    month: 'long',
+    year: 'numeric',
+  });
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+/**
+ * Ce qu'a fait le député sur ce scrutin, dit en clair. Purement descriptif :
+ * on rapporte le sens du vote officiel, on ne le qualifie pas (§7.4).
+ */
+export function libellePositionVotee(position: PositionVote): string {
+  switch (position) {
+    case 'pour':
+      return 'A voté pour';
+    case 'contre':
+      return 'A voté contre';
+    case 'abstention':
+      return "S'est abstenu";
+    case 'non_votant':
+      return "N'a pas pris part au vote";
+  }
+}
+
+/** Nature de ce sur quoi portait le vote (repère du fil). */
+export function libelleObjetVote(type: ObjetVote): string {
+  switch (type) {
+    case 'dossier':
+      return 'Dossier';
+    case 'amendement':
+      return 'Amendement';
+    case 'sous_amendement':
+      return 'Sous-amend.';
+  }
 }

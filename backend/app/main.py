@@ -10,9 +10,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import dossiers, health
+from app.api.routes import deputes, dossiers, health
 from app.config import settings
-from app.data.seed import SEED_DOSSIERS, SEED_SCRUTINS
+from app.data.seed import (
+    SEED_DEPUTES,
+    SEED_DOSSIERS,
+    SEED_GROUPES,
+    SEED_SCRUTINS,
+    SEED_VOTES_DEPUTES,
+)
 from app.repositories import InMemoryDossierRepository
 
 
@@ -33,7 +39,11 @@ async def lifespan(app: FastAPI):
         await engine.dispose()
     else:
         app.state.dossier_repository = InMemoryDossierRepository(
-            SEED_DOSSIERS, SEED_SCRUTINS
+            SEED_DOSSIERS,
+            SEED_SCRUTINS,
+            deputes=SEED_DEPUTES,
+            votes_deputes=SEED_VOTES_DEPUTES,
+            groupes=SEED_GROUPES,
         )
         yield
 
@@ -57,6 +67,8 @@ def create_app() -> FastAPI:
     app.include_router(dossiers.router)
     app.include_router(dossiers.scrutin_router)
     app.include_router(dossiers.search_router)
+    app.include_router(deputes.router)
+    app.include_router(deputes.groupes_router)
     return app
 
 

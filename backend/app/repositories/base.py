@@ -9,12 +9,44 @@ from typing import Protocol
 
 from app.schemas import (
     Accueil,
+    DeputeDetail,
+    DeputeListItem,
     Dossier,
     DossierListItem,
+    GroupeListItem,
+    PortraitVote,
     RecapMensuel,
     Scrutin,
     SectionTheme,
+    VoteDepute,
 )
+
+
+def construire_portrait(
+    pour: int,
+    contre: int,
+    abstention: int,
+    alignes: int,
+    avec_majorite: int,
+) -> PortraitVote:
+    """Portrait de vote (12 derniers mois) à partir de comptes bruts.
+
+    Règle unique pour les deux implémentations du repository : un ratio dont
+    le **dénominateur est nul** reste `None` — le client affiche alors
+    « information non disponible » au lieu d'un 0 % trompeur (§2.5).
+
+    `alignes` / `avec_majorite` : votes exprimés dont le groupe avait une
+    position majoritaire documentée, et parmi eux ceux qui la suivaient. Aucun
+    taux de participation n'est produit ici — cf. `PortraitVote`.
+    """
+    exprimes = pour + contre + abstention
+    return PortraitVote(
+        cohesion_groupe=(alignes / avec_majorite) if avec_majorite else None,
+        votes=exprimes,
+        pour=pour,
+        contre=contre,
+        abstention=abstention,
+    )
 
 
 def ordonner_sections(sections: list[SectionTheme]) -> list[SectionTheme]:
@@ -53,4 +85,33 @@ class DossierRepository(Protocol):
 
         None si aucune donnée (le client masque alors la carte, §2.5).
         """
+        ...
+
+    # --- Députés (§5.2) ---------------------------------------------------
+
+    async def list_deputes(
+        self, q: str = "", groupe_id: str | None = None, limit: int = 600
+    ) -> list[DeputeListItem]:
+        """Annuaire des députés, par ordre alphabétique.
+
+        `q` filtre sur nom / groupe / circonscription ; `groupe_id` restreint à
+        un groupe politique.
+        """
+        ...
+
+    async def get_depute(
+        self, depute_id: str, limit: int = 30, offset: int = 0
+    ) -> DeputeDetail | None:
+        """Fiche député : identité, portrait de vote (12 mois) et première
+        page d'historique. None si le député est inconnu."""
+        ...
+
+    async def votes_depute(
+        self, depute_id: str, limit: int = 30, offset: int = 0
+    ) -> list[VoteDepute]:
+        """Historique de vote paginé, du plus récent au plus ancien."""
+        ...
+
+    async def list_groupes(self) -> list[GroupeListItem]:
+        """Groupes politiques (filtres de l'annuaire)."""
         ...

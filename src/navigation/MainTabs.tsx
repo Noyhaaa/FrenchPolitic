@@ -4,6 +4,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { colors, radius, typography } from '@/theme';
 import {
   AssistantScreen,
+  DeputesScreen,
   HomeScreen,
   ProfileScreen,
   SearchScreen,
@@ -15,6 +16,7 @@ const Tab = createBottomTabNavigator<MainTabsParamList>();
 const icons: Record<keyof MainTabsParamList, string> = {
   Accueil: '🏛️',
   Recherche: '🔍',
+  Deputes: '🧑‍⚖️',
   Assistant: '💬',
   Profil: '👤',
 };
@@ -47,6 +49,11 @@ export function MainTabs() {
     >
       <Tab.Screen name="Accueil" component={HomeScreen} />
       <Tab.Screen name="Recherche" component={SearchScreen} />
+      <Tab.Screen
+        name="Deputes"
+        component={DeputesScreen}
+        options={{ title: 'Députés' }}
+      />
       <Tab.Screen name="Assistant" component={AssistantScreen} />
       <Tab.Screen name="Profil" component={ProfileScreen} />
     </Tab.Navigator>

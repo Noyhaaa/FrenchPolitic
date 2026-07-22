@@ -7,4 +7,11 @@ export {
   fetchScrutin,
   searchDossiers,
 } from './dossiers';
+export {
+  PAGE_VOTES,
+  fetchDepute,
+  fetchDeputes,
+  fetchGroupes,
+  fetchVotesDepute,
+} from './deputes';
 export { cache } from './cache';

@@ -39,7 +39,7 @@ les données restent affichées pendant le rafraîchissement).
 > nouveau scrutin s'y rattache (§7.7). Ce choix intègre en V1 ce qui était prévu
 > en V2 — le verrou §2.4 sur le suivi de dossier est **levé** en conséquence.
 
-Quatre écrans du cœur de valeur :
+Six écrans du cœur de valeur :
 1. **Accueil façon Netflix** (`HomeScreen` → `useAccueil`, `GET /accueil`) :
    l'écran complet arrive en **une réponse** (affichage atomique, pas de
    remplissage progressif) — hero « à la une », rangées horizontales
@@ -97,6 +97,26 @@ Quatre écrans du cœur de valeur :
    **ses sous-amendements** (chacun ouvrant sa propre fiche vote, empilée via
    `navigation.push`).
 4. **Recherche simple** (`SearchScreen` → `useDossierSearch`, avec debounce)
+5. **Annuaire des députés** (`DeputesScreen` → `useDeputes`, `GET /deputes`) :
+   recherche par nom (debounce) et filtres par groupe (chips `GET /groupes`,
+   pastille de couleur **+ libellé**), une ligne par député (`DeputeRow` :
+   `Avatar` — **photo officielle** de l'Assemblée, repli sur les initiales —,
+   nom, groupe, circonscription). L'effectif affiché est celui réellement servi, jamais
+   « 577 » en dur.
+6. **Fiche député** (`DeputeDetailScreen` → `useDepute`, `GET /deputes/{id}`) :
+   identité (groupe, circonscription, début de mandat — chaque champ masqué s'il
+   n'est pas documenté), puis le **portrait de vote** sur 12 mois glissants
+   (`PortraitVoteCard` : votes exprimés, part **avec son groupe**, ventilation
+   pour/abstention/contre avec légende) et l'**historique de vote**
+   (`VoteHistoryFil` : fil groupé par mois, rail + nœud coloré par position,
+   pastille de sens **écrite**, tag de nature et date, titre officiel), filtrable
+   Tous / Dossiers / Amendements / Sous-amend. et **paginé** (« Charger les votes
+   plus anciens », `GET /deputes/{id}/votes`). Chaque entrée ouvre le dossier
+   concerné. ⚠️ **Aucun taux de participation n'est affiché** : l'open data ne
+   recense que les votants physiques d'un scrutin public (268 en moyenne sur
+   577), si bien qu'un ratio de présence se lirait comme un score d'absentéisme
+   que la source ne soutient pas (§7.4). « Contre son groupe » (pastille ambre)
+   est en revanche un **fait déduit** du même scrutin, jamais un jugement.
 
 L'URL de l'API est dérivée de l'hôte Metro en dev (`src/api/config.ts`),
 surchargeable via `EXPO_PUBLIC_API_URL`. **Le backend doit tourner** pour un
@@ -109,7 +129,9 @@ tab bar mais hors périmètre V1 (§2.3 / §2.4).
 
 **Backend** — API FastAPI servant les endpoints du cœur (`/accueil` — écran
 d'accueil complet en une réponse —, `/dossiers`, `/dossiers/{id}`,
-`/scrutins/{id}`, `/recherche`, `/recap` — activité du dernier mois actif).
+`/scrutins/{id}`, `/recherche`, `/recap` — activité du dernier mois actif)
+et ceux des **députés** (`/deputes`, `/deputes/{id}`, `/deputes/{id}/votes`
+— historique paginé —, `/groupes`).
 Le détail d'un dossier reste
 **léger** (liste de `ScrutinResume`) ; le détail complet d'un vote — groupes et
 **vote nominatif** (noms des députés, résolus via l'annuaire acteurs de l'archive
@@ -221,7 +243,20 @@ dispositif, conditionnel) — mêmes contrôles déterministes (`valider_reponse
 et « résultat » déterministe (**camp gagnant en premier** : « rejeté par 268
 voix contre 188 », jamais l'inverse) ; réponses validées réutilisées entre runs.
 Le « qui était pour / contre » n'est pas généré : l'app le rend depuis
-`positionsGroupes` (`LigneFracture`). Détails dans `backend/README.md`.
+`positionsGroupes` (`LigneFracture`).
+
+Les **députés** (§5.2) ont leur propre référentiel (table `depute`, construite
+depuis l'archive AMO : nom, groupe du mandat GP en cours, circonscription, début
+de mandat, plus la **photo officielle** — seule URL *dérivée* de l'`acteurRef`,
+donc attachée uniquement après vérification HEAD, sinon `null` : 576/577) et leurs **votes nominatifs** (table `vote_depute`, une ligne par
+député × scrutin — 577 députés et ~1,27 M de votes sur la base de dev). Ces
+lignes portent le fait déduit **« contre son groupe »** (position ≠
+`positionMajoritaire` du groupe sur le MÊME scrutin, calculé pour les seules
+positions exprimées, `null` si le groupe n'a pas de position majoritaire
+exploitable). Alimentés par le run normal **et** par une commande autonome
+`python -m app.ingestion.deputes` (AMO + archive scrutins seulement, ni LLM ni
+dossiers : quelques minutes au lieu d'un run complet). Détails dans
+`backend/README.md`.
 
 ## Stack & commandes
 
@@ -244,6 +279,7 @@ Pas de suite de tests côté frontend. Vérification = `tsc --noEmit` + `expo ex
 ```bash
 cd backend && source .venv/bin/activate   # venv Python 3.12 (indispensable)
 python -m app.ingestion.run --limit 300   # ingère l'open data AN dans Postgres
+python -m app.ingestion.deputes           # référentiel députés + votes nominatifs seuls
 uvicorn app.main:app --reload             # http://localhost:8000/docs (sert la base via .env)
 pytest                                     # suite de tests (forcés sur seed)
 ```
@@ -261,16 +297,18 @@ src/
     spacing.ts               Échelle d'espacement + rayons
     typography.ts            Échelle typographique (serif titres · sans corps · mono métadonnées)
   types/index.ts             Modèle de données (miroir des schémas backend, §5.3 MVP)
-  api/                       Client HTTP : config (URL), client (fetch+timeout), dossiers+scrutins, cache offline
-  hooks/                     useDossiers / useDossier / useScrutin / useDossierSearch (chargement + cache + états)
+  api/                       Client HTTP : config (URL), client (fetch+timeout), dossiers+scrutins,
+                             deputes, cache offline
+  hooks/                     useDossiers / useDossier / useScrutin / useDossierSearch
+                             + useDeputes / useDepute (chargement + cache + états)
   constants/themes.ts        Emoji + teintes par thème
   utils/format.ts            Formatage dates, libellés de statut/position, temps de lecture
   components/                Composants réutilisables (DossierCard, StateViews…)
   screens/                   Un écran par fichier (barrel dans index.ts)
   navigation/
     types.ts                 Types de navigation (RootStack + MainTabs)
-    MainTabs.tsx             Bottom tabs : Accueil · Recherche · Assistant · Profil
-    RootNavigator.tsx        Stack : MainTabs + DossierDetail + ScrutinDetail
+    MainTabs.tsx             Bottom tabs : Accueil · Recherche · Députés · Assistant · Profil
+    RootNavigator.tsx        Stack : MainTabs + DossierDetail + ScrutinDetail + DeputeDetail
 ```
 
 Flux : `RootNavigator` → `MainTabs` (tabs) → `DossierDetail` puis `ScrutinDetail`
@@ -347,8 +385,15 @@ d'amendement — `pourquoi` / `changement` / `resultat`, générées à l'ingest
 `sources`. La fiche dossier n'embarque que des `ScrutinResume` (liste
 compacte) ; le `Scrutin` complet est servi par `GET /scrutins/{id}`. Le fil et la
 recherche renvoient un `DossierListItem` allégé (dont `nombreScrutins` et
-`miseAJour`). Types clés : `StatutScrutin` (`adopte` | `rejete` | `en_cours`),
-`PositionVote`, `NiveauConfiance`. Ce modèle est le **contrat de l'API** (miroir
+`miseAJour`). Côté **députés** : `Depute` (identité + groupe + circonscription),
+`DeputeListItem` (annuaire — **photo comprise**, la liste doit être
+identifiable sans charger chaque fiche), `DeputeDetail` (= `Depute` + `portrait` +
+`historique` paginé), `PortraitVote` (12 mois glissants : `votes`, `pour` /
+`contre` / `abstention`, `cohesionGroupe` — **pas de participation**, cf.
+« État actuel ») et `VoteDepute` (`objetType`, `titre`, `dossierId?`,
+`position`, `contreSonGroupe?`). Types clés : `StatutScrutin` (`adopte` |
+`rejete` | `en_cours`), `PositionVote`, `ObjetVote` (`dossier` | `amendement` |
+`sous_amendement`), `NiveauConfiance`. Ce modèle est le **contrat de l'API** (miroir
 camelCase des schémas Pydantic backend, à répercuter des deux côtés).
 
 ## Prochaines étapes (backlog priorisé, cf. §10 MVP)
@@ -363,7 +408,8 @@ camelCase des schémas Pydantic backend, à répercuter des deux côtés).
   l'open data AN, cf. `amendements.py`) ; planification du job de synchro
   (plusieurs fois/jour). *(La classification de thème est déjà affinée par un LLM
   local — cf. ci-dessous.)*
-- **V1.1** : fiche député (lecture seule), filtres de recherche, partage.
+- **V1.1** : filtres de recherche, partage. *(La fiche député en lecture seule
+  est faite — cf. « État actuel ».)*
 - **V2** : assistant IA en questions pré-cadrées.
 
 ## Pièges à éviter

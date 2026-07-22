@@ -26,6 +26,13 @@ from app.ingestion.assemblee import (
     parse_scrutin,
 )
 from app.ingestion.amendements import AmendementEnrichi, enrichir as enrichir_amendement
+from app.ingestion.deputes import (
+    attacher_portraits,
+    build_deputes_from_amo,
+    remplacer_votes_du_scrutin,
+    upsert_deputes,
+    votes_du_scrutin,
+)
 from app.ingestion.debats import IndexDebats, url_compte_rendu
 from app.ingestion.dossiers_legislatifs import construire_reconciliation
 from app.ingestion.textes_an import (
@@ -101,6 +108,10 @@ class SyncReport:
     # dossier officiel après amélioration de la réconciliation).
     dossiers_orphelins_supprimes: int = 0
     groupes: int = 0
+    # Référentiel des députés (AMO) et lignes de vote nominatif écrites (§5.2).
+    deputes: int = 0
+    portraits: int = 0
+    votes_deputes: int = 0
     # LLM configuré mais injoignable au démarrage → run sans LLM (visible).
     llm_indisponible: bool = False
     # Appels LLM en échec définitif malgré les retries (sinon un échec réseau
@@ -736,6 +747,16 @@ class SyncJob:
         self._indexer_groupes(resolver)
         async with self._sf() as session:
             report.groupes = await _upsert_groupes(session, resolver)
+            # Annuaire des députés (mandats actifs) : alimente la fiche député
+            # (§5.2). Le référentiel est petit (~570 lignes) et se refait à
+            # chaque run — un changement de groupe s'y répercute. Les photos
+            # officielles sont vérifiées une à une avant d'être attachées
+            # (best-effort : sans réseau, on repart sans photo).
+            deputes = build_deputes_from_amo(acteurs_bruts, resolver)
+            report.portraits = await attacher_portraits(
+                deputes, self._client.legislature
+            )
+            report.deputes = await upsert_deputes(session, deputes)
             await session.commit()
 
         # 1ter) LLM : health-check AVANT le long run. Un serveur configuré mais
@@ -813,6 +834,12 @@ class SyncJob:
         # 2) Scrutins → parsing (avec nominatif) → regroupement par dossier.
         bruts = await self._client.download_scrutins(limit=limit)
         report.scrutins_vus = len(bruts)
+        # Le JSON brut reste nécessaire APRÈS le parsing : c'est lui qui porte
+        # la ventilation nominative (qui a voté quoi, §5.2), que `ScrutinParse`
+        # ne transporte pas. On garde donc la correspondance uid → brut.
+        bruts_par_uid: dict[str, dict] = {
+            str((b.get("scrutin") or {}).get("uid")): b for b in bruts
+        }
         par_dossier: dict[str, list[ScrutinParse]] = {}
         for brut in bruts:
             try:
@@ -886,6 +913,17 @@ class SyncJob:
                             session, p.scrutin, report
                         )
                     await _upsert_scrutin(session, p.scrutin)
+                    # Votes nominatifs du scrutin (fiche député, §5.2) :
+                    # réécrits depuis le JSON brut, dans le même commit que le
+                    # scrutin auquel ils se rapportent.
+                    brut = bruts_par_uid.get(p.scrutin.id)
+                    if brut is not None:
+                        report.votes_deputes += await remplacer_votes_du_scrutin(
+                            session,
+                            p.scrutin.id,
+                            p.scrutin.date,
+                            votes_du_scrutin(brut),
+                        )
                 report.dossiers_upserts += 1
                 await session.commit()
                 if self._on_progress:

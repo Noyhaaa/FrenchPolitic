@@ -351,3 +351,98 @@ export interface RecapMensuel {
   /** Nombre de dossiers (textes) ayant connu au moins un vote dans le mois. */
   textes: number;
 }
+
+// ---------------------------------------------------------------------------
+// Députés (annuaire, fiche, historique de votes)
+//
+// Le sens de vote d'un député n'existe que pour les scrutins PUBLICS
+// (nominatifs, §5.2) : c'est la seule source de l'historique. « Contre son
+// groupe » est un fait déduit (position du député ≠ `positionMajoritaire` de
+// son groupe sur le même scrutin), jamais une interprétation (§7.4).
+// Miroir de `backend/app/schemas/depute.py`.
+// ---------------------------------------------------------------------------
+
+/** Un député (organe « acteur » de l'open data AN). */
+export interface Depute {
+  /** Référence acteur AMO (« PA841605 »). */
+  id: string;
+  nom: string;
+  groupeId: string;
+  groupeNom: string;
+  /** Couleur du groupe (même source que `PositionGroupe.couleur`). */
+  groupeCouleur: string;
+  circonscription: string;
+  /** Début de mandat (ISO), absent si non documenté. */
+  depuis?: string;
+  /** Photo officielle si disponible — sinon l'app affiche les initiales. */
+  portraitUrl?: string;
+}
+
+/**
+ * Version allégée pour l'annuaire — photo comprise : c'est elle qui rend la
+ * liste identifiable d'un coup d'œil (absente → initiales).
+ */
+export interface DeputeListItem {
+  id: string;
+  nom: string;
+  groupeNom: string;
+  groupeCouleur: string;
+  circonscription: string;
+  portraitUrl?: string;
+}
+
+/**
+ * Statistiques agrégées du député (12 derniers mois). Champs absents =
+ * « information non disponible » (§2.5), jamais comblés.
+ *
+ * PAS de taux de participation : l'open data ne recense que les votants
+ * physiques d'un scrutin public, si bien qu'un ratio de présence se lirait
+ * comme un score d'absentéisme que la source ne soutient pas (§7.4).
+ */
+export interface PortraitVote {
+  /** Part de ses votes alignés sur la majorité de son groupe (0..1). */
+  cohesionGroupe?: number;
+  /** Nombre de scrutins publics où il a exprimé un vote. */
+  votes: number;
+  pour: number;
+  contre: number;
+  abstention: number;
+}
+
+/** Nature de ce sur quoi portait un vote (situe une entrée d'historique). */
+export type ObjetVote = 'dossier' | 'amendement' | 'sous_amendement';
+
+/** Un vote du député dans l'historique. */
+export interface VoteDepute {
+  scrutinId: string;
+  date: string;
+  objetType: ObjetVote;
+  /** Titre clair du dossier, ou objet du vote d'amendement. */
+  titre: string;
+  /** Dossier à ouvrir au tap (absent si le vote n'en a pas). */
+  dossierId?: string;
+  position: PositionVote;
+  /**
+   * True si la position diffère de la majorité de son groupe sur ce scrutin.
+   * Absent quand le groupe n'a pas de position majoritaire documentée (§2.5).
+   */
+  contreSonGroupe?: boolean;
+}
+
+/**
+ * Fiche complète renvoyée par `GET /deputes/{id}`. `historique` est paginé
+ * (du plus récent au plus ancien) : une page plus courte que la limite
+ * demandée signale la fin de l'historique.
+ */
+export interface DeputeDetail extends Depute {
+  portrait: PortraitVote;
+  historique: VoteDepute[];
+}
+
+/** Groupe politique tel qu'exposé par les filtres de l'annuaire. */
+export interface GroupeListItem {
+  id: string;
+  nom: string;
+  abrev: string;
+  couleur: string;
+}

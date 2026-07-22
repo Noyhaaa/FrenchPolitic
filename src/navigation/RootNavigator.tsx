@@ -6,7 +6,11 @@ import {
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { colors } from '@/theme';
-import { DossierDetailScreen, ScrutinDetailScreen } from '@/screens';
+import {
+  DeputeDetailScreen,
+  DossierDetailScreen,
+  ScrutinDetailScreen,
+} from '@/screens';
 import { MainTabs } from './MainTabs';
 import type { RootStackParamList } from './types';
 
@@ -37,6 +41,11 @@ export function RootNavigator() {
         <Stack.Screen
           name="ScrutinDetail"
           component={ScrutinDetailScreen}
+          options={{ presentation: 'card', animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="DeputeDetail"
+          component={DeputeDetailScreen}
           options={{ presentation: 'card', animation: 'slide_from_right' }}
         />
       </Stack.Navigator>

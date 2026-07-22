@@ -1,5 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Accueil, Dossier, RecapMensuel, Scrutin } from '@/types';
+import {
+  Accueil,
+  DeputeDetail,
+  DeputeListItem,
+  Dossier,
+  GroupeListItem,
+  RecapMensuel,
+  Scrutin,
+} from '@/types';
 
 /**
  * Cache local pour l'usage hors-ligne (§8 : l'app reste utilisable sur les
@@ -10,6 +18,9 @@ const KEY_ACCUEIL = 'cache:accueil';
 const KEY_RECAP = 'cache:recap';
 const keyDetail = (id: string) => `cache:dossier:${id}`;
 const keyScrutin = (id: string) => `cache:scrutin:${id}`;
+const KEY_DEPUTES = 'cache:deputes';
+const KEY_GROUPES = 'cache:groupes';
+const keyDepute = (id: string) => `cache:depute:${id}`;
 
 async function readJson<T>(key: string): Promise<T | null> {
   try {
@@ -37,4 +48,12 @@ export const cache = {
   setScrutin: (s: Scrutin) => writeJson(keyScrutin(s.id), s),
   getRecap: () => readJson<RecapMensuel>(KEY_RECAP),
   setRecap: (r: RecapMensuel) => writeJson(KEY_RECAP, r),
+  // Annuaire des députés : seule la liste complète est mise en cache (les
+  // recherches et filtres se rejouent en ligne).
+  getDeputes: () => readJson<DeputeListItem[]>(KEY_DEPUTES),
+  setDeputes: (d: DeputeListItem[]) => writeJson(KEY_DEPUTES, d),
+  getGroupes: () => readJson<GroupeListItem[]>(KEY_GROUPES),
+  setGroupes: (g: GroupeListItem[]) => writeJson(KEY_GROUPES, g),
+  getDepute: (id: string) => readJson<DeputeDetail>(keyDepute(id)),
+  setDepute: (d: DeputeDetail) => writeJson(keyDepute(d.id), d),
 };

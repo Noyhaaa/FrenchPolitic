@@ -17,6 +17,15 @@ class PositionVote(str, Enum):
     non_votant = "non_votant"
 
 
+class ObjetVote(str, Enum):
+    """Nature de ce sur quoi portait un vote, pour situer une entrée
+    d'historique de député (§5.2)."""
+
+    dossier = "dossier"
+    amendement = "amendement"
+    sous_amendement = "sous_amendement"
+
+
 class NiveauConfiance(str, Enum):
     haute = "haute"
     moyenne = "moyenne"

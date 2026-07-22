@@ -42,6 +42,8 @@ async def _main(limit: int | None, legislature: int) -> None:
     print(
         f"Terminé : {report.dossiers_upserts} dossiers "
         f"({report.scrutins_vus} scrutins vus), {report.groupes} groupes, "
+        f"{report.deputes} députés ({report.portraits} photos, "
+        f"{report.votes_deputes} votes nominatifs), "
         f"{report.exposes_recuperes} exposés des motifs récupérés "
         f"(dont {report.exposes_senat} via le Sénat), "
         f"{report.themes_reclasses} thèmes reclassés, "

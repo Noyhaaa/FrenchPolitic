@@ -8,16 +8,30 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from app.repositories.base import DossierRepository, ordonner_sections
+from app.domain.enums import PositionVote
+from app.repositories.base import (
+    DossierRepository,
+    construire_portrait,
+    ordonner_sections,
+)
 from app.schemas import (
     Accueil,
+    Depute,
+    DeputeDetail,
+    DeputeListItem,
     Dossier,
     DossierListItem,
+    GroupeListItem,
+    PortraitVote,
     RecapMensuel,
     Scrutin,
     SectionTheme,
+    VoteDepute,
 )
 from app.utils.text import fold as _fold
+
+# Même fenêtre que le repository Postgres (§5.2) : les 12 derniers mois.
+FENETRE_PORTRAIT_JOURS = 365
 
 
 def _sort_key(d: Dossier) -> str:
@@ -25,12 +39,25 @@ def _sort_key(d: Dossier) -> str:
 
 
 class InMemoryDossierRepository(DossierRepository):
-    def __init__(self, dossiers: list[Dossier], scrutins: list[Scrutin]) -> None:
+    def __init__(
+        self,
+        dossiers: list[Dossier],
+        scrutins: list[Scrutin],
+        deputes: list[Depute] | None = None,
+        votes_deputes: dict[str, list[VoteDepute]] | None = None,
+        groupes: list[GroupeListItem] | None = None,
+    ) -> None:
         # Index par id + liste triée du plus récent au plus ancien.
         ordered = sorted(dossiers, key=_sort_key, reverse=True)
         self._ordered = ordered
         self._by_id = {d.id: d for d in ordered}
         self._scrutins = {s.id: s for s in scrutins}
+        # Députés : annuaire trié alphabétiquement + historique par député
+        # (déjà du plus récent au plus ancien dans le seed).
+        self._deputes = sorted(deputes or [], key=lambda d: d.nom)
+        self._deputes_by_id = {d.id: d for d in self._deputes}
+        self._votes_deputes = votes_deputes or {}
+        self._groupes = list(groupes or [])
 
     async def list(self, limit: int = 20, offset: int = 0) -> list[DossierListItem]:
         window = self._ordered[offset : offset + limit]
@@ -91,4 +118,64 @@ class InMemoryDossierRepository(DossierRepository):
             adoptes=sum(1 for s in du_mois if s.statut.value == "adopte"),
             rejetes=sum(1 for s in du_mois if s.statut.value == "rejete"),
             textes=len({s.dossier_id for s in du_mois}),
+        )
+
+    # --- Députés (§5.2) ---------------------------------------------------
+
+    async def list_deputes(
+        self, q: str = "", groupe_id: str | None = None, limit: int = 600
+    ) -> list[DeputeListItem]:
+        terme = _fold(q.strip())
+        resultats = [
+            d
+            for d in self._deputes
+            if (not groupe_id or d.groupe_id == groupe_id)
+            and (
+                not terme
+                or terme in _fold(f"{d.nom} {d.groupe_nom} {d.circonscription}")
+            )
+        ]
+        return [DeputeListItem.from_depute(d) for d in resultats[:limit]]
+
+    async def get_depute(
+        self, depute_id: str, limit: int = 30, offset: int = 0
+    ) -> DeputeDetail | None:
+        depute = self._deputes_by_id.get(depute_id)
+        if depute is None:
+            return None
+        return DeputeDetail(
+            **depute.model_dump(),
+            portrait=self._portrait(depute_id),
+            historique=await self.votes_depute(depute_id, limit=limit, offset=offset),
+        )
+
+    async def votes_depute(
+        self, depute_id: str, limit: int = 30, offset: int = 0
+    ) -> list[VoteDepute]:
+        votes = self._votes_deputes.get(depute_id, [])
+        return votes[offset : offset + limit]
+
+    async def list_groupes(self) -> list[GroupeListItem]:
+        return sorted(self._groupes, key=lambda g: g.nom)
+
+    def _portrait(self, depute_id: str) -> PortraitVote:
+        """Mêmes règles que le repository Postgres : 12 mois glissants, ratios
+        absents quand le dénominateur est nul (§2.5)."""
+        depuis = (
+            date.today() - timedelta(days=FENETRE_PORTRAIT_JOURS)
+        ).isoformat()
+        votes = [
+            v for v in self._votes_deputes.get(depute_id, []) if v.date >= depuis
+        ]
+        comptes = {
+            p: sum(1 for v in votes if v.position is p) for p in PositionVote
+        }
+        exprimes = [v for v in votes if v.position is not PositionVote.non_votant]
+        avec_majorite = [v for v in exprimes if v.contre_son_groupe is not None]
+        return construire_portrait(
+            pour=comptes[PositionVote.pour],
+            contre=comptes[PositionVote.contre],
+            abstention=comptes[PositionVote.abstention],
+            alignes=sum(1 for v in avec_majorite if not v.contre_son_groupe),
+            avec_majorite=len(avec_majorite),
         )

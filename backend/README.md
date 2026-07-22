@@ -43,6 +43,11 @@ createdb frenchpolitics
 # Ingère les scrutins publics de la 17e législature (open data AN).
 python -m app.ingestion.run --limit 300     # 300 récents (~4 s) ; sans --limit = tout
 
+# Députés + votes nominatifs UNIQUEMENT (référentiel AMO + ventilations des
+# scrutins) : ni LLM, ni dossiers, ni amendements, ni débats. ~7 min sur toute
+# la législature, là où un run complet dure des heures.
+python -m app.ingestion.deputes             # --limit 300 pour les plus récents
+
 # L'API sert alors la base ingérée (REPOSITORY_BACKEND=postgres via .env).
 uvicorn app.main:app --reload
 ```
@@ -50,8 +55,11 @@ uvicorn app.main:app --reload
 L'ingestion télécharge l'archive des scrutins + l'archive AMO (organes **et
 acteurs** : groupes + annuaire des députés pour le vote nominatif), parse,
 contrôle la cohérence des décomptes, **regroupe les scrutins par dossier** et
-upsert (idempotent) : les dossiers (liste compacte des votes) et le détail de
-chaque vote (table `scrutin`, avec les noms des votants). Regroupement en
+upsert (idempotent) : les dossiers (liste compacte des votes), le détail de
+chaque vote (table `scrutin`, avec les noms des votants) et — depuis la
+fonctionnalité « Députés » — le **référentiel des députés** (table `depute`)
+avec leurs **votes nominatifs** (table `vote_depute`, réécrits scrutin par
+scrutin). Regroupement en
 cascade : le `dossierRef` officiel quand il existe ; sinon **réconciliation** via
 l'archive *dossiers législatifs* (le titre cité dans l'objet, comparé aux titres
 officiels des législatures — **fold exact, puis signature, puis préfixe** : fold
@@ -170,6 +178,10 @@ finissait par préserver le bon thème, mais après un appel gaspillé).
 | GET     | `/dossiers/{id}`   | Fiche dossier (2)| Résumé sourcé + votes sur le texte + amendements |
 | GET     | `/scrutins/{id}`   | Fiche vote (3)   | Détail d'un vote (texte ou amendement) : groupes + nominatif |
 | GET     | `/recherche?q=`    | Recherche (4)    | Plein texte sur titre clair + officiel + thème |
+| GET     | `/deputes?q=&groupe=` | Annuaire       | Députés (ordre alphabétique), filtrables par groupe et recherche libre |
+| GET     | `/deputes/{id}`    | Fiche député     | Identité + portrait de vote (12 mois) + 1re page d'historique |
+| GET     | `/deputes/{id}/votes` | Fiche député  | Historique paginé (« charger les votes plus anciens ») |
+| GET     | `/groupes`         | Annuaire         | Groupes politiques (nom, abréviation, couleur) — filtres |
 | GET     | `/health`          | —                | Statut du service                             |
 
 Le JSON est en **camelCase**, miroir exact des types `Dossier` / `Scrutin` du
@@ -191,9 +203,9 @@ app/
   api/routes/        dossiers.py (fil, fiche dossier, fiche vote, recherche), health.py
   schemas/           Contrat d'API (Pydantic, camelCase) = §5.3 — Dossier + Scrutin
   domain/enums.py    Statuts, positions, niveaux de confiance…
-  db/                models.py (dossier, scrutin, groupe, sync_run) · session.py (moteur async)
+  db/                models.py (dossier, scrutin, groupe, depute, vote_depute, sync_run) · session.py (moteur async)
   repositories/      Protocole + in-memory (seed) + postgres (ingéré) — choix via config
-  data/seed.py       Dossiers FICTIFS de démonstration
+  data/seed.py       Dossiers + députés FICTIFS de démonstration (backend « memory »)
   ai/                Pipeline de résumé (§4)
     prompts.py       Prompt système neutre (§4.1–4.3)
     rag.py           Construction du contexte ancré (RAG)
@@ -210,6 +222,7 @@ app/
     textes_an.py     Exposé des motifs : uid → URL du PDF officiel → extraction (pypdf)
     textes_senat.py  Repli exposé : texte de transmission Sénat → PDF senat.fr → extraction
     organes.py       Résolution des groupes (AMO) + couleurs + annuaire des députés
+    deputes.py       Référentiel des députés + votes nominatifs (pur) + CLI autonome
     normalize.py     Thème (heuristique), positions, décomptes
     sync.py          Job download → parse → regroupement par dossier → upsert (idempotent)
     run.py           CLI : python -m app.ingestion.run
@@ -230,6 +243,29 @@ tests/               Tests API + garde-fous + génération + ingestion (+ repo p
   idempotent (dossiers + détail des votes), journal `sync_run`.
   Le nominatif n'existe pas dans le seed (on n'invente pas des noms, §2.5) :
   il apparaît sur les données réellement ingérées.
+- **Députés** (§5.2) : référentiel (`depute`) construit depuis l'archive AMO —
+  nom, groupe (mandat GP en cours, couleur partagée avec les ventilations),
+  circonscription (« Pas-de-Calais, 5ᵉ circ. »), début de mandat — et **votes
+  nominatifs** (`vote_depute`, une ligne par député × scrutin, écrite par lots).
+  Mesuré sur la base de dev : **577 députés**, **1 270 476 votes** sur 8 434
+  scrutins. La fiche député en dérive un **portrait sur 12 mois glissants**
+  (votes exprimés et leur ventilation, cohésion = part des votes suivant la
+  majorité de son groupe) et un
+  **historique paginé**. « Contre son groupe » est un **fait déduit** du même
+  scrutin (position ≠ `positionMajoritaire` du groupe), calculé pour les seules
+  positions exprimées et **absent** quand le groupe n'a pas de position
+  majoritaire exploitable ; un ratio au dénominateur nul reste `null`
+  (« information non disponible », jamais 0 %, §2.5). La **photo officielle**
+  est le seul champ dont l'URL est *dérivée* (`.../tribun/{leg}/photos/carre/
+  {acteurRef sans PA}.jpg` — le référentiel AMO ne la porte pas) : elle n'est
+  attachée qu'après vérification (HEAD 200 + `content-type: image/…`,
+  `attacher_portraits`), sinon `null` et l'app affiche les initiales. Mesuré :
+  **576/577** photos confirmées. **Aucun taux de
+  participation n'est produit** : l'open data ne recense que les votants
+  physiques d'un scrutin public (268 en moyenne sur 577, médiane de 44 % même
+  sur les seuls votes sur l'ensemble), si bien que tout ratio de présence se
+  lirait comme un score d'absentéisme que la source ne soutient pas (§7.4). Pas d'URL de portrait :
+
 - Les **garde-fous éditoriaux** (ancrage, lexique orienté avec accents, cohérence
   des chiffres, décision de revue) et le pipeline de génération avec `MockLLM`.
 

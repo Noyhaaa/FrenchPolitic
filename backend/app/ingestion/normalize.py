@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-from app.domain.enums import PositionVote
+from app.domain.enums import ObjetVote, PositionVote
 from app.utils.text import fold
 
 # Devine le thème à partir de mots-clés du titre (heuristique, pas d'opinion).
@@ -47,6 +47,19 @@ def est_amendement(objet: str) -> bool:
 def est_sous_amendement(objet: str) -> bool:
     """Le scrutin porte-t-il sur un sous-amendement (amendement à un amendement) ?"""
     return "sous-amendement" in fold(objet)
+
+
+def type_objet_vote(objet: str) -> ObjetVote:
+    """Nature de ce sur quoi portait un vote (texte, amendement, sous-amendement).
+
+    Même partition que le classement des scrutins d'un dossier ; sert à situer
+    chaque ligne de l'historique de vote d'un député (§5.2).
+    """
+    if est_sous_amendement(objet):
+        return ObjetVote.sous_amendement
+    if est_amendement(objet):
+        return ObjetVote.amendement
+    return ObjetVote.dossier
 
 
 # « (sous-)amendement … n° 80 » — fold() transforme « º » en « o », d'où [°o].

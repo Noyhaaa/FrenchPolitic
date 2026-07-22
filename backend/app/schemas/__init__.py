@@ -1,3 +1,11 @@
+from app.schemas.depute import (
+    Depute,
+    DeputeDetail,
+    DeputeListItem,
+    GroupeListItem,
+    PortraitVote,
+    VoteDepute,
+)
 from app.schemas.scrutin import (
     Accueil,
     Amendement,
@@ -23,6 +31,12 @@ from app.schemas.scrutin import (
 
 __all__ = [
     "Accueil",
+    "Depute",
+    "DeputeDetail",
+    "DeputeListItem",
+    "GroupeListItem",
+    "PortraitVote",
+    "VoteDepute",
     "Amendement",
     "ArgumentGroupe",
     "ChangementTexte",

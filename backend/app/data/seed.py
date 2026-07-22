@@ -6,10 +6,14 @@ sans dépendre d'une base. Unité : le dossier (texte) et ses scrutins.
 """
 from __future__ import annotations
 
+from app.domain.enums import ObjetVote, PositionVote
+from app.ingestion.normalize import type_objet_vote
 from app.schemas import (
     Amendement,
     ChangementTexte,
+    Depute,
     Dossier,
+    GroupeListItem,
     MiseAJourDossier,
     PhaseScrutin,
     PhraseSourcee,
@@ -20,6 +24,7 @@ from app.schemas import (
     Scrutin,
     ScrutinResume,
     SourceOfficielle,
+    VoteDepute,
 )
 
 # Emoji d'illustration par thème (aligné sur le frontend).
@@ -492,3 +497,147 @@ SEED_DOSSIERS: list[Dossier] = [
         ),
     ),
 ]
+
+
+# ---------------------------------------------------------------------------
+# Députés FICTIFS + leur historique de vote (§5.2).
+#
+# Les positions ci-dessous sont déclarées à la main ; le reste de chaque entrée
+# d'historique (date, objet, titre, « contre son groupe ») est **dérivé** des
+# scrutins seed ci-dessus, pour que la démonstration reste cohérente avec les
+# `positionsGroupes` affichés sur les fiches vote.
+# ---------------------------------------------------------------------------
+
+_DOSSIER_PAR_ID = {d.id: d for d in SEED_DOSSIERS}
+
+SEED_GROUPES: list[GroupeListItem] = [
+    GroupeListItem(id=gid, nom=nom, abrev=gid, couleur=couleur)
+    for gid, (nom, couleur) in _GROUPES.items()
+]
+
+# (id, nom, groupe, circonscription, début de mandat)
+_DEPUTES: tuple[tuple[str, str, str, str, str | None], ...] = (
+    ("dep-seed-01", "Camille Vernet", "RE", "Loire-Atlantique, 3ᵉ circ.", "2024-07-19"),
+    ("dep-seed-02", "Hugo Belmont", "RN", "Somme, 1re circ.", "2024-07-19"),
+    ("dep-seed-03", "Nadia Ferrand", "LFI", "Seine-Saint-Denis, 7ᵉ circ.", "2024-07-19"),
+    ("dep-seed-04", "Olivier Sancerre", "LR", "Cantal, 2ᵉ circ.", "2024-07-19"),
+    ("dep-seed-05", "Awa Diallo", "SOC", "Gironde, 4ᵉ circ.", "2024-07-19"),
+    # Circonscription et date de début non documentées : les champs restent
+    # vides / absents, ils ne sont pas devinés (§2.5).
+    ("dep-seed-06", "Léa Marchand", "ECO", "", None),
+)
+
+SEED_DEPUTES: list[Depute] = [
+    Depute(
+        id=identifiant,
+        nom=nom,
+        groupe_id=groupe,
+        groupe_nom=_GROUPES[groupe][0],
+        groupe_couleur=_GROUPES[groupe][1],
+        circonscription=circo,
+        depuis=depuis,
+        portrait_url=None,  # pas de photo dans le seed (l'app affiche les initiales)
+    )
+    for identifiant, nom, groupe, circo, depuis in _DEPUTES
+]
+
+
+def _vote_depute(scrutin_id: str, groupe_id: str, position: str) -> VoteDepute:
+    """Une entrée d'historique, dérivée du scrutin seed correspondant.
+
+    « Contre son groupe » est calculé (position ≠ position majoritaire du
+    groupe sur CE scrutin) — jamais saisi à la main, comme à l'ingestion
+    (§7.4). Absent si le groupe n'a pas de position sur ce vote (§2.5).
+    """
+    scrutin = _SCRUTIN[scrutin_id]
+    objet_type = type_objet_vote(scrutin.objet)
+    dossier = _DOSSIER_PAR_ID.get(scrutin.dossier_id)
+    titre = scrutin.objet
+    if objet_type is ObjetVote.dossier and dossier is not None:
+        titre = dossier.titre_clair
+    majoritaire = next(
+        (
+            g.position_majoritaire
+            for g in scrutin.positions_groupes
+            if g.groupe_id == groupe_id
+        ),
+        None,
+    )
+    exprime = position != PositionVote.non_votant.value
+    contre_son_groupe = None
+    if exprime and majoritaire is not None and majoritaire != PositionVote.non_votant:
+        contre_son_groupe = position != majoritaire.value
+    return VoteDepute(
+        scrutin_id=scrutin.id,
+        date=scrutin.date,
+        objet_type=objet_type,
+        titre=titre,
+        dossier_id=scrutin.dossier_id,
+        position=position,
+        contre_son_groupe=contre_son_groupe,
+    )
+
+
+# Positions déclarées par député (scrutin → position). « dep-seed-06 » n'a
+# aucun vote enregistré : sa fiche montre alors des statistiques sans cohésion
+# (« information non disponible »), pas un 0 % inventé (§2.5).
+_POSITIONS: dict[str, dict[str, str]] = {
+    "dep-seed-01": {
+        "scr-2026-0412b": "pour",
+        "scr-2026-0412a": "pour",
+        "scr-2026-0412-am1": "pour",
+        "scr-2026-0412-sam1": "contre",
+        # Position opposée à celle de son groupe sur ce vote (cas « contre son
+        # groupe » : purement descriptif).
+        "scr-2026-0412-am2": "pour",
+        "scr-2026-0410": "pour",
+        "scr-2026-0405": "contre",
+        "scr-2026-0398": "pour",
+    },
+    "dep-seed-02": {
+        "scr-2026-0412b": "contre",
+        "scr-2026-0412a": "contre",
+        "scr-2026-0412-am1": "contre",
+        "scr-2026-0412-am2": "pour",
+        "scr-2026-0410": "pour",
+        "scr-2026-0398": "abstention",
+    },
+    "dep-seed-03": {
+        "scr-2026-0412b": "pour",
+        "scr-2026-0412a": "pour",
+        "scr-2026-0412-am1": "pour",
+        "scr-2026-0412-sam1": "pour",
+        "scr-2026-0405": "pour",
+        "scr-2026-0398": "pour",
+    },
+    "dep-seed-04": {
+        "scr-2026-0412b": "contre",
+        "scr-2026-0412a": "contre",
+        "scr-2026-0412-am2": "pour",
+        # N'a pas pris part au vote : compté ni dans les votes exprimés ni
+        # dans la cohésion.
+        "scr-2026-0405": "non_votant",
+        "scr-2026-0410": "pour",
+    },
+    "dep-seed-05": {
+        "scr-2026-0412b": "pour",
+        "scr-2026-0412a": "pour",
+        "scr-2026-0412-am1": "pour",
+        "scr-2026-0410": "pour",
+        "scr-2026-0405": "pour",
+        "scr-2026-0398": "pour",
+    },
+}
+
+# Historique par député, du plus récent au plus ancien (comme l'API réelle).
+SEED_VOTES_DEPUTES: dict[str, list[VoteDepute]] = {
+    depute.id: sorted(
+        (
+            _vote_depute(scrutin_id, depute.groupe_id, position)
+            for scrutin_id, position in _POSITIONS.get(depute.id, {}).items()
+        ),
+        key=lambda v: v.date,
+        reverse=True,
+    )
+    for depute in SEED_DEPUTES
+}
