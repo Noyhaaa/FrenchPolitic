@@ -25,4 +25,5 @@ export { QuestionsCard } from './QuestionsCard';
 export { QuestionsAmendementCard } from './QuestionsAmendementCard';
 export { TrajectoireNavette } from './TrajectoireNavette';
 export { BrandHeader } from './BrandHeader';
+export { TabBarIcon } from './TabBarIcon';
 export { LoadingView, ErrorView, EmptyView, OfflineBanner } from './StateViews';

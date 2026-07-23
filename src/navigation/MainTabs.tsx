@@ -1,7 +1,8 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
 import { colors, radius, typography } from '@/theme';
+import { TabBarIcon } from '@/components';
 import {
   AssistantScreen,
   DeputesScreen,
@@ -13,20 +14,14 @@ import type { MainTabsParamList } from './types';
 
 const Tab = createBottomTabNavigator<MainTabsParamList>();
 
-const icons: Record<keyof MainTabsParamList, string> = {
-  Accueil: '🏛️',
-  Recherche: '🔍',
-  Deputes: '🧑‍⚖️',
-  Assistant: '💬',
-  Profil: '👤',
-};
-
 function TabIcon({ name, focused }: { name: keyof MainTabsParamList; focused: boolean }) {
   return (
     <View style={styles.iconWrap}>
-      <Text style={[styles.icon, { opacity: focused ? 1 : 0.35 }]}>
-        {icons[name]}
-      </Text>
+      <TabBarIcon
+        name={name}
+        color={focused ? colors.textPrimary : colors.textTertiary}
+        size={24}
+      />
       {/* Point d'accent sous l'onglet actif (prototype). */}
       <View style={[styles.dot, { opacity: focused ? 1 : 0 }]} />
     </View>
@@ -73,9 +68,6 @@ const styles = StyleSheet.create({
   iconWrap: {
     alignItems: 'center',
     gap: 3,
-  },
-  icon: {
-    fontSize: 20,
   },
   dot: {
     width: 4,

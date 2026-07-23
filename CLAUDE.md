@@ -356,8 +356,11 @@ qui affiche du contenu de scrutin doit les respecter.
   interactifs et les badges ; `importantForAccessibility="no"` sur les emojis
   décoratifs.
 - **Safe area.** Les écrans gèrent eux-mêmes `useSafeAreaInsets` (padding top/bottom).
-- **Icônes.** Emojis (pas de librairie d'icônes installée). Si on ajoute des icônes
-  vectorielles un jour, passer par `@expo/vector-icons`.
+- **Icônes.** La **barre d'onglets** utilise un jeu d'icônes-lignes maison
+  (`TabBarIcon`, tracés SVG via `react-native-svg`) : monochromes, la couleur
+  vient de l'état actif/inactif. Partout ailleurs, ce sont des emojis (thèmes,
+  repères décoratifs → `importantForAccessibility="no"`). Pas de librairie
+  d'icônes : une nouvelle icône se dessine dans `TabBarIcon`.
 - **Commentaires.** Référencer la section du MVP concernée (`§3.2`, `§4.5`…) quand un
   choix découle d'une règle produit — c'est la convention en place.
 
