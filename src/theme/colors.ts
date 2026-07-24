@@ -50,6 +50,12 @@ export const colors = {
 
   // Superposition sur les tuiles teintées (lisibilité du texte par-dessus)
   overlay: 'rgba(0,0,0,0.55)',
+
+  // Écran de lancement (constellation « chat qui dort », cf. DecrypteSplash)
+  splashLigne: '#A9B4F7', // traits de la silhouette
+  splashLigneSoft: '#C7CFF7', // œil clos / museau
+  splashEtoile: '#EAEEFF', // étoiles aux sommets
+  splashEtoileVive: '#FFFFFF', // étoiles brillantes
 } as const;
 
 export type Colors = typeof colors;

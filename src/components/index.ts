@@ -27,3 +27,4 @@ export { TrajectoireNavette } from './TrajectoireNavette';
 export { BrandHeader } from './BrandHeader';
 export { TabBarIcon } from './TabBarIcon';
 export { LoadingView, ErrorView, EmptyView, OfflineBanner } from './StateViews';
+export { DecrypteSplash } from './DecrypteSplash';

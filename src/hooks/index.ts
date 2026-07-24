@@ -1,4 +1,4 @@
-export { useAccueil } from './useAccueil';
+export { useAccueil, amorcerAccueil } from './useAccueil';
 export { useDepute } from './useDepute';
 export { useDeputes } from './useDeputes';
 export { useDossier } from './useDossier';
