@@ -588,7 +588,12 @@ class SyncJob:
         deja_resolu = await self._theme_en_base(session, dossier.id)
         if deja_resolu is not None and deja_resolu != "Autre":
             return
-        nouveau = await classifier_theme(dossier.titre_officiel, self._llm, THEMES)
+        # L'exposé des motifs est déjà chargé (_enrichir_expose, appelé avant) :
+        # on le donne au classifieur comme signal supplémentaire au titre.
+        expose = dossier.expose_motifs.texte if dossier.expose_motifs else None
+        nouveau = await classifier_theme(
+            dossier.titre_officiel, self._llm, THEMES, objet=dossier.accroche, expose=expose
+        )
         if nouveau and nouveau != "Autre":
             dossier.theme = nouveau
             report.themes_reclasses += 1

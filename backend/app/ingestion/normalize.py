@@ -6,25 +6,88 @@ import re
 from app.domain.enums import ObjetVote, PositionVote
 from app.utils.text import fold
 
+# Liste fermée des thèmes (source unique, miroir de `ThemeScrutin` côté front).
+# L'open data ne fournit pas de thème : on le devine par heuristique (mots-clés du
+# titre) puis, pour les « Autre » restants, par LLM (liste imposée, cf. app.ai.theme).
+# ⚠️ Contrat : tout ajout ici doit l'être aussi dans `src/types/index.ts`
+# (`ThemeScrutin`) et `src/constants/themes.ts` (3 maps). Cap 32 car. (DB `String(32)`).
+THEMES: tuple[str, ...] = (
+    "Logement",
+    "Santé",
+    "Fiscalité",
+    "Énergie",
+    "Éducation",
+    "Environnement",
+    "Justice",
+    "Travail",
+    "Économie",
+    "Institutions",
+    "Vie parlementaire",
+    "International & Défense",
+    "Agriculture",
+    "Transports",
+    "Culture",
+    "Sport",
+    "Immigration",
+    "Sécurité",
+    "Autre",
+)
+
+# Thème dédié aux textes purement procéduraux (routage déterministe, sans LLM).
+THEME_PROCEDURAL = "Vie parlementaire"
+
+# Phrases complètes (foldées) marquant un texte procédural. On teste des phrases
+# entières et non le mot « motion » seul, qui capterait « motion de rejet préalable »
+# ou « motion de renvoi en commission » attachées à un texte de fond.
+_PHRASES_PROCEDURALES: tuple[str, ...] = (
+    "motion de censure",
+    "declaration de politique generale",
+)
+
 # Devine le thème à partir de mots-clés du titre (heuristique, pas d'opinion).
-# L'open data ne fournit pas de thème ; à terme, un classifieur plus fin.
+# Sous-ensemble de THEMES : seuls les thèmes à sous-chaînes FIABLES sont ici.
+# Institutions & International/Défense sont laissés au LLM (leurs mots — « traite »
+# ⊂ « traitement », « etranger » ⊂ « affaires étrangères », « election »… — sont
+# trop larges/collisionnants). Ordre = précédence (1er match gagne) : le spécifique
+# avant le générique. Transports AVANT Sport car « sport » ⊂ « transport ». Économie
+# (large) en dernier.
 _THEME_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
+    ("Agriculture", ("agricol", "alimentaire", "paysan")),
+    ("Transports", ("transport", "autorouti", "ferroviaire", "mobilite", "aerien")),
+    ("Sport", ("sport", "olympique")),
+    ("Culture", ("culturel", "patrimoine", "audiovisuel", "restitution")),
+    ("Immigration", ("immigration", "asile", "nationalite")),
+    # « municip » couvre municipal/municipaux/municipale ; « scrutin » les modes de
+    # scrutin (Conseil de Paris…). On évite « election » (⊂ « sélection »).
+    ("Institutions", ("municip", "electoral", "scrutin", "constitutionnel", "corse", "caledonie", "elu local")),
+    ("Sécurité", ("securite civile", "gendarmerie", "pompier")),
     ("Logement", ("logement", "loyer", "habitat", "bail", "locati", "hlm")),
-    ("Santé", ("sante", "soin", "hopital", "medecin", "medical", "hospital")),
+    ("Santé", ("sante", "soin", "hopital", "medecin", "medical", "hospital", "palliati", "aide a mourir", "fin de vie")),
     ("Fiscalité", ("impot", "fiscal", "taxe", "budget", "finances", "tva")),
     ("Énergie", ("energie", "electricite", "gaz", "nucleaire", "carburant", "petrol")),
     ("Éducation", ("ecole", "education", "enseign", "universit", "scolaire", "eleve", "etudiant")),
     ("Environnement", ("environnement", "climat", "ecolog", "pollution", "biodiversite", "pesticide")),
     ("Justice", ("justice", "penal", "peine", "tribunal", "delit", "criminel", "prison", "victim")),
     ("Travail", ("travail", "emploi", "salari", "chomage", "retraite", "syndic")),
+    ("Économie", ("economi", "industrie", "entreprise", "consommateur", "concurrence")),
 ]
 
+# Garde-fou : toute étiquette de mots-clés doit exister dans la liste fermée.
+assert all(t in THEMES for t, _ in _THEME_KEYWORDS), "thème mots-clés hors THEMES"
+assert THEME_PROCEDURAL in THEMES
 
-# Liste fermée des thèmes (heuristique + choix imposé au classifieur LLM).
-THEMES: tuple[str, ...] = tuple(t for t, _ in _THEME_KEYWORDS) + ("Autre",)
+
+def est_texte_procedural(*textes: str) -> bool:
+    """Le vote porte-t-il sur un texte purement procédural (motion de censure,
+    déclaration de politique générale) ? Ces événements n'ont pas de sujet de fond
+    et sont rangés dans « Vie parlementaire » plutôt que « Autre »."""
+    blob = fold(" ".join(t for t in textes if t))
+    return any(p in blob for p in _PHRASES_PROCEDURALES)
 
 
 def guess_theme(*textes: str) -> str:
+    if est_texte_procedural(*textes):
+        return THEME_PROCEDURAL
     blob = fold(" ".join(t for t in textes if t))
     for theme, mots in _THEME_KEYWORDS:
         if any(m in blob for m in mots):

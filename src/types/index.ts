@@ -13,6 +13,7 @@ export type PositionVote = 'pour' | 'contre' | 'abstention' | 'non_votant';
 
 export type NiveauConfiance = 'haute' | 'moyenne' | 'faible';
 
+// Miroir de `THEMES` dans backend/app/ingestion/normalize.py — à garder synchronisé.
 export type ThemeScrutin =
   | 'Logement'
   | 'Santé'
@@ -22,6 +23,16 @@ export type ThemeScrutin =
   | 'Environnement'
   | 'Justice'
   | 'Travail'
+  | 'Économie'
+  | 'Institutions'
+  | 'Vie parlementaire'
+  | 'International & Défense'
+  | 'Agriculture'
+  | 'Transports'
+  | 'Culture'
+  | 'Sport'
+  | 'Immigration'
+  | 'Sécurité'
   | 'Autre';
 
 /** Une phrase du résumé, systématiquement rattachée à une source (§4). */

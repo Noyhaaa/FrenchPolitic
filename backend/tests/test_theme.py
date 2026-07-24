@@ -22,10 +22,13 @@ def test_valider_theme_exact_insensible_casse_accents():
     assert valider_theme("Justice", THEMES) == "Justice"
     assert valider_theme("justice.", THEMES) == "Justice"
     assert valider_theme("  SANTE ", THEMES) == "Santé"
+    # L'accent est facultatif : « Economie » → « Économie » (thème de la liste).
+    assert valider_theme("Economie", THEMES) == "Économie"
 
 
 def test_valider_theme_hors_liste_est_rejete():
-    assert valider_theme("Economie", THEMES) is None
+    # Mot absent de la liste fermée, et forme au singulier d'un thème pluriel.
+    assert valider_theme("Cuisine", THEMES) is None
     assert valider_theme("Transport", THEMES) is None
 
 
@@ -41,7 +44,7 @@ async def test_classifier_retourne_theme_valide():
 
 async def test_classifier_repli_si_reponse_invalide():
     # Sortie hors-liste → None (l'appelant garde l'existant).
-    assert await classifier_theme("Titre", _FakeLLM("Economie"), THEMES) is None
+    assert await classifier_theme("Titre", _FakeLLM("Cuisine"), THEMES) is None
 
 
 async def test_classifier_repli_si_llm_muet():

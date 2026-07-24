@@ -751,3 +751,26 @@ def test_map_position_absent_devient_non_votant():
 def test_guess_theme():
     assert guess_theme("Accès aux soins et hôpitaux") == "Santé"
     assert guess_theme("Un sujet sans mot-clé identifiable") == "Autre"
+    # Thèmes ajoutés (couverture des « Autre » réels).
+    assert guess_theme("Sûreté dans les transports") == "Transports"
+    assert guess_theme("Organisation du sport professionnel") == "Sport"
+    assert guess_theme("Exercice de la démocratie agricole") == "Agriculture"
+    assert guess_theme("Mode d'élection des conseils municipaux") == "Institutions"
+    assert guess_theme("Nationalité française à Mayotte") == "Immigration"
+    assert guess_theme("Droit à l'aide à mourir") == "Santé"
+    # « sport » ⊂ « transport » : un texte transport ne bascule pas en Sport.
+    assert guess_theme("Sûreté dans les transports en commun") == "Transports"
+
+
+def test_guess_theme_procedural_vers_vie_parlementaire():
+    # Motions de censure / déclarations de politique générale → thème dédié.
+    assert (
+        guess_theme("la motion de censure déposée en application de l'article 49")
+        == "Vie parlementaire"
+    )
+    assert (
+        guess_theme("la déclaration de politique générale du Gouvernement")
+        == "Vie parlementaire"
+    )
+    # Une « motion de rejet préalable » sur un texte de fond n'est PAS procédurale.
+    assert guess_theme("motion de rejet préalable au projet de loi de santé") == "Santé"

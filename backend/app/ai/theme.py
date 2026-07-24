@@ -18,11 +18,27 @@ def _system_prompt(themes: Sequence[str]) -> str:
     return (
         "Tu classes un texte de loi français dans UN thème, choisi STRICTEMENT "
         "dans cette liste : " + ", ".join(themes) + ".\n"
-        "Réponds UNIQUEMENT par un seul mot de la liste, exactement tel qu'écrit, "
-        "sans ponctuation ni explication.\n"
-        "Un texte de procédure (motion de censure, commission d'enquête, "
-        "résolution) sans sujet de fond clair → Autre."
+        "Réponds UNIQUEMENT par l'un de ces thèmes, recopié EXACTEMENT tel qu'écrit "
+        "(y compris les espaces et le « & »), sans ponctuation ni explication.\n"
+        "N'emploie « Autre » que si le texte n'a vraiment aucun sujet de fond "
+        "rattachable à un thème de la liste."
     )
+
+
+# Cap de l'extrait d'exposé injecté (la classification n'a besoin que de l'amorce).
+_MAX_EXPOSE_PROMPT = 1000
+
+
+def _user_prompt(titre: str, objet: str | None, expose: str | None) -> str:
+    """Message utilisateur : titre + (objet du vote) + (amorce de l'exposé des
+    motifs). Chaque partie est optionnelle — absente, sa ligne est omise, et on
+    dégrade vers le comportement historique (titre seul)."""
+    lignes = [f"Titre : {titre}"]
+    if objet:
+        lignes.append(f"Objet : {objet}")
+    if expose:
+        lignes.append(f"Exposé des motifs (extrait) : {expose[:_MAX_EXPOSE_PROMPT]}")
+    return "\n".join(lignes)
 
 
 def valider_theme(reponse: str, themes: Sequence[str]) -> str | None:
@@ -39,8 +55,21 @@ def valider_theme(reponse: str, themes: Sequence[str]) -> str | None:
 
 
 async def classifier_theme(
-    titre: str, llm: LLMClient, themes: Sequence[str]
+    titre: str,
+    llm: LLMClient,
+    themes: Sequence[str],
+    *,
+    objet: str | None = None,
+    expose: str | None = None,
 ) -> str | None:
-    """Thème proposé par le LLM pour un titre, ou None si réponse invalide/absente."""
-    reponse = await llm.generate_text(_system_prompt(themes), f"Titre : {titre}")
+    """Thème proposé par le LLM, ou None si réponse invalide/absente.
+
+    On donne au modèle le titre, l'objet du vote et une amorce de l'exposé des
+    motifs quand ils sont disponibles : plus de signal que le titre seul → moins
+    de repli sur « Autre ». La sortie reste **validée exact-match** contre la
+    liste fermée (`valider_theme`), donc l'enrichissement ne peut pas introduire
+    de thème invalide."""
+    reponse = await llm.generate_text(
+        _system_prompt(themes), _user_prompt(titre, objet, expose)
+    )
     return valider_theme(reponse, themes)
