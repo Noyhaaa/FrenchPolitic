@@ -280,9 +280,16 @@ export interface MiseAJourDossier {
 export interface Dossier {
   id: string;
   titreOfficiel: string;
+  /**
+   * Titre d'affichage : le titre officiel sans la nature (rendue en label à
+   * part) ni son connecteur (« visant à »…). Voir `titre_court` côté backend.
+   */
   titreClair: string;
-  /** Description courte affichée sur la carte du fil (1-2 lignes). */
-  accroche: string;
+  /**
+   * Le but du texte en une phrase, tiré de la Q1 « pourquoi ont-ils débattu ? ».
+   * Absente tant que la Q1 l'est : on masque plutôt que de combler (§2.5).
+   */
+  accroche?: string;
   statut: StatutScrutin;
   phase?: PhaseScrutin;
   theme: ThemeScrutin;
@@ -313,7 +320,13 @@ export interface DossierListItem {
   /** Date du dernier scrutin (tri du fil). */
   date: string;
   titreClair: string;
-  accroche: string;
+  /** Le but du texte en une phrase (tiré de la Q1) — absente si pas de Q1 (§2.5). */
+  accroche?: string;
+  /**
+   * Nature du texte (« Projet de loi »…), affichée en label : le titre court ne
+   * la porte plus. Absente quand le titre officiel ne la porte pas (§2.5).
+   */
+  natureTexte?: string;
   statut: StatutScrutin;
   theme: ThemeScrutin;
   tempsLectureSec: number;

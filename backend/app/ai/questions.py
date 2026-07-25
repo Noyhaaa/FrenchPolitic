@@ -29,6 +29,7 @@ import re
 
 from app.ai.guardrails import LEXIQUE_ORIENTE
 from app.ai.llm import LLMClient
+from app.ingestion.normalize import truncate_mots
 from app.schemas import (
     ArgumentGroupe,
     QuestionsAmendement,
@@ -48,8 +49,9 @@ PREFIXE_AUTEUR_AMENDEMENT = "Selon son auteur"
 _MAX_CHARS = 500
 
 # L'exposé complet peut dépasser la fenêtre utile : le « pourquoi » et le
-# « changement » sont dans les premières pages (constat + intention).
-_MAX_EXPOSE_PROMPT = 3000
+# « changement » sont dans les premières pages (constat + intention). Aligné sur
+# le cap de stockage (`decouper_expose`, 4000) pour ne pas amputer l'exposé lu.
+_MAX_EXPOSE_PROMPT = 4000
 
 _STATUT_FR = {"adopte": "adopté", "rejete": "rejeté"}
 
@@ -170,6 +172,89 @@ def valider_reponse(
         if nature in s_fold and opposee not in s_fold and opposee in r_fold:
             return None
     return reponse
+
+
+# --- Accroche de carte, dérivée de la Q1 -----------------------------------
+#
+# L'accroche affichée dans le fil et la recherche n'est PAS une nouvelle
+# génération : c'est la première phrase de la Q1 — déjà passée par
+# `valider_reponse` — débarrassée de son amorce. Aucun fait nouveau n'est
+# introduit ; sans Q1, il n'y a pas d'accroche (§2.5 : on masque).
+
+# Une accroche tient sur deux lignes de carte.
+_MAX_ACCROCHE = 160
+
+# En deçà, la « phrase » est trop courte pour être une accroche (abréviation
+# prise pour une fin de phrase, énumération) : on continue jusqu'à la suivante.
+_MIN_PHRASE = 40
+
+# Fin de phrase — un point précédé d'une seule majuscule est une abréviation
+# (« M. Dupont », « Mme »), pas une fin de phrase.
+_RE_FIN_PHRASE = re.compile(r"(?<![A-ZÀÂÉÈÊËÎÏÔÙÛÜÇ])[.!?](?:\s|$)")
+
+# Amorce imposée par `_SYS_POURQUOI` (« pourquoi les députés ont examiné un
+# texte ») : 185 des 187 Q1 en base la portent. Testée sur la forme foldée, d'où
+# l'absence d'accents ; les deux apostrophes (droite et courbe) sont acceptées,
+# `fold` ne les normalise pas.
+_RE_AMORCE_Q1 = re.compile(
+    r"^les deputes\s+(?:ont examine|examinent|ont debattu de|ont vote sur|"
+    r"ont etudie|se sont penches sur)\s+"
+    r"(?:ce|cette|le|la)\s+(?:texte|projet|proposition|resolution|dossier)"
+    r"(?:\s+de\s+(?:loi|resolution))?(?:\s+organique)?"
+    r"(?:\s+a l['’]assemblee nationale)?"
+    r"(?:\s+(?:pour|car|afin d['’e]|parce qu['’e]|puisqu['’e]))?\s*"
+)
+
+
+def _phrases(texte: str) -> list[str]:
+    """Découpe en phrases exploitables (les fragments courts sont recollés à la
+    suivante, cf. `_MIN_PHRASE`)."""
+    phrases: list[str] = []
+    debut = 0
+    for m in _RE_FIN_PHRASE.finditer(texte):
+        candidate = texte[debut : m.end()].strip()
+        if len(candidate) >= _MIN_PHRASE:
+            phrases.append(candidate)
+            debut = m.end()
+    reste = texte[debut:].strip()
+    if len(reste) >= _MIN_PHRASE:
+        phrases.append(reste)
+    return phrases or [texte]
+
+
+def _sans_amorce(phrase: str) -> str:
+    """La phrase débarrassée de l'amorce de Q1 (chaîne vide s'il ne reste rien)."""
+    plie = fold(phrase)
+    m = _RE_AMORCE_Q1.match(plie)
+    if not m:
+        return phrase
+    # `fold` peut théoriquement changer la longueur (ligatures) : on ne coupe
+    # que si l'index reste valide sur la chaîne d'origine.
+    if fold(phrase[: m.end()]) != plie[: m.end()]:
+        return phrase
+    reste = phrase[m.end() :].lstrip(" ,;:–-")
+    # « Les députés ont examiné cette proposition de résolution. » : il ne reste
+    # que la ponctuation finale — la phrase n'était QUE l'amorce.
+    return reste.strip() if any(c.isalpha() for c in reste) else ""
+
+
+def accroche_depuis_q1(pourquoi: str | None) -> str | None:
+    """Accroche de carte tirée de la Q1 « pourquoi ont-ils débattu ? ».
+
+    On garde la première phrase et on retire l'amorce (« Les députés ont examiné
+    ce texte pour… ») : répétée sur chaque carte du fil, elle mange la place
+    utile sans rien dire. Une phrase qui n'est QUE l'amorce (« Les députés ont
+    examiné cette proposition de résolution. ») ne dit rien non plus : on passe
+    à la suivante. Amorce non reconnue → phrase rendue telle quelle. Pas de Q1,
+    ou rien d'exploitable → pas d'accroche (§2.5).
+    """
+    if not pourquoi or not pourquoi.strip():
+        return None
+    for phrase in _phrases(" ".join(pourquoi.split())):
+        reste = _sans_amorce(phrase)
+        if reste:
+            return truncate_mots(reste[0].upper() + reste[1:], _MAX_ACCROCHE)
+    return None
 
 
 def _vote_decisif(scrutins: list[ScrutinResume]) -> ScrutinResume | None:

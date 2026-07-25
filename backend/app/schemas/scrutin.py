@@ -16,6 +16,8 @@ from app.domain.enums import (
     StatutScrutin,
     TypeSource,
 )
+# `normalize` ne dépend que de `domain` et `utils` : pas de cycle avec les schémas.
+from app.ingestion.normalize import nature_texte
 
 
 class CamelModel(BaseModel):
@@ -265,7 +267,9 @@ class Dossier(CamelModel):
     id: str
     titre_officiel: str
     titre_clair: str
-    accroche: str
+    # Le but du texte en une phrase, tiré de la Q1 (« pourquoi ont-ils
+    # débattu ? »). Absente tant que la Q1 ne l'est pas — on ne comble pas (§2.5).
+    accroche: str | None = None
     statut: StatutScrutin
     phase: PhaseScrutin | None = None
     theme: str
@@ -290,7 +294,10 @@ class DossierListItem(CamelModel):
     id: str
     date: str
     titre_clair: str
-    accroche: str
+    accroche: str | None = None
+    # Nature du texte (« Projet de loi »…), affichée en label à part : le titre
+    # court ne la porte plus. None quand le titre officiel ne la porte pas (§2.5).
+    nature_texte: str | None = None
     statut: StatutScrutin
     theme: str
     temps_lecture_sec: int
@@ -316,7 +323,8 @@ class DossierListItem(CamelModel):
             id=d.id,
             date=d.date_dernier_scrutin,
             titre_clair=d.titre_clair,
-            accroche=d.accroche,
+            accroche=d.accroche or None,
+            nature_texte=nature_texte(d.titre_officiel),
             statut=d.statut,
             theme=d.theme,
             temps_lecture_sec=d.temps_lecture_sec,

@@ -13,6 +13,8 @@ from app.ingestion.normalize import (
     numero_amendement,
     numero_amendement_parent,
     texte_de_rattachement,
+    titre_court,
+    truncate_mots,
 )
 from app.ingestion.organes import build_acteurs_from_amo, build_resolver_from_organes
 from app.schemas import ScrutinResume, SourceOfficielle
@@ -774,3 +776,90 @@ def test_guess_theme_procedural_vers_vie_parlementaire():
     )
     # Une « motion de rejet préalable » sur un texte de fond n'est PAS procédurale.
     assert guess_theme("motion de rejet préalable au projet de loi de santé") == "Santé"
+
+
+def test_titre_court_retire_nature_et_connecteur():
+    # La nature est affichée en label à part : le titre ne la répète pas.
+    assert (
+        titre_court("Proposition de loi visant à améliorer la sécurité des trains")
+        == "Améliorer la sécurité des trains"
+    )
+    assert (
+        titre_court("Projet de loi relatif au statut de l'élu local")
+        == "Statut de l'élu local"
+    )
+    # Article contracté collé au connecteur (« visant AU »).
+    assert (
+        titre_court("Proposition de loi visant au rétablissement du délit de fuite")
+        == "Rétablissement du délit de fuite"
+    )
+    # L'article qui suit le connecteur part aussi (titre de presse).
+    assert (
+        titre_court("Proposition de loi visant à la nationalisation d'ArcelorMittal")
+        == "Nationalisation d'ArcelorMittal"
+    )
+
+
+def test_titre_court_variantes_de_la_source():
+    # Apostrophe courbe : `fold` ne la normalise pas, l'article part quand même.
+    assert (
+        titre_court("Proposition de résolution européenne relative à l’adoption du texte")
+        == "Adoption du texte"
+    )
+    # Mention de navette insérée : déjà portée par la trajectoire du dossier.
+    assert (
+        titre_court("Proposition de loi, adoptée par le Sénat, relative à l'accès aux soins")
+        == "Accès aux soins"
+    )
+
+
+def test_titre_court_garde_le_titre_quand_la_nature_fait_partie_du_nom():
+    # Pas de connecteur de la liste fermée → on ne touche à rien (§2.5).
+    for titre in (
+        "Projet de loi de finances pour 2025",
+        "Projet de loi de financement de la sécurité sociale pour 2026",
+        "Proposition de loi d'abrogation de la retraite à 64 ans",
+        "Proposition de résolution pour une stratégie nationale de prévention",
+    ):
+        assert titre_court(titre) == titre
+
+
+def test_titre_court_capitalise_un_objet_cite_en_minuscule():
+    assert (
+        titre_court("la motion de censure déposée en application de l'article 49")
+        == "Motion de censure déposée en application de l'article 49"
+    )
+
+
+def test_titre_court_ne_tronque_pas():
+    # L'app clampe sur 2 lignes ; on ne coupe plus en plein mot comme avant.
+    long = "Proposition de loi visant à " + "réformer le droit de la copropriété " * 4
+    assert titre_court(long).endswith("copropriété")
+    assert "…" not in titre_court(long)
+    # Un titre déjà tronqué par la source garde ses points de suspension.
+    assert titre_court("Projet de loi portant diverses mesures d'urg…").endswith("…")
+
+
+def test_truncate_mots_coupe_sur_un_mot_entier():
+    assert truncate_mots("un texte court", 40) == "un texte court"
+    assert truncate_mots("abcdef ghijkl mnopqr stuvwx", 20) == "abcdef ghijkl…"
+    # Mot à rallonge : on coupe net plutôt que de sacrifier la phrase.
+    assert truncate_mots("a " + "z" * 40, 20).endswith("…")
+
+
+def test_build_dossier_pose_le_titre_court():
+    """Le pipeline produit directement le titre d'affichage (plus de troncature
+    à 90 caractères en plein mot), et laisse l'accroche vide : elle est posée
+    après la génération des questions."""
+    import copy
+
+    brut = copy.deepcopy(SCRUTIN)
+    brut["scrutin"]["objet"]["dossierLegislatif"]["libelle"] = (
+        "Proposition de loi visant à la nationalisation d'ArcelorMittal France"
+    )
+    resolver = build_resolver_from_organes(ORGANES)
+    dossier = build_dossier([parse_scrutin(brut, resolver)])
+
+    assert dossier.titre_clair == "Nationalisation d'ArcelorMittal France"
+    assert dossier.titre_officiel.startswith("Proposition de loi")
+    assert dossier.accroche is None

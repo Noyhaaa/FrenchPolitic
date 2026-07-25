@@ -200,6 +200,9 @@ _NATURES: tuple[tuple[str, str], ...] = (
     ("projet de loi", "Projet de loi"),
     ("proposition de loi organique", "Proposition de loi organique"),
     ("proposition de loi", "Proposition de loi"),
+    # « européenne » avant le générique : sinon le préfixe court gagne et la
+    # mention européenne resterait collée en tête du titre d'affichage.
+    ("proposition de resolution europeenne", "Proposition de résolution européenne"),
     ("proposition de resolution", "Proposition de résolution"),
 )
 
@@ -212,6 +215,124 @@ def nature_texte(titre: str) -> str | None:
         if t.startswith(prefixe):
             return libelle
     return None
+
+
+# Connecteurs (foldés) qui, APRÈS une nature, introduisent l'objet du texte :
+# « Proposition de loi *visant à* améliorer… » → « Améliorer… ». Liste fermée :
+# hors de cette liste, on ne touche pas au titre. C'est le garde-fou qui protège
+# « Projet de loi *de finances* pour 2025 » ou « Proposition de loi *d'*abrogation
+# de la retraite à 64 ans », où la nature fait partie du nom du texte.
+_CONNECTEURS: tuple[str, ...] = (
+    "visant a",
+    # « visant AU rétablissement » : l'article contracté fait corps avec le
+    # connecteur, il ne peut pas être capté par le groupe d'article qui suit.
+    "visant au",
+    "visant aux",
+    "tendant a",
+    "tendant au",
+    "tendant aux",
+    "relatif a",
+    "relative a",
+    "relatif au",
+    "relative au",
+    "relatif aux",
+    "relative aux",
+    "relatifs a",
+    "relatives a",
+    "appelant a",
+    "appelant au",
+    "appelant aux",
+    "portant",
+    "autorisant",
+    "actualisant",
+    "abrogeant",
+    "prorogeant",
+    "transposant",
+    "organisant",
+    "instituant",
+    "creant",
+    "modifiant",
+    "ratifiant",
+    "permettant",
+    "renforcant",
+    "ameliorant",
+    "elargissant",
+    "assurant",
+    "adaptant",
+    "simplifiant",
+    "encadrant",
+    "garantissant",
+    "interdisant",
+    "facilitant",
+    "supprimant",
+    "instaurant",
+    "reconnaissant",
+)
+
+
+def _alternance(mots: tuple[str, ...]) -> str:
+    """Alternance regex, du plus long au plus court (« relatif aux » avant
+    « relatif au »), sur des chaînes déjà foldées."""
+    return "|".join(re.escape(m) for m in sorted(mots, key=len, reverse=True))
+
+
+# Nature + connecteur, plus l'article qui suit : « … visant à la nationalisation
+# d'ArcelorMittal » → « Nationalisation d'ArcelorMittal » (un titre de carte se
+# lit mieux sans son article de tête, comme un titre de presse).
+# Mention de navette insérée entre la nature et le connecteur (« Proposition de
+# loi, adoptée par le Sénat, relative à… ») : le fait est déjà porté par la
+# trajectoire du dossier, il n'a pas à manger le titre de la carte.
+_INSERTION_NAVETTE = r"(?:,\s*(?:adoptee|modifiee|rejetee)[^,]{0,40},)?"
+
+# `fold` ne normalise PAS l'apostrophe : les deux formes doivent être écrites.
+_ARTICLE = r"(?:les|la|le|l['’])"
+
+_RE_NATURE_CONNECTEUR = re.compile(
+    rf"^(?:{_alternance(tuple(p for p, _ in _NATURES))}){_INSERTION_NAVETTE}"
+    rf"\s+(?:{_alternance(_CONNECTEURS)})\s+(?:{_ARTICLE}\s*)?"
+)
+
+# Article initial d'un objet de vote cité en minuscule (« la motion de censure
+# déposée en application de l'article 49… »).
+_RE_ARTICLE_INITIAL = re.compile(rf"^{_ARTICLE}\s*")
+
+
+def titre_court(titre_officiel: str) -> str:
+    """Titre d'affichage : le titre officiel débarrassé de ce qui est déjà porté
+    ailleurs par l'interface (§8, langue simple).
+
+    La nature (« Proposition de loi ») est affichée en label à part — la répéter
+    en tête du titre coûte un quart de la place utile sur une vignette. On la
+    retire donc, avec le connecteur qui la suit (« visant à », « portant »…),
+    **uniquement** quand ce connecteur est dans la liste fermée `_CONNECTEURS` :
+    ailleurs la nature fait partie du nom du texte (« Projet de loi de finances
+    pour 2025 »), et on rend le titre intact.
+
+    Rien n'est tronqué (le clamp de lignes de l'app s'en charge) et rien n'est
+    reformulé (§2.5) : on ne fait que retirer un préfixe et capitaliser.
+    """
+    titre = " ".join(titre_officiel.split())
+    if not titre:
+        return titre
+    plie = fold(titre)
+
+    coupe = 0
+    match = _RE_NATURE_CONNECTEUR.match(plie)
+    if match:
+        coupe = match.end()
+    elif titre[0].islower():
+        # Objet de vote cité tel quel par l'open data, en minuscule.
+        article = _RE_ARTICLE_INITIAL.match(plie)
+        coupe = article.end() if article else 0
+
+    # `fold` peut théoriquement changer la longueur (ligatures) : on ne coupe que
+    # si l'index reste valide sur la chaîne d'origine.
+    if coupe and fold(titre[:coupe]) == plie[:coupe]:
+        reste = titre[coupe:].strip()
+        if reste:
+            titre = reste
+
+    return titre[0].upper() + titre[1:]
 
 
 def map_position(position_majoritaire: str | None) -> PositionVote:
@@ -232,6 +353,23 @@ def truncate(text: str, limit: int = 160) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 1].rstrip() + "…"
+
+
+def truncate_mots(text: str, limit: int = 160) -> str:
+    """Comme `truncate`, mais coupe à la frontière de mot.
+
+    Pour une phrase lue par un humain (accroche d'une carte), un mot coupé en
+    deux se remarque ; on recule au dernier espace, sauf s'il faut sacrifier
+    plus de la moitié de la phrase (mot à rallonge) — auquel cas on coupe net.
+    """
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    coupe = text[: limit - 1].rstrip()
+    espace = coupe.rfind(" ")
+    if espace > limit // 2:
+        coupe = coupe[:espace]
+    return coupe.rstrip(" ,;:") + "…"
 
 
 def to_int(value: object, default: int = 0) -> int:

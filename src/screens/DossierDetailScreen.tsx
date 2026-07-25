@@ -282,6 +282,14 @@ export function DossierDetailScreen() {
             .filter(Boolean)
             .join(' · ')}
         </Text>
+        {/* Titre officiel complet : le titre affiché en tête est une version
+            raccourcie (nature et connecteur retirés). La formulation d'origine
+            reste lisible ici (§7.5) — masquée si elle est identique. */}
+        {dossier.titreOfficiel !== resume.titreClair ? (
+          <Text style={[typography.meta, styles.titreOfficiel]}>
+            Titre officiel : {dossier.titreOfficiel}
+          </Text>
+        ) : null}
 
         {/* Badge « mis à jour » (§7.7) : le dossier a évolué depuis une
             consultation précédente (nouveau scrutin rattaché). */}
@@ -522,6 +530,10 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     marginTop: -spacing.md,
+  },
+  titreOfficiel: {
+    marginTop: -spacing.sm,
+    color: colors.textTertiary,
   },
   updateBanner: {
     alignSelf: 'flex-start',

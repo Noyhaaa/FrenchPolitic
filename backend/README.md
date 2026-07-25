@@ -48,6 +48,11 @@ python -m app.ingestion.run --limit 300     # 300 récents (~4 s) ; sans --limit
 # la législature, là où un run complet dure des heures.
 python -m app.ingestion.deputes             # --limit 300 pour les plus récents
 
+# Recalcule le titre d'affichage (titre_court) et l'accroche (depuis la Q1 déjà
+# validée) des dossiers DÉJÀ en base : ni réseau ni LLM, quelques secondes.
+# Évite d'attendre une ingestion complète après un changement de formatage.
+python -m app.ingestion.reformater          # --dry-run pour voir le bilan sans écrire
+
 # L'API sert alors la base ingérée (REPOSITORY_BACKEND=postgres via .env).
 uvicorn app.main:app --reload
 ```
@@ -223,9 +228,10 @@ app/
     textes_senat.py  Repli exposé : texte de transmission Sénat → PDF senat.fr → extraction
     organes.py       Résolution des groupes (AMO) + couleurs + annuaire des députés
     deputes.py       Référentiel des députés + votes nominatifs (pur) + CLI autonome
-    normalize.py     Thème (heuristique), positions, décomptes
+    normalize.py     Thème (heuristique), positions, décomptes, titre d'affichage (titre_court)
     sync.py          Job download → parse → regroupement par dossier → upsert (idempotent)
     run.py           CLI : python -m app.ingestion.run
+    reformater.py    CLI : recalcule titre court + accroche des dossiers en base (sans réseau ni LLM)
     legifrance.py    API Légifrance via PISTE (OAuth2) — stub Phase 2
 tests/               Tests API + garde-fous + génération + ingestion (+ repo pg opt-in)
 ```

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from app.ai.questions import (
     PREFIXE_AUTEUR,
+    accroche_depuis_q1,
     PREFIXE_AUTEUR_AMENDEMENT,
     generer_desaccord,
     generer_questions,
@@ -295,3 +296,53 @@ async def test_desaccord_argument_distordu_est_omis():
 
 async def test_desaccord_sans_llm_est_vide():
     assert await generer_desaccord(_INTERVENTIONS, None) == []
+
+
+def test_accroche_retire_l_amorce_de_la_q1():
+    # L'amorce imposée au modèle ne dit rien sur une carte : elle saute.
+    assert (
+        accroche_depuis_q1(
+            "Les députés ont examiné cette proposition de loi pour améliorer la "
+            "sécurité dans les transports. Le texte crée de nouvelles sanctions."
+        )
+        == "Améliorer la sécurité dans les transports."
+    )
+    # Variante « car » (et mention de l'Assemblée) : même traitement.
+    assert (
+        accroche_depuis_q1(
+            "Les députés ont examiné ce texte à l'Assemblée nationale car il "
+            "propose de nationaliser ArcelorMittal France."
+        )
+        == "Il propose de nationaliser ArcelorMittal France."
+    )
+
+
+def test_accroche_sans_amorce_reconnue_garde_la_phrase():
+    assert (
+        accroche_depuis_q1("Le texte réforme le mode de scrutin municipal. Suite.")
+        == "Le texte réforme le mode de scrutin municipal."
+    )
+
+
+def test_accroche_passe_a_la_phrase_suivante_si_la_premiere_ne_dit_rien():
+    # « Les députés ont examiné cette proposition de résolution. » = amorce seule.
+    assert (
+        accroche_depuis_q1(
+            "Les députés ont examiné cette proposition de résolution. "
+            "Elle demande la libération de prisonniers détenus arbitrairement."
+        )
+        == "Elle demande la libération de prisonniers détenus arbitrairement."
+    )
+
+
+def test_accroche_absente_sans_q1():
+    assert accroche_depuis_q1(None) is None
+    assert accroche_depuis_q1("   ") is None
+
+
+def test_accroche_coupe_sur_un_mot_entier():
+    longue = "Les députés ont examiné ce texte pour " + "réformer le droit " * 20
+    accroche = accroche_depuis_q1(longue)
+    assert accroche is not None
+    assert len(accroche) <= 160 and accroche.endswith("…")
+    assert not accroche[:-1].endswith(" ")  # pas de mot coupé en deux

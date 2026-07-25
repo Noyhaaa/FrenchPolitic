@@ -81,11 +81,20 @@ def _tokens(titre: str) -> set[str]:
 
 @dataclass(frozen=True)
 class ExplicationVote:
-    """Une explication de vote : le groupe et le texte prononcé (mots exacts)."""
+    """Une prise de parole de groupe : le groupe et le texte prononcé (mots exacts).
 
-    groupe: str  # abréviation telle qu'écrite au CR (« RN », « LFI-NFP »…)
+    Deux origines, résolues différemment vers un groupe côté ingestion :
+    - explication de vote formelle : `groupe` = abréviation écrite au CR (« RN »,
+      « LFI-NFP »…), `acteur_ref` = None ;
+    - intervention en discussion générale : le CR n'y met PAS l'abréviation de
+      groupe dans le nom → `groupe` = "", `acteur_ref` = « PA… » (l'orateur, résolu
+      en groupe via l'annuaire des députés).
+    """
+
+    groupe: str  # abréviation telle qu'écrite au CR (« RN », « LFI-NFP »…), ou ""
     orateur: str
     texte: str
+    acteur_ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -99,6 +108,9 @@ class DebatTexte:
     # discussion (« (n[[o]] 525) », parfois plusieurs : « n[[os]] 1681, 1682 »).
     numeros: frozenset[int] = frozenset()
     explications: list[ExplicationVote] = field(default_factory=list)
+    # Prises de parole des groupes en discussion générale — source de REPLI pour
+    # le désaccord quand le texte n'a pas d'explications de vote formelles.
+    interventions_generales: list[ExplicationVote] = field(default_factory=list)
 
     @property
     def tokens_titre(self) -> set[str]:
@@ -127,14 +139,16 @@ def _est_section_explications(titre: str) -> bool:
 
 
 def extraire_debats(xml: str) -> list[DebatTexte]:
-    """Extrait, pour un compte rendu, les textes discutés et leurs explications
-    de vote par groupe.
+    """Extrait, pour un compte rendu, les textes discutés, leurs explications de
+    vote par groupe et — en repli — les interventions en discussion générale.
 
     On parcourt la séance en ordre de lecture : chaque `TITRE_TEXTE_DISCUSSION`
     ouvre un texte ; la sous-section « Explications de vote » capture les prises
-    de parole de groupe jusqu'au vote (VOTE_…) ou au texte suivant. On ignore les
-    interruptions/rappels au règlement (seul `PAROLE_GENERIQUE`) et les prises de
-    parole sans groupe identifiable (présidence, gouvernement)."""
+    de parole de groupe jusqu'au vote (VOTE_…) ou au texte suivant ; la section
+    `DISC_GENERALE_1` (« Discussion générale ») capture, elle, les orateurs de
+    groupe (repli quand il n'y a pas d'explications de vote formelles). On ignore
+    les interruptions/rappels au règlement (seul `PAROLE_GENERIQUE`) et les prises
+    de parole sans locuteur identifiable."""
     try:
         root = ET.fromstring(xml)
     except ET.ParseError:
@@ -145,6 +159,7 @@ def extraire_debats(xml: str) -> list[DebatTexte]:
     textes: list[DebatTexte] = []
     courant: DebatTexte | None = None
     dans_explications = False
+    dans_discussion = False
 
     for e in root.iter():
         t = _tag(e)
@@ -160,32 +175,67 @@ def extraire_debats(xml: str) -> list[DebatTexte]:
                 )
                 textes.append(courant)
                 dans_explications = False
+                dans_discussion = False
+            elif cg == "DISC_GENERALE_1":
+                dans_discussion = True
+                dans_explications = False
             elif _est_section_explications(titre):
                 dans_explications = True
+                dans_discussion = False
             elif cg.startswith(("VOTE_", "APPEL_", "SCRUTIN")):
                 dans_explications = False
-        elif t == "paragraphe" and dans_explications and courant is not None:
+                dans_discussion = False
+            else:
+                # Tout autre point (discussion des articles, motions…) ferme la
+                # discussion générale (ses orateurs sont des paragraphe, pas des
+                # point) ; la logique des explications de vote reste inchangée.
+                dans_discussion = False
+        elif t == "paragraphe" and courant is not None and (
+            dans_explications or dans_discussion
+        ):
             if e.attrib.get("code_grammaire", "") != "PAROLE_GENERIQUE":
                 continue
             orateur_el = e.find(f"{_NS}orateurs/{_NS}orateur")
             if orateur_el is None:
                 continue
             nom = (orateur_el.findtext(f"{_NS}nom") or "").strip()
-            m = _RE_GROUPE.search(nom)
-            if not m:  # présidence, ministre : pas de groupe → ignoré
-                continue
             texte = (e.findtext(f"{_NS}texte") or "").strip()
             if len(texte) < _MIN_LONGUEUR:
                 continue
-            courant.explications.append(
-                ExplicationVote(
-                    groupe=m.group(1).strip(),
-                    orateur=re.sub(r"\s*\([^()]+\)\s*$", "", nom).strip(),
-                    texte=texte[:_MAX_LONGUEUR],
+            orateur = re.sub(r"\s*\([^()]+\)\s*$", "", nom).strip()
+            if dans_explications:
+                m = _RE_GROUPE.search(nom)
+                if not m:  # présidence, ministre : pas de groupe → ignoré
+                    continue
+                courant.explications.append(
+                    ExplicationVote(
+                        groupe=m.group(1).strip(),
+                        orateur=orateur,
+                        texte=texte[:_MAX_LONGUEUR],
+                    )
                 )
-            )
-    # On ne garde que les textes qui ont réellement des explications de vote.
-    return [t for t in textes if t.explications]
+            else:  # discussion générale : le groupe n'est PAS dans le nom → id acteur
+                ref = (orateur_el.findtext(f"{_NS}id") or "").strip()
+                if not ref:  # présidence/gouvernement sans acteurRef → ignoré
+                    continue
+                acteur_ref = ref if ref.startswith("PA") else f"PA{ref}"
+                # Un même orateur peut reprendre la parole : on ne garde que sa
+                # première intervention (dédup par groupe faite à l'ingestion).
+                if any(
+                    x.acteur_ref == acteur_ref for x in courant.interventions_generales
+                ):
+                    continue
+                courant.interventions_generales.append(
+                    ExplicationVote(
+                        groupe="",
+                        orateur=orateur,
+                        texte=texte[:_MAX_LONGUEUR],
+                        acteur_ref=acteur_ref,
+                    )
+                )
+    # On garde les textes qui ont des explications de vote OU, à défaut, des
+    # interventions en discussion générale (repli pour le désaccord).
+    return [t for t in textes if t.explications or t.interventions_generales]
 
 
 # Recoupement de titre minimal (coefficient de recouvrement, adapté aux labels

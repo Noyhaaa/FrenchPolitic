@@ -1,11 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, radius, spacing, typography } from '@/theme';
 import { DossierListItem } from '@/types';
-import {
-  formatDateRelative,
-  formatTempsLecture,
-  natureTexte,
-} from '@/utils/format';
+import { formatDateRelative, formatTempsLecture } from '@/utils/format';
 import { StatusBadge } from './StatusBadge';
 import { ThemeAvatar } from './ThemeAvatar';
 import { MiniResultat } from './MiniResultat';
@@ -41,16 +37,20 @@ export function DossierCard({ dossier, onPress }: Props) {
         ) : null}
       </View>
 
-      {/* Nature du texte (projet / proposition de loi…) si le titre la porte —
-          l'utilisateur sait d'un coup d'œil ce qu'est le dossier. */}
-      {natureTexte(dossier.titreClair) ? (
-        <Text style={styles.nature}>{natureTexte(dossier.titreClair)}</Text>
+      {/* Nature du texte (projet / proposition de loi…) — servie par l'API, le
+          titre court ne la porte plus. L'utilisateur sait d'un coup d'œil ce
+          qu'est le dossier sans la relire dans le titre. */}
+      {dossier.natureTexte ? (
+        <Text style={styles.nature}>{dossier.natureTexte}</Text>
       ) : null}
       <Text style={[typography.cardTitle, styles.title]}>{dossier.titreClair}</Text>
 
-      <Text style={typography.bodySecondary} numberOfLines={2}>
-        {dossier.accroche}
-      </Text>
+      {/* Le but du texte (Q1). Absent → rien (§2.5). */}
+      {dossier.accroche ? (
+        <Text style={typography.bodySecondary} numberOfLines={2}>
+          {dossier.accroche}
+        </Text>
+      ) : null}
 
       {dossier.resultatDernierScrutin ? (
         <View style={styles.result}>

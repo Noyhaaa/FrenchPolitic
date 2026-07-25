@@ -52,8 +52,10 @@ from app.ingestion.normalize import (
     auteur_amendement,
     est_amendement,
     est_sous_amendement,
+    est_texte_procedural,
     numero_amendement,
     numero_amendement_parent,
+    titre_court,
 )
 from app.ingestion.organes import (
     GroupInfo,
@@ -65,6 +67,7 @@ from app.ai.faits import construire_faits
 from app.ai.generation import generer_resume
 from app.ai.llm import LLMClient
 from app.ai.questions import (
+    accroche_depuis_q1,
     generer_desaccord,
     generer_questions,
     generer_questions_amendement,
@@ -117,6 +120,11 @@ class SyncReport:
     # Appels LLM en échec définitif malgré les retries (sinon un échec réseau
     # est indistinguable d'une réponse rejetée — vécu : 48 dossiers sans Q2).
     llm_echecs: int = 0
+    # Abréviations de groupe vues au CR (explications de vote) mais non résolues
+    # par l'annuaire AMO → le groupe est silencieusement retiré du désaccord
+    # (asymétrie §7.4). On les collecte pour compléter `_ALIAS_ABBREV` sur preuve,
+    # sans jamais deviner d'alias (§2.5).
+    abrevs_non_resolues: set[str] = field(default_factory=set)
     anomalies: list[str] = field(default_factory=list)
     finished_at: datetime | None = None
 
@@ -145,6 +153,17 @@ def _vote_ensemble(votes_texte: list[Scrutin]) -> Scrutin | None:
     vote), sinon None. Sert à relier le dossier au débat de la séance."""
     for s in votes_texte:
         if "ensemble" in fold(s.objet):
+            return s
+    return None
+
+
+def _vote_ancre_procedural(votes_texte: list[Scrutin]) -> Scrutin | None:
+    """Ancre de désaccord pour un texte procédural (motion de censure, déclaration
+    de politique générale) : ces votes n'ont pas d'« ensemble » mais ont un vrai
+    débat avec explications de vote. On ne l'utilise QUE pour ces textes — pas pour
+    un dossier amendements-seuls, où l'on ne fabrique pas de désaccord (§2.5)."""
+    for s in votes_texte:
+        if est_texte_procedural(s.objet):
             return s
     return None
 
@@ -236,7 +255,9 @@ def build_dossier(
     """
     tous = sorted((p.scrutin for p in parses), key=lambda s: s.date, reverse=True)
     ref = parses[0]  # métadonnées de dossier partagées
-    titre_clair = ref.dossier_titre[:90].rstrip()
+    # Titre d'affichage : sans la nature (rendue en label à part), sans troncature
+    # en plein mot — l'app clampe elle-même sur 2 lignes (§8).
+    titre_clair = titre_court(ref.dossier_titre)
 
     votes_texte = [s for s in tous if not est_amendement(s.objet)]
     votes_amendement = [s for s in tous if est_amendement(s.objet)]
@@ -255,7 +276,9 @@ def build_dossier(
         id=ref.dossier_id,
         titre_officiel=ref.dossier_titre,
         titre_clair=titre_clair,
-        accroche=ref.dossier_titre,
+        # Posée plus tard dans le run, une fois la Q1 disponible
+        # (`SyncJob._composer_accroche`) — sinon rien (§2.5).
+        accroche=None,
         # Statut / date du dossier = scrutin le plus récent, amendements compris.
         statut=tous[0].statut,
         phase=None,
@@ -361,6 +384,10 @@ def _merge_avec_existant(prev: Dossier, incoming: Dossier) -> Dossier:
     # humain (le travail éditorial ne doit pas être écrasé par une régénération).
     if prev.resume.relu_par_humain:
         incoming.resume = prev.resume
+        # L'accroche est dérivée de la Q1 : elle suit le résumé retenu.
+        incoming.accroche = accroche_depuis_q1(
+            prev.resume.questions.pourquoi if prev.resume.questions else None
+        )
     # Exposé des motifs : stable (texte déposé). Si ce run n'a pas pu le
     # récupérer (réseau, PDF momentanément absent), on garde celui déjà en base
     # plutôt que de le perdre.
@@ -388,7 +415,9 @@ def _dossier_row_values(dossier: Dossier) -> dict:
         "theme": dossier.theme,
         "titre_clair": dossier.titre_clair,
         "titre_officiel": dossier.titre_officiel,
-        "accroche": dossier.accroche,
+        # La colonne est NOT NULL : pas d'accroche → chaîne vide, reconvertie en
+        # None à la lecture (`postgres._to_list_item`).
+        "accroche": dossier.accroche or "",
         "temps_lecture_sec": dossier.temps_lecture_sec,
         "nombre_scrutins": len(dossier.scrutins),
         "mise_a_jour": (
@@ -399,7 +428,7 @@ def _dossier_row_values(dossier: Dossier) -> dict:
         "payload": dossier.model_dump(mode="json", by_alias=True),
         "search_index": fold(
             f"{dossier.titre_clair} {dossier.titre_officiel} "
-            f"{dossier.accroche} {dossier.theme}"
+            f"{dossier.accroche or ''} {dossier.theme}"
         ),
     }
 
@@ -476,6 +505,10 @@ class SyncJob:
         # ce run (best-effort : l'enrichissement déjà en base est préservé).
         self._index_amendements: IndexAmendements = {}
         self._groupes_par_abbrev: dict[str, GroupInfo] = {}
+        # acteurRef (« PA… ») → (groupe_id, groupe_nom) du député, depuis l'annuaire
+        # AMO : résout l'orateur d'une intervention en discussion générale vers son
+        # groupe (le CR n'y écrit pas l'abréviation, cf. debats.py).
+        self._groupe_par_acteur: dict[str, tuple[str, str]] = {}
 
     # Abréviations de groupe divergentes entre le compte rendu et l'annuaire AMO
     # (fold appliqué de part et d'autre). À compléter si de nouveaux cas surgissent.
@@ -592,7 +625,7 @@ class SyncJob:
         # on le donne au classifieur comme signal supplémentaire au titre.
         expose = dossier.expose_motifs.texte if dossier.expose_motifs else None
         nouveau = await classifier_theme(
-            dossier.titre_officiel, self._llm, THEMES, objet=dossier.accroche, expose=expose
+            dossier.titre_officiel, self._llm, THEMES, objet=None, expose=expose
         )
         if nouveau and nouveau != "Autre":
             dossier.theme = nouveau
@@ -621,36 +654,53 @@ class SyncJob:
         dossier_ref: str | None,
         votes_texte: list[Scrutin],
         questions: QuestionsCitoyennes,
+        report: SyncReport,
     ) -> bool:
         """Renseigne Q2 (« principal désaccord ») depuis les débats de la séance.
 
-        Joint la section « Explications de vote » du compte rendu (relié au vote
-        sur l'ensemble par numéro de texte, sinon date + titre) aux positions de
-        vote du scrutin : le SENS (pour/contre) vient du scrutin, l'ARGUMENT du
-        groupe est paraphrasé par le LLM et validé. Renvoie True si au moins un
-        argument a été produit."""
+        Relie le vote (sur l'ensemble, ou celui de la motion pour un texte
+        procédural) au compte rendu (par numéro de texte, sinon date + titre) puis
+        joint, PAR GROUPE, ses prises de parole aux positions du scrutin : le SENS
+        (pour/contre) vient du scrutin, l'ARGUMENT est paraphrasé par le LLM et
+        validé. Source des arguments : les **explications de vote** formelles si
+        présentes, sinon **en repli** la **discussion générale** (mêmes garde-fous,
+        §7.4). Renvoie True si au moins un argument a été produit."""
         if self._llm is None or self._index_debats is None:
             return False
-        ensemble = _vote_ensemble(votes_texte)
-        if ensemble is None:
+        ancre = _vote_ensemble(votes_texte) or _vote_ancre_procedural(votes_texte)
+        if ancre is None:
             return False
         debat = self._index_debats.pour_vote(
-            ensemble.date,
-            ensemble.objet,
+            ancre.date,
+            ancre.objet,
             self._numeros_par_ref.get(dossier_ref or ""),
         )
         if debat is None:
             return False
-        positions = {g.groupe_id: g for g in ensemble.positions_groupes}
+        positions = {g.groupe_id: g for g in ancre.positions_groupes}
+        # Repli : explications de vote formelles d'abord, discussion générale sinon.
+        prises = debat.explications or debat.interventions_generales
         interventions: list[tuple[str, object, str]] = []
-        for exp in debat.explications:
-            info = self._groupe_par_abbrev(exp.groupe)
-            if info is None:
+        vus: set[str] = set()  # un seul argument par groupe (symétrie §7.4)
+        for pdp in prises:
+            if pdp.acteur_ref:  # discussion générale : orateur → groupe (annuaire)
+                resolu = self._groupe_par_acteur.get(pdp.acteur_ref)
+                if resolu is None:  # ministre / ancien député : hors annuaire
+                    continue
+                groupe_id, groupe_nom = resolu
+            else:  # explication de vote : abréviation écrite au CR
+                info = self._groupe_par_abbrev(pdp.groupe)
+                if info is None:  # abréviation divergente → fuite mesurée (§7.4)
+                    report.abrevs_non_resolues.add(pdp.groupe)
+                    continue
+                groupe_id, groupe_nom = info.id, info.nom
+            if groupe_id in vus:
                 continue
-            pos = positions.get(info.id)
+            pos = positions.get(groupe_id)
             if pos is None:  # groupe sans position enregistrée sur ce vote
                 continue
-            interventions.append((info.nom, pos.position_majoritaire, exp.texte))
+            vus.add(groupe_id)
+            interventions.append((groupe_nom, pos.position_majoritaire, pdp.texte))
         arguments = await generer_desaccord(interventions, self._llm)
         if not arguments:
             return False
@@ -693,7 +743,7 @@ class SyncJob:
             questions.desaccord = prev.desaccord
             questions.desaccord_source = prev.desaccord_source
         elif await self._construire_desaccord(
-            dossier, dossier_ref, votes_texte, questions
+            dossier, dossier_ref, votes_texte, questions, report
         ):
             report.desaccords_generes += 1
 
@@ -703,6 +753,16 @@ class SyncJob:
             questions.pourquoi = questions.pourquoi or prev.pourquoi
             questions.changement = questions.changement or prev.changement
         dossier.resume.questions = questions
+
+    def _composer_accroche(self, dossier: Dossier) -> None:
+        """Pose l'accroche de carte à partir de la Q1 (§2.2, §8).
+
+        Rien n'est généré ici : on réutilise la Q1 déjà validée
+        (`_generer_questions`, appelée juste avant) en lui retirant son amorce.
+        Pas de Q1 → pas d'accroche, la carte n'affiche rien (§2.5).
+        """
+        questions = dossier.resume.questions
+        dossier.accroche = accroche_depuis_q1(questions.pourquoi if questions else None)
 
     async def _questions_amendement_en_base(
         self, session: AsyncSession, scrutin_id: str
@@ -763,6 +823,11 @@ class SyncJob:
             )
             report.deputes = await upsert_deputes(session, deputes)
             await session.commit()
+        # Résolution orateur → groupe pour les interventions en discussion générale
+        # (le CR n'y porte pas l'abréviation de groupe, cf. debats.py).
+        self._groupe_par_acteur = {
+            d.id: (d.groupe_id, d.groupe_nom) for d in deputes
+        }
 
         # 1ter) LLM : health-check AVANT le long run. Un serveur configuré mais
         #       injoignable (PC distant éteint…) rendrait chaque appel muet :
@@ -877,6 +942,8 @@ class SyncJob:
                 await self._generer_questions(
                     session, dossier, parses[0].dossier_ref, votes_texte, report
                 )
+                # Après les questions : l'accroche en est tirée.
+                self._composer_accroche(dossier)
                 dossier = await _upsert_dossier(session, dossier)
                 report.amendements_enrichis += sum(
                     1

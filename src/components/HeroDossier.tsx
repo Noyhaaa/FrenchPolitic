@@ -3,7 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { colors, mono, radius, serif, spacing, typography } from '@/theme';
 import { DossierListItem, StatutScrutin } from '@/types';
 import { themeEmoji, themeTintDark } from '@/constants/themes';
-import { formatDateRelative, natureTexte } from '@/utils/format';
+import { formatDateRelative } from '@/utils/format';
 import { statutLabel } from '@/utils/format';
 import { MiniResultat } from './MiniResultat';
 
@@ -27,7 +27,8 @@ const STATUT_FG: Record<StatutScrutin, string> = {
  * Surtitre = statut factuel (pas de « live » : nos données ne le sont pas).
  */
 export function HeroDossier({ dossier, onPress, topInset }: Props) {
-  const nature = natureTexte(dossier.titreClair);
+  // Nature servie par l'API : le titre court ne la porte plus.
+  const nature = dossier.natureTexte;
   const statutFg = STATUT_FG[dossier.statut];
 
   return (
@@ -66,13 +67,19 @@ export function HeroDossier({ dossier, onPress, topInset }: Props) {
           </Text>
         </View>
 
-        <Text style={styles.title} numberOfLines={3}>
+        <Text style={styles.title} numberOfLines={2}>
           {dossier.titreClair}
         </Text>
 
-        <Text style={[typography.bodySecondary, styles.accroche]} numberOfLines={2}>
-          {dossier.accroche}
-        </Text>
+        {/* Le but du texte (Q1). Absent → rien (§2.5). */}
+        {dossier.accroche ? (
+          <Text
+            style={[typography.bodySecondary, styles.accroche]}
+            numberOfLines={2}
+          >
+            {dossier.accroche}
+          </Text>
+        ) : null}
 
         {dossier.resultatDernierScrutin ? (
           <View style={styles.barWrap}>

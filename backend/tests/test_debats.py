@@ -76,6 +76,72 @@ def test_extraire_debats_xml_invalide():
     assert extraire_debats("pas du xml") == []
 
 
+# --- Discussion générale (repli quand pas d'explications de vote) ---
+
+_XML_DG = """<?xml version="1.0" encoding="UTF-8"?>
+<compteRendu xmlns="http://schemas.assemblee-nationale.fr/referentiel">
+  <uid>CRSANR5L17S2025DG</uid>
+  <metadonnees><dateSeanceJour>jeudi 15 mai 2025</dateSeanceJour></metadonnees>
+  <contenu>
+    <point code_grammaire="TITRE_TEXTE_DISCUSSION" valeur=" (n[[o]] 900)"><texte>Refondation de Mayotte</texte></point>
+    <point code_grammaire="DISC_GENERALE_1"><texte>Discussion générale</texte></point>
+    <paragraphe code_grammaire="PAROLE_GENERIQUE">
+      <orateurs><orateur><nom>Mme Sabrina Sebaihi</nom><id>795808</id></orateur></orateurs>
+      <texte>Ce texte doit garantir la reconstruction et l'accès à l'eau pour les habitants de Mayotte.</texte>
+    </paragraphe>
+    <paragraphe code_grammaire="PAROLE_GENERIQUE">
+      <orateurs><orateur><nom>Mme Sabrina Sebaihi</nom><id>795808</id></orateur></orateurs>
+      <texte>Je reprends la parole mais cela ne doit pas créer un second argument pour mon groupe.</texte>
+    </paragraphe>
+    <paragraphe code_grammaire="PAROLE_GENERIQUE">
+      <orateurs><orateur><nom>Mme la présidente</nom></orateur></orateurs>
+      <texte>La parole est à l'orateur suivant pour la discussion générale, je vous en prie.</texte>
+    </paragraphe>
+    <paragraphe code_grammaire="PAROLE_GENERIQUE">
+      <orateurs><orateur><nom>M. Éric Martineau</nom><id>795100</id></orateur></orateurs>
+      <texte>Notre groupe soutient l'objectif mais s'interroge sur le financement des mesures.</texte>
+    </paragraphe>
+    <point code_grammaire="DISC_ARTICLES_1_2"><texte>Discussion des articles</texte></point>
+    <paragraphe code_grammaire="PAROLE_GENERIQUE">
+      <orateurs><orateur><nom>M. Après Section</nom><id>111111</id></orateur></orateurs>
+      <texte>Cette prise de parole est hors de la discussion générale et ne doit pas être capturée.</texte>
+    </paragraphe>
+  </contenu>
+</compteRendu>
+"""
+
+
+def test_extraire_debats_discussion_generale_en_repli():
+    debats = extraire_debats(_XML_DG)
+    assert len(debats) == 1
+    d = debats[0]
+    # Pas d'explications de vote formelles ici, mais le texte est conservé grâce
+    # à la discussion générale (source de repli).
+    assert d.explications == []
+    # Orateur résolu par acteurRef (le CR n'écrit pas le groupe dans le nom).
+    refs = [iv.acteur_ref for iv in d.interventions_generales]
+    assert refs == ["PA795808", "PA795100"]  # présidente exclue (pas d'id),
+    # 2e prise de Sebaihi dédupliquée, orateur « hors section » exclu (point suivant).
+    assert d.interventions_generales[0].orateur == "Mme Sabrina Sebaihi"
+    assert d.interventions_generales[0].groupe == ""
+
+
+def test_extraire_debats_explications_et_discussion_generale_coexistent():
+    # Un texte qui a une discussion générale PUIS des explications de vote :
+    # les deux sont capturées (l'ingestion préférera les explications).
+    xml = _XML_DG.replace(
+        '<point code_grammaire="DISC_ARTICLES_1_2"><texte>Discussion des articles</texte></point>',
+        '<point code_grammaire="DISC_ARTICLES_1_2"><texte>Explications de vote</texte></point>'
+        '<paragraphe code_grammaire="PAROLE_GENERIQUE">'
+        '<orateurs><orateur><nom>M. Jean Dupont (RN)</nom></orateur></orateurs>'
+        '<texte>Notre groupe votera pour ce texte essentiel à la reconstruction de Mayotte.</texte>'
+        '</paragraphe>',
+    )
+    d = extraire_debats(xml)[0]
+    assert [e.groupe for e in d.explications] == ["RN"]
+    assert len(d.interventions_generales) == 2
+
+
 def _debat(titre, date="2025-03-06", numeros=frozenset()):
     return DebatTexte(
         titre=titre,

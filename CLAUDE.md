@@ -46,8 +46,18 @@ Six écrans du cœur de valeur :
    **Aujourd'hui** / **Hier** (masquées si vides, §2.5), carte **récap du
    dernier mois actif** (`useRecap`, `GET /recap`), puis **une rangée par
    thème**. Pas de défilement infini : la recherche sert à aller au-delà.
-   Les vignettes affichent la **nature du texte** (« Projet de loi »…) quand
-   le titre la porte (`natureTexte` — rien d'affiché sinon, on ne déduit pas).
+   Les cartes et le hero affichent la **nature du texte** (« Projet de loi »…)
+   en label, **servie par l'API** (`DossierListItem.natureTexte`, dérivée du
+   titre officiel — rien d'affiché sinon, on ne déduit pas). Le **titre affiché**
+   (`titreClair`) est le titre officiel **débarrassé de cette nature et de son
+   connecteur** (« Proposition de loi visant à améliorer la sécurité des
+   trains » → « Améliorer la sécurité des trains », `titre_court` dans
+   `normalize.py`) : liste fermée de connecteurs, sinon titre intact (« Projet de
+   loi **de finances** pour 2025 » n'est pas amputé). Sous le titre vient
+   l'**accroche** — le **but du texte en une phrase, tirée de la Q1** dont
+   l'amorce (« Les députés ont examiné ce texte pour… ») est retirée
+   (`accroche_depuis_q1`) : rien n'est régénéré, la Q1 est déjà validée. Pas de
+   Q1 → **pas d'accroche**, la ligne disparaît (§2.5).
 2. **Fiche dossier** (`DossierDetailScreen` → `useDossier`) : en tête, la
    **frise « Trajectoire à l'Assemblée »** (`TrajectoireNavette` +
    `phasesNavette` dans `format.ts`) — les phases de navette documentées par
@@ -280,6 +290,7 @@ Pas de suite de tests côté frontend. Vérification = `tsc --noEmit` + `expo ex
 cd backend && source .venv/bin/activate   # venv Python 3.12 (indispensable)
 python -m app.ingestion.run --limit 300   # ingère l'open data AN dans Postgres
 python -m app.ingestion.deputes           # référentiel députés + votes nominatifs seuls
+python -m app.ingestion.reformater        # recalcule titre court + accroche en base (ni réseau ni LLM)
 uvicorn app.main:app --reload             # http://localhost:8000/docs (sert la base via .env)
 pytest                                     # suite de tests (forcés sur seed)
 ```
@@ -374,7 +385,10 @@ sort, `cible?` (article visé) + `dispositif?` (ce que l'amendement change) +
 `exposeSommaire?` (le « pourquoi » côté auteur, non neutre) tirés de l'open data
 AN quand disponibles, `scrutinId` vers la fiche vote, et `sousAmendements?` — les
 **sous-amendements rattachés** à cet amendement, même forme), `sources`,
-`statut`, `theme`, `dateDernierScrutin`, `miseAJour?` (badge §7.7). La partition
+`statut`, `theme`, `dateDernierScrutin`, `miseAJour?` (badge §7.7),
+`titreOfficiel` (la formulation d'origine, toujours conservée et affichée sur la
+fiche §7.5), `titreClair` (titre d'affichage raccourci) et `accroche?`
+(le but du texte, tiré de la Q1 — **optionnelle**, absente = ligne masquée §2.5). La partition
 texte / amendement / sous-amendement se fait à l'ingestion (`est_amendement`,
 `est_sous_amendement`, `numero_amendement_parent` sur l'objet du scrutin).
 Un `Scrutin` est **vote-niveau** : `dossierId`, `objet` (ce sur quoi on a voté),
@@ -387,8 +401,9 @@ contenu enrichi, cf. `amendements.py` — miroir des mêmes champs sur `Amendeme
 d'amendement — `pourquoi` / `changement` / `resultat`, générées à l'ingestion),
 `sources`. La fiche dossier n'embarque que des `ScrutinResume` (liste
 compacte) ; le `Scrutin` complet est servi par `GET /scrutins/{id}`. Le fil et la
-recherche renvoient un `DossierListItem` allégé (dont `nombreScrutins` et
-`miseAJour`). Côté **députés** : `Depute` (identité + groupe + circonscription),
+recherche renvoient un `DossierListItem` allégé (dont `nombreScrutins`,
+`miseAJour`, `accroche?` et `natureTexte?` — il ne porte PAS `titreOfficiel`,
+d'où la nature calculée côté API). Côté **députés** : `Depute` (identité + groupe + circonscription),
 `DeputeListItem` (annuaire — **photo comprise**, la liste doit être
 identifiable sans charger chaque fiche), `DeputeDetail` (= `Depute` + `portrait` +
 `historique` paginé), `PortraitVote` (12 mois glissants : `votes`, `pour` /

@@ -12,7 +12,7 @@ from datetime import date, timedelta
 
 from app.db.models import DeputeRow, DossierRow, GroupeRow, ScrutinRow, VoteDeputeRow
 from app.domain.enums import ObjetVote, PositionVote
-from app.ingestion.normalize import type_objet_vote
+from app.ingestion.normalize import nature_texte, type_objet_vote
 from app.repositories.base import (
     DossierRepository,
     construire_portrait,
@@ -68,7 +68,9 @@ def _to_list_item(row: DossierRow) -> DossierListItem:
         id=row.id,
         date=row.date,
         titre_clair=row.titre_clair,
-        accroche=row.accroche,
+        # Colonne NOT NULL : la chaîne vide signifie « pas d'accroche » (§2.5).
+        accroche=row.accroche or None,
+        nature_texte=nature_texte(row.titre_officiel),
         statut=row.statut,  # type: ignore[arg-type]  (str -> enum coercé)
         theme=row.theme,
         temps_lecture_sec=row.temps_lecture_sec,

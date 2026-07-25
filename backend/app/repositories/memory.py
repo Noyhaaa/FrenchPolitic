@@ -76,7 +76,10 @@ class InMemoryDossierRepository(DossierRepository):
         results = [
             d
             for d in self._ordered
-            if q in _fold(f"{d.titre_clair} {d.titre_officiel} {d.accroche} {d.theme}")
+            if q
+            in _fold(
+                f"{d.titre_clair} {d.titre_officiel} {d.accroche or ''} {d.theme}"
+            )
         ]
         return [DossierListItem.from_dossier(d) for d in results[:limit]]
 

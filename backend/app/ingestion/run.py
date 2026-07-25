@@ -57,6 +57,13 @@ async def _main(limit: int | None, legislature: int) -> None:
             f"  {report.dossiers_orphelins_supprimes} dossier(s) orphelin(s) "
             "supprimé(s) (votes migrés vers leur vrai dossier)."
         )
+    if report.abrevs_non_resolues:
+        # Fuite mesurée (§7.4) : abréviation de groupe au CR non résolue par
+        # l'annuaire AMO → à ajouter à `_ALIAS_ABBREV` sur preuve, sans deviner.
+        print(
+            "⚠ abréviations de groupe non résolues (désaccord) : "
+            + ", ".join(sorted(report.abrevs_non_resolues))
+        )
     if report.llm_indisponible:
         print("⚠ LLM configuré mais injoignable : run SANS LLM (relancer quand il répond).")
     if report.llm_echecs:
