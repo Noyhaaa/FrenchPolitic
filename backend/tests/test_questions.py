@@ -12,7 +12,13 @@ from app.ai.questions import (
     phrase_resultat_amendement,
     valider_reponse,
 )
-from app.schemas import ResultatGlobal, Scrutin, ScrutinResume
+from app.schemas import (
+    DispositifTexte,
+    ResultatGlobal,
+    Scrutin,
+    ScrutinResume,
+    SourceOfficielle,
+)
 
 
 class _FakeLLM:
@@ -156,6 +162,75 @@ async def test_sans_expose_pas_d_appel_llm():
     q = await generer_questions(_TITRE, [_scrutin("l'ensemble…")], None, llm)
     assert q.pourquoi is None and q.changement is None
     assert llm._reponses  # la réponse n'a pas été consommée : LLM non appelé
+
+
+# --- Q4 : le dispositif officiel prime sur la parole de l'auteur ---
+
+_DISPOSITIF_TEXTE = DispositifTexte(
+    texte=(
+        "Article 1er. Après l'article 15-3 du code de procédure pénale, il est "
+        "inséré un article 15-3-5 ainsi rédigé : « La victime dont la plainte "
+        "est classée sans suite en est informée par écrit. »"
+    ),
+    source=SourceOfficielle(
+        type="texte",
+        libelle="Texte déposé",
+        url="https://www.assemblee-nationale.fr/dyn/17/textes/l17b0001_proposition-loi",
+    ),
+)
+
+
+async def test_q4_depuis_le_dispositif_est_un_fait_non_attribue():
+    llm = _FakeLLM(
+        "Le texte obligerait à informer par écrit la victime dont la plainte "
+        "est classée sans suite.",
+        "Les députés ont examiné une proposition de loi sur les droits des victimes.",
+    )
+    q = await generer_questions(
+        _TITRE,
+        [_scrutin("l'ensemble…")],
+        _EXPOSE,
+        llm,
+        dispositif=_DISPOSITIF_TEXTE,
+    )
+    assert q.changement is not None
+    # Pas d'attribution : la source n'est pas un point de vue mais le texte…
+    assert not q.changement.startswith(PREFIXE_AUTEUR)
+    # …et elle porte son lien vers ce texte (§7.5).
+    assert q.changement_source == _DISPOSITIF_TEXTE.source
+    # L'exposé n'a servi qu'à la Q1 : la réponse « auteur » n'est pas demandée.
+    assert q.pourquoi is not None
+    assert not llm._reponses
+
+
+async def test_q4_repli_sur_l_auteur_si_le_dispositif_est_rejete():
+    # Chiffre absent du dispositif → réponse factuelle rejetée ; on retombe sur
+    # l'exposé, et la réponse redevient attribuée (sans source).
+    llm = _FakeLLM(
+        "Le texte concernerait 12 000 victimes par an.",
+        "Les députés ont examiné une proposition de loi sur les droits des victimes.",
+        f"{PREFIXE_AUTEUR}, cela permettrait de mieux protéger les victimes.",
+    )
+    q = await generer_questions(
+        _TITRE,
+        [_scrutin("l'ensemble…")],
+        _EXPOSE,
+        llm,
+        dispositif=_DISPOSITIF_TEXTE,
+    )
+    assert q.changement is not None and q.changement.startswith(PREFIXE_AUTEUR)
+    assert q.changement_source is None
+
+
+async def test_q4_sans_expose_mais_avec_dispositif():
+    # Un texte sans exposé récupérable garde une réponse : celle du texte.
+    llm = _FakeLLM("Le texte obligerait à informer la victime par écrit.")
+    q = await generer_questions(
+        _TITRE, [_scrutin("l'ensemble…")], None, llm, dispositif=_DISPOSITIF_TEXTE
+    )
+    assert q.changement is not None
+    assert q.changement_source is not None
+    assert q.pourquoi is None  # pas d'exposé → pas de Q1 (§2.5)
 
 
 # --- questions d'un vote d'amendement (fiche vote) ---
@@ -346,3 +421,31 @@ def test_accroche_coupe_sur_un_mot_entier():
     assert accroche is not None
     assert len(accroche) <= 160 and accroche.endswith("…")
     assert not accroche[:-1].endswith(" ")  # pas de mot coupé en deux
+
+
+def test_lexique_de_la_source_admis_seulement_si_le_mot_y_figure():
+    """Un texte officiel a le droit d'employer ses propres mots.
+
+    Cas réel : « l'exposition des jeunes utilisateurs aux contenus dangereux »
+    est écrit dans l'article unique d'une proposition de résolution — le
+    reprendre n'est pas un jugement ajouté par le modèle."""
+    source = (
+        "Article unique. Est créée une commission d'enquête chargée d'examiner "
+        "les risques liés à l'exposition aux contenus dangereux."
+    )
+    reponse = "Le texte créerait une commission sur les contenus dangereux."
+    # Par défaut, la liste noire s'applique sans exception.
+    assert valider_reponse(reponse, source) is None
+    # Source officielle : le mot y figure tel quel → accepté.
+    assert (
+        valider_reponse(reponse, source, lexique_de_la_source_admis=True) == reponse
+    )
+    # Mais un jugement AJOUTÉ par le modèle reste rejeté.
+    assert (
+        valider_reponse(
+            "Le texte créerait une commission indispensable.",
+            source,
+            lexique_de_la_source_admis=True,
+        )
+        is None
+    )

@@ -133,6 +133,10 @@ class QuestionsCitoyennes(CamelModel):
     desaccord_source: SourceOfficielle | None = None
     resultat: str | None = None
     changement: str | None = None
+    # Renseignée quand `changement` vient du **dispositif officiel** (fait) et
+    # non de l'exposé (point de vue de l'auteur, signalé par son préfixe) :
+    # renvoie au texte déposé (réversibilité §7.5).
+    changement_source: SourceOfficielle | None = None
 
 
 class QuestionsAmendement(CamelModel):
@@ -261,6 +265,20 @@ class ExposeMotifs(CamelModel):
     source: SourceOfficielle
 
 
+class DispositifTexte(CamelModel):
+    """Dispositif du texte déposé — ses **articles**, tels que publiés (§5.1).
+
+    Contrairement à l'exposé des motifs, c'est un **fait officiel** : ce que le
+    texte écrit, pas ce que son auteur en dit. Sert de source vérifiable à la
+    réponse « qu'est-ce que ça change » (contrôlée déterministiquement, cf.
+    `app.ai.questions`). Non affiché tel quel : c'est du droit codifié, le
+    lecteur l'atteint par `source` (§7.5).
+    """
+
+    texte: str
+    source: SourceOfficielle
+
+
 class Dossier(CamelModel):
     """Entité centrale : un dossier législatif (un texte) et sa trajectoire."""
 
@@ -283,6 +301,9 @@ class Dossier(CamelModel):
     # Exposé des motifs (point de vue de l'auteur, bloc attribué). Absent tant
     # qu'on n'a pas pu récupérer le PDF officiel du texte (§2.5 : pas comblé).
     expose_motifs: ExposeMotifs | None = None
+    # Dispositif du texte déposé (fait officiel), extrait du même PDF. Sert de
+    # source à la réponse « qu'est-ce que ça change » ; jamais affiché brut.
+    dispositif: DispositifTexte | None = None
 
 
 class DossierListItem(CamelModel):

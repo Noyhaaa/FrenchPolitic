@@ -146,6 +146,12 @@ export interface QuestionsCitoyennes {
   desaccordSource?: SourceOfficielle;
   resultat?: string;
   changement?: string;
+  /**
+   * Présente quand `changement` vient du **dispositif officiel** (un fait) et
+   * non de l'exposé (point de vue de l'auteur, signalé par son préfixe) :
+   * renvoie au texte déposé (§7.5).
+   */
+  changementSource?: SourceOfficielle;
 }
 
 /**
@@ -194,6 +200,19 @@ export interface ResumeScrutin {
  * jamais fondu dans le résumé neutre. `source` renvoie au texte officiel (§7.5).
  */
 export interface ExposeMotifs {
+  texte: string;
+  source: SourceOfficielle;
+}
+
+/**
+ * Dispositif du texte déposé — ses **articles**, tels que publiés (§5.1).
+ *
+ * Contrairement à l'exposé des motifs, c'est un **fait officiel** : ce que le
+ * texte écrit. Sert de source à la réponse « qu'est-ce que ça change »
+ * (`QuestionsCitoyennes.changementSource`). Non affiché tel quel : c'est du
+ * droit codifié, le lecteur l'atteint par `source`.
+ */
+export interface DispositifTexte {
   texte: string;
   source: SourceOfficielle;
 }
@@ -308,6 +327,11 @@ export interface Dossier {
    * Absent tant que le PDF officiel n'a pas pu être récupéré (§2.5).
    */
   exposeMotifs?: ExposeMotifs;
+  /**
+   * Dispositif du texte déposé (fait officiel), extrait du même PDF que
+   * l'exposé. Source de la réponse Q4 ; jamais affiché brut.
+   */
+  dispositif?: DispositifTexte;
 }
 
 /**

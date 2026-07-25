@@ -5,8 +5,11 @@
    comptes rendus des débats en séance (non ingérés). On ne déduit pas un
    désaccord du titre ou de l'exposé (§2.5) — la réponse reste None.
 3. Quel est le résultat du vote ?            → déterministe, depuis le vote décisif.
-4. Qu'est-ce que cela change concrètement ?  → LLM, depuis l'exposé des motifs,
-   toujours préfixé « Selon l'auteur du texte » (point de vue du déposant, §4.3).
+4. Qu'est-ce que cela change concrètement ?  → LLM, depuis le **dispositif**
+   officiel du texte quand il est disponible (fait : pas d'attribution, la
+   réponse porte le lien vers le texte déposé) ; à défaut seulement, depuis
+   l'exposé des motifs, alors toujours préfixé « Selon l'auteur du texte »
+   (point de vue du déposant, §4.3).
 
 Pourquoi un LLM ici alors que le résumé reste au gabarit déterministe : ces deux
 réponses sont **attribuables à une source unique** (l'exposé) et **vérifiables
@@ -32,6 +35,7 @@ from app.ai.llm import LLMClient
 from app.ingestion.normalize import truncate_mots
 from app.schemas import (
     ArgumentGroupe,
+    DispositifTexte,
     QuestionsAmendement,
     QuestionsCitoyennes,
     Scrutin,
@@ -78,6 +82,16 @@ _SYS_CHANGEMENT = (
     f"Commence obligatoirement ta réponse par « {PREFIXE_AUTEUR}, ».\n"
     "Utilise le conditionnel (« permettrait », « créerait ») : le changement "
     "n'est qu'annoncé par l'auteur.\n" + _CONSIGNES_COMMUNES
+)
+
+_SYS_CHANGEMENT_TEXTE = (
+    "Tu expliques à un citoyen ce qu'un texte de loi français prévoit, "
+    "uniquement à partir de son dispositif (les articles du texte déposé, "
+    "c'est-à-dire le texte officiel lui-même).\n"
+    "Utilise le conditionnel (« créerait », « obligerait ») : le texte n'est "
+    "qu'une proposition tant qu'il n'est pas promulgué.\n"
+    "N'attribue rien à personne : ce n'est pas un point de vue, c'est ce "
+    "qu'écrit le texte.\n" + _CONSIGNES_COMMUNES
 )
 
 _SYS_POURQUOI_AMENDEMENT = (
@@ -142,6 +156,7 @@ def valider_reponse(
     *,
     prefixe: str | None = None,
     max_chars: int = _MAX_CHARS,
+    lexique_de_la_source_admis: bool = False,
 ) -> str | None:
     """Contrôles déterministes d'une réponse LLM ; None au moindre doute (§2.5).
 
@@ -150,7 +165,15 @@ def valider_reponse(
     - lexique évaluatif (liste noire §4.3) → rejet ;
     - un nombre absent des sources → rejet (chiffre inventé ou converti) ;
     - nature du texte inversée (proposition ↔ projet) → rejet ;
-    - préfixe d'attribution manquant (Q4) → rejet.
+    - préfixe d'attribution manquant (Q4 tirée de l'exposé) → rejet.
+
+    `lexique_de_la_source_admis` n'est activé que lorsque la source est un
+    **texte officiel** (dispositif d'un texte ou d'un amendement) : un mot de la
+    liste noire y est alors toléré s'il figure **tel quel dans la source** —
+    même logique de contenance que pour les chiffres. Ce qu'on interdit, c'est
+    que le modèle AJOUTE un jugement, pas qu'il reprenne les mots de la loi
+    (cas réel : « l'exposition des jeunes utilisateurs aux contenus dangereux »,
+    écrit dans l'article unique d'une proposition de résolution).
     """
     reponse = reponse.strip()
     if not reponse or len(reponse) > max_chars:
@@ -160,11 +183,15 @@ def valider_reponse(
     if prefixe is not None and not reponse.startswith(prefixe):
         return None
     r_fold = fold(reponse)
-    if any(mot in LEXIQUE_ORIENTE for mot in re.findall(r"[a-z]+", r_fold)):
+    s_fold = fold(sources)
+    orientes = {m for m in re.findall(r"[a-z]+", r_fold) if m in LEXIQUE_ORIENTE}
+    if orientes and not (
+        lexique_de_la_source_admis
+        and orientes <= set(re.findall(r"[a-z]+", s_fold))
+    ):
         return None
     if not _chiffres(reponse) <= _chiffres(sources):
         return None
-    s_fold = fold(sources)
     for nature, opposee in (
         ("proposition de loi", "projet de loi"),
         ("projet de loi", "proposition de loi"),
@@ -303,16 +330,52 @@ def _decompte(sujet: str, statut: str, statut_brut: str, r) -> str:
     return phrase + "."
 
 
+async def generer_changement_texte(
+    titre_officiel: str, dispositif: str, llm: LLMClient
+) -> str | None:
+    """Q4 **factuelle** : ce que le texte prévoit, depuis son dispositif officiel.
+
+    Mêmes contrôles déterministes que partout ailleurs (`valider_reponse`), mais
+    **sans préfixe d'attribution** : la source n'est pas un point de vue, c'est
+    le texte lui-même. None si la réponse ne passe pas les contrôles (§2.5).
+    Le dispositif est lu ENTIÈREMENT (le cap est appliqué à l'extraction, cf.
+    `textes_an._MAX_DISPOSITIF` : au-delà, il n'est pas stocké du tout).
+    """
+    sources = f"{titre_officiel}\n{dispositif}"
+    user = f"TITRE : {titre_officiel}\n\nDISPOSITIF DU TEXTE :\n{dispositif}"
+    reponse = await llm.generate_text(_SYS_CHANGEMENT_TEXTE, user)
+    return valider_reponse(reponse, sources, lexique_de_la_source_admis=True)
+
+
 async def generer_questions(
     titre_officiel: str,
     scrutins: list[ScrutinResume],
     expose_texte: str | None,
     llm: LLMClient | None,
+    dispositif: DispositifTexte | None = None,
 ) -> QuestionsCitoyennes:
-    """Compose les 4 réponses. Sans LLM ou sans exposé, seule la Q3 (déterministe)
-    est renseignée — les autres restent « information non disponible » (§2.5)."""
+    """Compose les 4 réponses. Sans LLM (ni exposé ni dispositif), seule la Q3
+    (déterministe) est renseignée — les autres restent « information non
+    disponible » (§2.5).
+
+    Q4 « qu'est-ce que ça change » a deux sources possibles, dans cet ordre :
+    le **dispositif officiel** (fait — réponse sans attribution, la source est
+    posée par l'appelant) puis, à défaut, l'**exposé des motifs** (point de vue
+    de l'auteur — réponse obligatoirement préfixée « Selon l'auteur du texte »).
+    """
     questions = QuestionsCitoyennes(resultat=phrase_resultat(scrutins))
-    if llm is None or not expose_texte:
+    if llm is None:
+        return questions
+
+    if dispositif:
+        questions.changement = await generer_changement_texte(
+            titre_officiel, dispositif.texte, llm
+        )
+        if questions.changement:
+            # La réponse est un fait : elle porte son lien vers le texte (§7.5).
+            questions.changement_source = dispositif.source
+
+    if not expose_texte:
         return questions
 
     expose = expose_texte[:_MAX_EXPOSE_PROMPT]
@@ -322,8 +385,12 @@ async def generer_questions(
     reponse = await llm.generate_text(_SYS_POURQUOI, user)
     questions.pourquoi = valider_reponse(reponse, sources)
 
-    reponse = await llm.generate_text(_SYS_CHANGEMENT, user)
-    questions.changement = valider_reponse(reponse, sources, prefixe=PREFIXE_AUTEUR)
+    # Repli seulement : le fait officiel prime sur la parole de l'auteur.
+    if not questions.changement:
+        reponse = await llm.generate_text(_SYS_CHANGEMENT, user)
+        questions.changement = valider_reponse(
+            reponse, sources, prefixe=PREFIXE_AUTEUR
+        )
 
     return questions
 
@@ -381,7 +448,11 @@ async def generer_questions_amendement(
         sources = f"{scrutin.objet}\n{scrutin.dispositif}"
         user = f"VOTE : {scrutin.objet}\n\nDISPOSITIF :\n{scrutin.dispositif}"
         reponse = await llm.generate_text(_SYS_CHANGEMENT_AMENDEMENT, user)
-        questions.changement = valider_reponse(reponse, sources)
+        # Source officielle (le dispositif de l'amendement) : ses propres mots
+        # sont admis, seul un jugement AJOUTÉ par le modèle est rejeté.
+        questions.changement = valider_reponse(
+            reponse, sources, lexique_de_la_source_admis=True
+        )
 
     return questions
 

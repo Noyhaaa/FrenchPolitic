@@ -46,12 +46,32 @@ type DetailRoute = RouteProp<RootStackParamList, 'DossierDetail'>;
  * un dossier réel peut compter des dizaines de votes d'amendement). */
 const APERCU_LISTE = 4;
 
-/** Emoji des publics concernés (maquette « Qui est concerné ? »). */
+/** Emoji des publics concernés (« Qui est concerné ? »).
+ *  ⚠️ Contrat : miroir de la liste fermée `PUBLICS` du backend
+ *  (`app/ai/publics.py`) — une entrée non mappée retombe sur 👥. */
 const publicEmoji: Record<string, string> = {
-  Particuliers: '👥',
+  Salariés: '💼',
+  Employeurs: '🏭',
+  Locataires: '🔑',
+  Propriétaires: '🏠',
+  Agriculteurs: '🌾',
+  Étudiants: '🎓',
+  Familles: '👨‍👩‍👧',
+  Enfants: '🧒',
+  Patients: '🏥',
+  Soignants: '🩺',
+  'Personnes handicapées': '♿',
+  Consommateurs: '🛒',
+  Retraités: '👵',
+  Automobilistes: '🚗',
+  Fonctionnaires: '🏛️',
+  'Élus locaux': '🗳️',
   Entreprises: '🏢',
-  Collectivités: '🏛️',
+  Communes: '🗺️',
   Associations: '🤝',
+  // Catégories larges du seed (données fictives) — conservées pour l'affichage.
+  Particuliers: '👥',
+  Collectivités: '🏛️',
 };
 
 /** Petit intitulé de sous-bloc (CONTEXTE, OBJECTIF…). */

@@ -16,8 +16,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from app.ingestion.textes_an import decouper_expose, lire_pdf
-from app.schemas import ExposeMotifs, SourceOfficielle
+from app.ingestion.textes_an import decouper_dispositif, decouper_expose, lire_pdf
+from app.schemas import DispositifTexte, ExposeMotifs, SourceOfficielle
 
 # Signature d'un texte de transmission Sénat (le PDF AN n'a alors pas d'exposé).
 _RE_TRANSMISSION = re.compile(
@@ -83,3 +83,17 @@ def construire_expose_senat(url_pdf: str, pdf: bytes) -> ExposeMotifs | None:
     if not texte:
         return None
     return ExposeMotifs(texte=texte, source=source_senat(url_pdf))
+
+
+def construire_dispositif_senat(url_pdf: str, pdf: bytes) -> DispositifTexte | None:
+    """Bloc `DispositifTexte` (articles + source Sénat) ; None si non exploitable.
+
+    Miroir de `construire_expose_senat` : le PDF Sénat porte les deux, on ne le
+    retélécharge pas pour autant (même octets, deux découpages)."""
+    texte_pdf = lire_pdf(pdf)
+    if not texte_pdf:
+        return None
+    corps = decouper_dispositif(texte_pdf)
+    if not corps:
+        return None
+    return DispositifTexte(texte=corps, source=source_senat(url_pdf))

@@ -224,8 +224,8 @@ app/
     assemblee.py     Open data AN : download + parse_scrutin (pur, nominatif inclus) → ScrutinParse
     debats.py        Comptes rendus (SyceronBrut) : explications de vote par groupe + liaison au vote
     amendements.py   Contenu des amendements (dispositif + exposé sommaire + article visé) : archive AN → index (dossierRef, numéro)
-    textes_an.py     Exposé des motifs : uid → URL du PDF officiel → extraction (pypdf)
-    textes_senat.py  Repli exposé : texte de transmission Sénat → PDF senat.fr → extraction
+    textes_an.py     Exposé des motifs ET dispositif : uid → URL du PDF officiel → extraction (pypdf)
+    textes_senat.py  Repli exposé/dispositif : texte de transmission Sénat → PDF senat.fr → extraction
     organes.py       Résolution des groupes (AMO) + couleurs + annuaire des députés
     deputes.py       Référentiel des députés + votes nominatifs (pur) + CLI autonome
     normalize.py     Thème (heuristique), positions, décomptes, titre d'affichage (titre_court)
@@ -291,6 +291,38 @@ tests/               Tests API + garde-fous + génération + ingestion (+ repo p
   fiable sera dispo, l'exposé servira de **contexte** pour un « que change le
   texte » neutre passant les garde-fous — jamais affiché tel quel.
 
+**Dispositif du texte — la source factuelle de « ce que ça change » (en place)**
+- Le **même PDF** porte, après l'exposé, le **dispositif** : les articles du
+  texte. `decouper_dispositif` commence exactement là où `decouper_expose`
+  s'arrête (marqueur `_RE_FIN`), donc **aucun téléchargement supplémentaire**.
+  Stocké dans `Dossier.dispositif` (texte + source).
+- **Jamais affiché brut** : c'est du droit codifié (« Le troisième alinéa de
+  l'article L. 815-13 du code de la sécurité sociale est complété par… »),
+  illisible pour un citoyen. Il sert de **source vérifiable** à la Q4 et le
+  lecteur l'atteint en 1 tap par le lien (§7.5).
+- **Cap `_MAX_DISPOSITIF` = 10 000 caractères, sans troncature** : au-delà, on
+  n'attache rien. Le modèle doit lire la source ENTIÈREMENT, sinon il présente un
+  bout de loi comme le texte entier (§2.5). Calibré sur 25 textes réels : 17 sous
+  7 000 caractères, puis 9 461 / 14 351 / 26 301 / 37 528, et les textes
+  budgétaires à 217 000-266 000. Épreuve : à 1 455 et 6 636 caractères
+  mistral-small tient la consigne ; à 15 711 il produit un rapport structuré de
+  3 000 caractères, rejeté par les garde-fous (l'appel est perdu pour rien).
+- Effet de bord assumé : un texte hors cap n'aura jamais de dispositif, donc son
+  PDF est retéléchargé à chaque run (pas de marqueur d'absence inventé en base).
+
+**Publics concernés — liste fermée (en place)**
+- `app/ai/publics.py` : même doctrine que le thème (rangement, pas de prose).
+  19 publics (Salariés, Locataires, Agriculteurs, Patients, Soignants,
+  Consommateurs, Enfants, Communes…), sortie **validée exact-match**, cap 3,
+  hors-liste ignoré, rien de valide → `public_concerne` vide → section « Qui est
+  concerné ? » masquée (§2.5). ⚠️ Miroir obligatoire de `publicEmoji`
+  (`src/screens/DossierDetailScreen.tsx`).
+- Le prompt a été calibré sur des textes réels : trop permissif il ajoutait des
+  publics par ricochet (« Étudiants » sur un texte de sécurité routière), trop
+  strict il répondait « aucun » 12 fois sur 18. La version en place vise les
+  publics **directement** visés et réserve « aucun » aux textes institutionnels,
+  procéduraux ou symboliques.
+
 **Classification de thème par LLM local — Ollama (en place)**
 - `app/ai/theme.py` : à l'ingestion, les dossiers que l'heuristique laisse en
   « Autre » sont soumis à un LLM local (Ollama) qui choisit un thème dans
@@ -323,16 +355,27 @@ tests/               Tests API + garde-fous + génération + ingestion (+ repo p
   même gabarit pour tous) ; le **sens pour/contre vient du scrutin**, jamais du
   LLM. Aucune synthèse éditoriale (« qui a raison ») : on juxtapose les positions
   que les groupes formulent eux-mêmes. Source = le compte rendu officiel (§7.5).
-  **Pourquoi (Q1)** et **Changement (Q4)** : générés par
-  `qwen3:14b` **uniquement depuis l'exposé des motifs** (+ titre), puis soumis à
-  des **contrôles déterministes** (`valider_reponse`) : tout chiffre de la
-  réponse doit exister dans la source, nature du texte non inversée
-  (proposition↔projet), lexique évaluatif interdit, aucun caractère hors
-  français (fuite CJK vue en épreuve), longueur bornée, et Q4 obligatoirement
-  préfixée « Selon l'auteur du texte » (point de vue du déposant, §4.3, au
-  conditionnel). Rejet → réponse absente (§2.5), jamais publiée. Les réponses
-  validées sont **persistées et réutilisées** entre runs (pas de rappel du
-  modèle sur une source stable).
+  **Pourquoi (Q1)** : généré depuis l'**exposé des motifs** (+ titre).
+  **Changement (Q4)** : **deux sources, dans cet ordre** — le **dispositif
+  officiel** du texte quand il existe (c'est un **fait** : réponse *sans*
+  attribution, qui porte son `changement_source` vers le texte déposé, affiché
+  en lien sous la réponse §7.5), sinon seulement l'**exposé**, et la réponse est
+  alors obligatoirement préfixée « Selon l'auteur du texte » (point de vue du
+  déposant, §4.3, au conditionnel). Une Q4 déjà en base tirée de l'exposé est
+  **regénérée** dès qu'un dispositif devient disponible : le fait prime sur la
+  parole du déposant.
+  Les deux passent les **contrôles déterministes** (`valider_reponse`) : tout
+  chiffre de la réponse doit exister dans la source, nature du texte non
+  inversée (proposition↔projet), lexique évaluatif interdit, aucun caractère
+  hors français (fuite CJK vue en épreuve), longueur bornée. **Exception
+  `lexique_de_la_source_admis`** (dispositif de texte ou d'amendement, sources
+  officielles) : un mot de la liste noire est admis **s'il figure tel quel dans
+  la source** — on interdit au modèle d'**ajouter** un jugement, pas de reprendre
+  les mots de la loi (cas réel : « l'exposition des jeunes utilisateurs aux
+  contenus dangereux », écrit dans l'article unique d'une résolution, faisait
+  rejeter une réponse pourtant fidèle). Rejet → réponse absente (§2.5), jamais
+  publiée. Les réponses validées sont **persistées et réutilisées** entre runs
+  (pas de rappel du modèle sur une source stable).
 - **Questions d'un vote d'amendement** (fiche vote) : mêmes principes,
   adaptés — `generer_questions_amendement` remplit `questions` sur le **scrutin**
   de chaque vote d'amendement (servi par `GET /scrutins/{id}`). **Pourquoi** :

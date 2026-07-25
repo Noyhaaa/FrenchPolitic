@@ -204,19 +204,37 @@ du texte) récupéré du **PDF officiel du texte déposé** (`app/ingestion/text
 transmission du Sénat → exposé récupéré sur senat.fr via le numéro cité)
 et stocké dans `Dossier.expose_motifs` : contenu **non neutre** (point de vue de
 l'auteur, §4.3), affiché en **bloc cité et attribué** (`ExposeMotifsCard`), jamais
-fondu dans le résumé neutre. Pas besoin de Légifrance pour ça (option a ; la
+fondu dans le résumé neutre. Le **même PDF** livre aussi le **dispositif** (les
+articles du texte : `decouper_dispositif`, `Dossier.dispositif`) — lui est un
+**fait officiel**, jamais affiché brut (droit codifié illisible) mais servant de
+**source vérifiable** à la Q4. Un dispositif au-delà de `_MAX_DISPOSITIF`
+(10 000 car. : budget, PLFSS) n'est **pas stocké du tout** — le modèle ne doit
+jamais voir un texte partiel qu'il présenterait comme le tout (§2.5 ; à 15 700
+car. mistral-small part en rapport de 3 000 car., rejeté par les garde-fous).
+Pas besoin de Légifrance pour ça (option a ; la
 neutralisation par LLM — option b — viendra avec un LLM assez fiable). **LLM local
-(Ollama, `qwen3:14b`) branché sur deux tâches vérifiables** : (1) la
+(Ollama, `qwen3:14b`) branché sur trois tâches vérifiables** : (1) la
 **classification de thème** (`app/ai/theme.py`) — les dossiers « Autre » de
 l'heuristique reçoivent un thème choisi dans la **liste fermée**, sortie
-hors-liste/verbeuse rejetée (repli) ; (2) les **4 questions citoyennes**
+hors-liste/verbeuse rejetée (repli) ; (1bis) les **publics concernés**
+(`app/ai/publics.py`, `resume.public_concerne` → section « Qui est concerné ? ») —
+même doctrine : liste fermée de 19 publics (miroir `publicEmoji` côté front),
+validation exact-match, cap 3, rien de valide → section masquée ; (2) les
+**4 questions citoyennes**
 (`app/ai/questions.py`, servies dans `resume.questions`, affichées par
-`QuestionsCard` en tête de fiche dossier) : « Pourquoi ont-ils débattu ? » (Q1)
-et « Qu'est-ce que ça change ? » (Q4, toujours préfixée « Selon l'auteur du
-texte », au conditionnel) sont générées **depuis l'exposé des motifs seul** puis
+`QuestionsCard` en tête de fiche dossier) : « Pourquoi ont-ils débattu ? » (Q1,
+depuis l'exposé) et « Qu'est-ce que ça change ? » (Q4, au conditionnel) sont
 passées à des **contrôles déterministes** (`valider_reponse` : chiffres présents
 dans la source, nature du texte non inversée, lexique, caractères hors français,
-attribution) — rejet → « information non disponible » ; le **résultat** (Q3) est
+attribution) — rejet → « information non disponible ». **Q4 a deux sources, dans
+cet ordre** : le **dispositif officiel** (fait — réponse *sans* attribution, qui
+porte son `changementSource` vers le texte déposé) puis, à défaut seulement,
+l'**exposé** (parole du déposant — réponse obligatoirement préfixée « Selon
+l'auteur du texte »). Quand la source est un texte officiel (dispositif de texte
+ou d'amendement), un mot du lexique évaluatif est admis **s'il figure tel quel
+dans la source** (`lexique_de_la_source_admis`) : on interdit au modèle
+d'**ajouter** un jugement, pas de reprendre les mots de la loi (cas réel :
+« contenus dangereux », écrit dans l'article unique d'une résolution) ; le **résultat** (Q3) est
 composé **déterministiquement** depuis le vote décisif ; le **désaccord** (Q2)
 vient des **comptes rendus des débats** (archive « SyceronBrut »,
 `app/ingestion/debats.py`) : la section **« Explications de vote »** (chaque
@@ -386,6 +404,8 @@ sort, `cible?` (article visé) + `dispositif?` (ce que l'amendement change) +
 AN quand disponibles, `scrutinId` vers la fiche vote, et `sousAmendements?` — les
 **sous-amendements rattachés** à cet amendement, même forme), `sources`,
 `statut`, `theme`, `dateDernierScrutin`, `miseAJour?` (badge §7.7),
+`exposeMotifs?` (parole de l'auteur, bloc attribué) et `dispositif?` (les
+articles du texte — fait officiel, jamais affiché brut, source de la Q4),
 `titreOfficiel` (la formulation d'origine, toujours conservée et affichée sur la
 fiche §7.5), `titreClair` (titre d'affichage raccourci) et `accroche?`
 (le but du texte, tiré de la Q1 — **optionnelle**, absente = ligne masquée §2.5). La partition

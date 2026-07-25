@@ -4,6 +4,7 @@ from __future__ import annotations
 from app.ingestion.textes_an import (
     construire_index_numeros,
     construire_index_textes,
+    decouper_dispositif,
     decouper_expose,
     url_page_texte,
 )
@@ -14,7 +15,11 @@ _TEXTE = (
     "EXPOSÉ DES MOTIFS\nMESDAMES, MESSIEURS,\n"
     "La présente proposition de loi vise à clarifier le régime applicable. "
     "Elle s'inscrit dans un contexte de réforme.\n"
-    "PROPOSITION DE LOI\nArticle 1er\nLe code est ainsi modifié…"
+    "PROPOSITION DE LOI\nArticle 1er\nLe code est ainsi modifié : "
+    "après l'article L. 123-4 du code de la santé publique, il est inséré un "
+    "article L. 123-4-1 ainsi rédigé : « Le régime applicable est précisé par "
+    "décret en Conseil d'État. »\nArticle 2\nLa présente loi entre en vigueur "
+    "le premier jour du sixième mois suivant sa promulgation."
 )
 
 
@@ -67,6 +72,35 @@ def test_decoupe_expose_tronque_au_mot():
     assert expose is not None
     assert len(expose) <= 101  # 100 + l'ellipse
     assert expose.endswith("…")
+
+
+def test_decoupe_dispositif_commence_au_premier_article():
+    """Symétrique de l'exposé : ce que celui-ci laisse, celui-là prend."""
+    dispositif = decouper_dispositif(_TEXTE)
+    assert dispositif is not None
+    assert dispositif.startswith("PROPOSITION DE LOI Article 1er")
+    assert "Le code est ainsi modifié" in dispositif
+    # L'argumentaire de l'auteur n'a rien à faire dans un extrait factuel.
+    assert "Elle s'inscrit dans un contexte" not in dispositif
+    # Les deux découpages du même texte ne se recouvrent pas.
+    expose = decouper_expose(_TEXTE)
+    assert expose is not None and expose not in dispositif
+
+
+def test_decoupe_dispositif_trop_long_rend_none():
+    """Au-delà du cap on n'attache RIEN : le modèle ne doit jamais voir un texte
+    partiel (un projet de loi de finances mesuré atteint 291 000 caractères)."""
+    long_texte = "EXPOSÉ DES MOTIFS\nMotif.\nArticle 1er " + "disposition " * 3000
+    assert decouper_dispositif(long_texte, max_chars=8000) is None
+    # Sous le cap, le même texte passe.
+    assert decouper_dispositif(long_texte, max_chars=10**6) is not None
+
+
+def test_decoupe_dispositif_trop_court_ou_absent_rend_none():
+    # Page de garde d'un texte retiré en séance : ni articles, ni dispositif.
+    assert decouper_dispositif("N° 42 ASSEMBLÉE NATIONALE Texte retiré.") is None
+    # Marqueur présent mais rien derrière (< _MIN_DISPOSITIF).
+    assert decouper_dispositif("EXPOSÉ DES MOTIFS\nMotif.\nArticle 1er Fin.") is None
 
 
 def test_index_textes_ne_garde_que_les_textes_deposes_an():

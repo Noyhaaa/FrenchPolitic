@@ -119,7 +119,25 @@ export function QuestionsCard({ questions }: Props) {
 
       <View style={styles.sep} />
 
-      <QARow n={4} question="Qu'est-ce que ça change concrètement ?" reponse={questions.changement} />
+      {/* Q4 : la réponse vient du dispositif officiel (fait — elle porte alors
+          son lien vers le texte déposé, §7.5) ou, à défaut, de l'exposé des
+          motifs (parole de l'auteur, signalée par son préfixe §4.3). */}
+      <QARow n={4} question="Qu'est-ce que ça change concrètement ?">
+        {questions.changement ? (
+          <>
+            <Text style={styles.reponse}>{questions.changement}</Text>
+            {questions.changementSource ? (
+              <View style={styles.source}>
+                <SourceLink source={questions.changementSource} />
+              </View>
+            ) : null}
+          </>
+        ) : (
+          <Text style={[styles.reponse, styles.indispo]}>
+            Information non disponible.
+          </Text>
+        )}
+      </QARow>
     </View>
   );
 }

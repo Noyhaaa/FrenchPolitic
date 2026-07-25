@@ -36,6 +36,7 @@ from app.ingestion.deputes import (
 from app.ingestion.debats import IndexDebats, url_compte_rendu
 from app.ingestion.dossiers_legislatifs import construire_reconciliation
 from app.ingestion.textes_an import (
+    construire_dispositif,
     construire_expose,
     construire_index_numeros,
     construire_index_textes,
@@ -43,6 +44,7 @@ from app.ingestion.textes_an import (
     url_page_texte,
 )
 from app.ingestion.textes_senat import (
+    construire_dispositif_senat,
     construire_expose_senat,
     reference_senat,
     urls_pdf_senat,
@@ -72,9 +74,11 @@ from app.ai.questions import (
     generer_questions,
     generer_questions_amendement,
 )
+from app.ai.publics import classifier_publics
 from app.ai.theme import classifier_theme
 from app.schemas import (
     Amendement,
+    DispositifTexte,
     Dossier,
     ExposeMotifs,
     MiseAJourDossier,
@@ -99,8 +103,16 @@ class SyncReport:
     exposes_recuperes: int = 0
     # Sous-ensemble des exposés récupérés via senat.fr (textes d'origine Sénat).
     exposes_senat: int = 0
+    # Dispositifs (articles du texte déposé) extraits du même PDF que l'exposé —
+    # source de la Q4 factuelle. Les textes trop longs (budget) n'en ont pas.
+    dispositifs_recuperes: int = 0
     themes_reclasses: int = 0
     questions_generees: int = 0
+    # Dossiers dont la Q4 vient du dispositif officiel (fait) et non de l'exposé
+    # (parole de l'auteur) — mesure la bascule visée par ce chantier.
+    changements_factuels: int = 0
+    # Dossiers dont « Qui est concerné ? » a été renseigné ce run (liste fermée).
+    publics_classes: int = 0
     # Votes d'amendement dont une question LLM (pourquoi/changement) a été
     # générée ce run (le résultat, déterministe, n'est pas compté).
     questions_amendements_generees: int = 0
@@ -393,6 +405,15 @@ def _merge_avec_existant(prev: Dossier, incoming: Dossier) -> Dossier:
     # plutôt que de le perdre.
     if incoming.expose_motifs is None and prev.expose_motifs is not None:
         incoming.expose_motifs = prev.expose_motifs
+    # Dispositif : même raisonnement (extrait du même PDF, tout aussi stable).
+    if incoming.dispositif is None and prev.dispositif is not None:
+        incoming.dispositif = prev.dispositif
+    # Publics concernés : acquis d'un run avec LLM, préservés sur un run sans.
+    if not incoming.resume.public_concerne and prev.resume.public_concerne:
+        incoming.resume.public_concerne = prev.resume.public_concerne
+        incoming.resume.champs_non_documentes = [
+            c for c in incoming.resume.champs_non_documentes if c != "public_concerne"
+        ]
     # Thème : ne pas régresser un thème déjà affiné vers « Autre » si ce run a
     # tourné sans LLM (ou si le LLM n'a rien renvoyé de valide).
     if incoming.theme == "Autre" and prev.theme != "Autre":
@@ -524,17 +545,22 @@ class SyncJob:
         cle = self._ALIAS_ABBREV.get(cle, cle)
         return self._groupes_par_abbrev.get(cle)
 
-    async def _expose_en_base(
+    async def _texte_en_base(
         self, session: AsyncSession, dossier_id: str
-    ) -> ExposeMotifs | None:
-        """L'exposé des motifs déjà persisté pour ce dossier, s'il y en a un."""
+    ) -> tuple[ExposeMotifs | None, DispositifTexte | None]:
+        """L'exposé des motifs et le dispositif déjà persistés pour ce dossier."""
         row = await session.get(DossierRow, dossier_id)
         if row is None:
-            return None
-        brut = (row.payload or {}).get("exposeMotifs")
-        return ExposeMotifs.model_validate(brut) if brut else None
+            return None, None
+        payload = row.payload or {}
+        brut_expose = payload.get("exposeMotifs")
+        brut_dispositif = payload.get("dispositif")
+        return (
+            ExposeMotifs.model_validate(brut_expose) if brut_expose else None,
+            DispositifTexte.model_validate(brut_dispositif) if brut_dispositif else None,
+        )
 
-    async def _enrichir_expose(
+    async def _enrichir_texte_depose(
         self,
         session: AsyncSession,
         dossier: Dossier,
@@ -542,21 +568,28 @@ class SyncJob:
         index_textes: dict[str, list[str]],
         report: SyncReport,
     ) -> None:
-        """Attache l'exposé des motifs du texte (PDF officiel) au dossier.
+        """Attache l'exposé des motifs ET le dispositif du texte (PDF officiel).
 
-        Un texte déposé ne change pas : si un exposé est déjà en base pour ce
-        dossier, on le réutilise **sans réseau** — évite de retélécharger et
-        reparser un PDF à chaque run pour un résultat identique. Sinon, essaie
-        les textes déposés candidats **du dépôt initial au plus récent**
-        (l'exposé n'est que dans le dépôt initial ; les versions de navette ne
-        l'ont pas), borné à `_MAX_TENTATIVES_EXPOSE`. Quand le texte AN n'est
-        qu'une **transmission du Sénat** (dispositif sans exposé), on va chercher
-        l'exposé sur senat.fr (§5.1). Best-effort et silencieux en cas d'échec
-        (§2.5) : sans exposé récupérable, le dossier n'en porte pas.
+        Les deux sortent du **même PDF**, en un seul téléchargement : l'exposé
+        est le « pourquoi » de l'auteur (non neutre §4.3), le dispositif est ce
+        que le texte écrit (fait, source de la Q4 factuelle).
+
+        Un texte déposé ne change pas : si les deux sont déjà en base, on les
+        réutilise **sans réseau**. Sinon on essaie les textes déposés candidats
+        **du dépôt initial au plus récent** (l'exposé n'est que dans le dépôt
+        initial), borné à `_MAX_TENTATIVES_EXPOSE`. Quand le texte AN n'est
+        qu'une **transmission du Sénat**, l'exposé est cherché sur senat.fr
+        (§5.1). Best-effort et silencieux en cas d'échec (§2.5).
+
+        Un texte dont le dispositif dépasse le cap (`_MAX_DISPOSITIF` : budget,
+        PLFSS) n'en portera jamais : son PDF est donc retéléchargé à chaque run,
+        coût accepté (quelques dizaines de dossiers) pour ne pas inventer un
+        marqueur d'absence en base.
         """
-        prev = await self._expose_en_base(session, dossier.id)
-        if prev is not None:
-            dossier.expose_motifs = prev
+        prev_expose, prev_dispositif = await self._texte_en_base(session, dossier.id)
+        dossier.expose_motifs = prev_expose
+        dossier.dispositif = prev_dispositif
+        if prev_expose is not None and prev_dispositif is not None:
             return
         uids = index_textes.get(dossier_ref or "")
         if not uids:
@@ -568,19 +601,27 @@ class SyncJob:
             pdf = await self._client.download_texte_pdf(url_page + ".pdf")
             if not pdf:
                 continue
-            expose = construire_expose(uid, pdf)
-            if expose is not None:
-                dossier.expose_motifs = expose
-                report.exposes_recuperes += 1
-                return
-            # Le PDF AN est peut-être une transmission Sénat → exposé chez le Sénat.
-            if await self._enrichir_expose_senat(dossier, pdf, report):
+            if dossier.dispositif is None:
+                dispositif = construire_dispositif(uid, pdf)
+                if dispositif is not None:
+                    dossier.dispositif = dispositif
+                    report.dispositifs_recuperes += 1
+            if dossier.expose_motifs is None:
+                expose = construire_expose(uid, pdf)
+                if expose is not None:
+                    dossier.expose_motifs = expose
+                    report.exposes_recuperes += 1
+                else:
+                    # PDF AN = transmission Sénat ? L'exposé est alors sur senat.fr.
+                    await self._enrichir_senat(dossier, pdf, report)
+            if dossier.expose_motifs is not None and dossier.dispositif is not None:
                 return
 
-    async def _enrichir_expose_senat(
+    async def _enrichir_senat(
         self, dossier: Dossier, pdf_transmission: bytes, report: SyncReport
     ) -> bool:
-        """Récupère l'exposé sur senat.fr quand le texte AN est une transmission.
+        """Récupère l'exposé (et le dispositif) sur senat.fr quand le texte AN
+        est une transmission.
 
         Le numéro Sénat est cité dans le PDF de transmission ; on en dérive
         l'URL du PDF Sénat (préfixe pjl/ppl selon la nature, l'autre en repli)
@@ -596,6 +637,11 @@ class SyncJob:
             pdf_senat = await self._client.download_texte_pdf(url)
             if not pdf_senat:
                 continue
+            if dossier.dispositif is None:
+                dispositif = construire_dispositif_senat(url, pdf_senat)
+                if dispositif is not None:
+                    dossier.dispositif = dispositif
+                    report.dispositifs_recuperes += 1
             expose = construire_expose_senat(url, pdf_senat)
             if expose is not None:
                 dossier.expose_motifs = expose
@@ -621,8 +667,8 @@ class SyncJob:
         deja_resolu = await self._theme_en_base(session, dossier.id)
         if deja_resolu is not None and deja_resolu != "Autre":
             return
-        # L'exposé des motifs est déjà chargé (_enrichir_expose, appelé avant) :
-        # on le donne au classifieur comme signal supplémentaire au titre.
+        # L'exposé des motifs est déjà chargé (_enrichir_texte_depose, appelé
+        # avant) : on le donne au classifieur comme signal supplémentaire.
         expose = dossier.expose_motifs.texte if dossier.expose_motifs else None
         nouveau = await classifier_theme(
             dossier.titre_officiel, self._llm, THEMES, objet=None, expose=expose
@@ -630,6 +676,53 @@ class SyncJob:
         if nouveau and nouveau != "Autre":
             dossier.theme = nouveau
             report.themes_reclasses += 1
+
+    async def _classifier_publics(
+        self, session: AsyncSession, dossier: Dossier, report: SyncReport
+    ) -> None:
+        """Renseigne « Qui est concerné ? » depuis la liste fermée `PUBLICS`.
+
+        Même garde-fou que le thème : sortie hors-liste rejetée, rien de valide
+        → liste vide → section masquée (§2.5). Des publics déjà en base ne sont
+        pas recalculés (le texte déposé ne change pas).
+        """
+        if self._llm is None:
+            return
+        deja = await self._publics_en_base(session, dossier.id)
+        if deja:
+            dossier.resume.public_concerne = deja
+            self._marquer_documente(dossier)
+            return
+        expose = dossier.expose_motifs.texte if dossier.expose_motifs else None
+        dispositif = dossier.dispositif.texte if dossier.dispositif else None
+        if not expose and not dispositif:
+            return
+        publics = await classifier_publics(
+            dossier.titre_officiel, self._llm, expose=expose, dispositif=dispositif
+        )
+        if publics:
+            dossier.resume.public_concerne = publics
+            self._marquer_documente(dossier)
+            report.publics_classes += 1
+
+    @staticmethod
+    def _marquer_documente(dossier: Dossier) -> None:
+        """Retire « public_concerne » des champs annoncés non documentés — le
+        gabarit l'y met par défaut (`app.ai.gabarit`), faute de le connaître au
+        moment où il compose le résumé."""
+        dossier.resume.champs_non_documentes = [
+            c for c in dossier.resume.champs_non_documentes if c != "public_concerne"
+        ]
+
+    async def _publics_en_base(
+        self, session: AsyncSession, dossier_id: str
+    ) -> list[str]:
+        """Les publics déjà persistés pour ce dossier (liste vide si aucun)."""
+        row = await session.get(DossierRow, dossier_id)
+        if row is None:
+            return []
+        resume = (row.payload or {}).get("resume") or {}
+        return list(resume.get("publicConcerne") or [])
 
     async def _theme_en_base(
         self, session: AsyncSession, dossier_id: str
@@ -723,20 +816,37 @@ class SyncJob:
         """Renseigne les 4 questions citoyennes du résumé (§2.2).
 
         Q3 (résultat) est recomposée à chaque run — déterministe, elle suit les
-        nouveaux votes. Q1/Q4 (LLM depuis l'exposé) et Q2 (LLM depuis les débats)
+        nouveaux votes. Q1/Q4 (LLM depuis le texte) et Q2 (LLM depuis les débats)
         déjà en base sont réutilisées : on ne rappelle pas le modèle pour rien.
+
+        Exception : une Q4 tirée de l'**exposé** (donc attribuée à l'auteur, sans
+        `changement_source`) est **regénérée** dès qu'un dispositif est
+        disponible — le fait officiel prime sur la parole du déposant.
         """
         prev = await self._questions_en_base(session, dossier.id)
-        deja_completes = prev is not None and prev.pourquoi and prev.changement
+        peut_mieux_faire = (
+            dossier.dispositif is not None
+            and prev is not None
+            and prev.changement_source is None
+        )
+        deja_completes = (
+            prev is not None
+            and prev.pourquoi
+            and prev.changement
+            and not peut_mieux_faire
+        )
         expose = dossier.expose_motifs.texte if dossier.expose_motifs else None
         questions = await generer_questions(
             dossier.titre_officiel,
             dossier.scrutins,
             expose,
             None if deja_completes else self._llm,
+            dispositif=dossier.dispositif,
         )
         if questions.pourquoi or questions.changement:
             report.questions_generees += 1
+        if questions.changement_source is not None:
+            report.changements_factuels += 1
 
         # Q2 « désaccord » : on la (re)génère si elle n'est pas déjà en base.
         if prev is not None and prev.desaccord:
@@ -749,9 +859,12 @@ class SyncJob:
 
         if prev is not None:
             # Une réponse validée en base ne se perd pas sur un run sans LLM
-            # (ou dont la sortie a été rejetée par les contrôles).
+            # (ou dont la sortie a été rejetée par les contrôles). La source
+            # suit sa réponse : les deux se reprennent ensemble ou pas du tout.
             questions.pourquoi = questions.pourquoi or prev.pourquoi
-            questions.changement = questions.changement or prev.changement
+            if not questions.changement:
+                questions.changement = prev.changement
+                questions.changement_source = prev.changement_source
         dossier.resume.questions = questions
 
     def _composer_accroche(self, dossier: Dossier) -> None:
@@ -935,10 +1048,11 @@ class SyncJob:
                 votes_texte = [
                     p.scrutin for p in parses if not est_amendement(p.scrutin.objet)
                 ]
-                await self._enrichir_expose(
+                await self._enrichir_texte_depose(
                     session, dossier, parses[0].dossier_ref, index_textes, report
                 )
                 await self._reclasser_theme(session, dossier, report)
+                await self._classifier_publics(session, dossier, report)
                 await self._generer_questions(
                     session, dossier, parses[0].dossier_ref, votes_texte, report
                 )
