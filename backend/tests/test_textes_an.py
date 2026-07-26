@@ -210,3 +210,21 @@ def test_index_numeros_ecarte_les_numeros_ambigus():
     assert construire_index_numeros(docs, legislatures=(17,)) == {
         "DLR5L17N200": {600}
     }
+
+
+def test_index_numeros_meme_numero_dans_deux_legislatures():
+    # La série des numéros redémarre à chaque législature : le n° 959 de la 16e
+    # et celui de la 17e sont deux textes sans rapport. Une telle collision ne
+    # doit PAS faire jeter les deux dossiers (elle en jetait 2 540 sur 3 026).
+    docs = [
+        {"document": {"dossierRef": "DLR5L17N100", "uid": "PIONANR5L17B0959"}},
+        {"document": {"dossierRef": "DLR5L16N300", "uid": "PIONANR5L16B0959"}},
+        # Dossier reporté après dissolution : ref de la 16e, texte de la 17e.
+        {"document": {"dossierRef": "DLR5L16N400", "uid": "PIONANR5L17B0777"}},
+    ]
+    # Seuls les numéros de la législature courante sont exposés : ce sont les
+    # seuls comparables aux « (n° X) » des comptes rendus, tous de la 17e.
+    assert construire_index_numeros(docs, legislatures=(17, 16), courante=17) == {
+        "DLR5L17N100": {959},
+        "DLR5L16N400": {777},
+    }

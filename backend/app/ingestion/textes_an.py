@@ -236,7 +236,7 @@ _RE_NUMERO_DOC = re.compile(r"L(\d+)B(?:TC)?0*(\d+)$")
 
 
 def construire_index_numeros(
-    documents: list[dict], legislatures: tuple[int, ...]
+    documents: list[dict], legislatures: tuple[int, ...], courante: int | None = None
 ) -> dict[str, set[int]]:
     """Table `dossierRef → numéros de distribution AN de ses documents`.
 
@@ -247,9 +247,22 @@ def construire_index_numeros(
 
     `legislatures` couvre typiquement la courante + la précédente (dossier
     reporté après dissolution, cf. `construire_index_textes`).
+
+    ⚠️ La série des numéros de distribution **redémarre à chaque législature** :
+    le n° 959 de la 16e et le n° 959 de la 17e sont deux textes sans rapport. Le
+    garde-fou d'unicité s'applique donc à `(législature, numéro)` — sinon toute
+    collision inter-législature faisait jeter les DEUX dossiers (mesuré : 2 540
+    numéros sur 3 026 perdus, couverture 54/237 dossiers officiels seulement).
+
+    En sortie on n'expose que les numéros de la législature `courante` (par
+    défaut la première de `legislatures`) : ce sont les seuls comparables aux
+    « (n° X) » des comptes rendus, qui sont eux aussi de la législature courante.
+    Un dossier reporté après dissolution garde donc son `dossierRef` de la
+    législature précédente, mais est retrouvé par ses numéros actuels.
     """
+    leg_courante = courante if courante is not None else legislatures[0]
     prefixes = tuple(f"DLR5L{leg}" for leg in legislatures)
-    par_numero: dict[int, set[str]] = defaultdict(set)
+    par_numero: dict[tuple[int, int], set[str]] = defaultdict(set)
     for brut in documents:
         doc = brut.get("document") or brut
         ref = doc.get("dossierRef") or ""
@@ -257,9 +270,9 @@ def construire_index_numeros(
             continue
         m = _RE_NUMERO_DOC.search(doc.get("uid") or "")
         if m and int(m.group(1)) in legislatures:
-            par_numero[int(m.group(2))].add(ref)
+            par_numero[(int(m.group(1)), int(m.group(2)))].add(ref)
     par_ref: dict[str, set[int]] = defaultdict(set)
-    for numero, refs in par_numero.items():
-        if len(refs) == 1:
+    for (leg, numero), refs in par_numero.items():
+        if len(refs) == 1 and leg == leg_courante:
             par_ref[next(iter(refs))].add(numero)
     return dict(par_ref)

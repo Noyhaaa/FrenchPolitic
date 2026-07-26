@@ -8,6 +8,7 @@ Journalise chaque exécution (table sync_run) pour l'observabilité (§8).
 """
 from __future__ import annotations
 
+import re
 import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -78,10 +79,12 @@ from app.ai.publics import classifier_publics
 from app.ai.theme import classifier_theme
 from app.schemas import (
     Amendement,
+    ArgumentGroupe,
     DispositifTexte,
     Dossier,
     ExposeMotifs,
     MiseAJourDossier,
+    PositionGroupe,
     QuestionsAmendement,
     QuestionsCitoyennes,
     Scrutin,
@@ -160,24 +163,92 @@ def controles_coherence(scrutin: Scrutin) -> list[str]:
     return anomalies
 
 
-def _vote_ensemble(votes_texte: list[Scrutin]) -> Scrutin | None:
-    """Le vote sur l'ensemble du texte (celui que précèdent les explications de
-    vote), sinon None. Sert à relier le dossier au débat de la séance."""
-    for s in votes_texte:
-        if "ensemble" in fold(s.objet):
-            return s
+# Un texte mono-article se vote « article unique » : ce vote EST le vote sur le
+# texte, il n'y a pas de vote sur l'ensemble derrière.
+_RE_ARTICLE_UNIQUE = re.compile(r"^l'article unique\b")
+# Le texte cité directement, sans « l'ensemble de » : c'est le cas des
+# résolutions (art. 34-1) et de quelques projets d'approbation d'accord.
+_RE_TEXTE_DIRECT = re.compile(r"^l[ae] (?:proposition|projet) de (?:loi|resolution)\b")
+# Motions qui closent l'examen d'un texte (rejet préalable, référendaire,
+# ajournement) : leur débat est un vrai moment de positions de groupe.
+_RE_MOTION = re.compile(r"^la motion\b")
+
+
+def _vote_conclusif(votes_texte: list[Scrutin]) -> Scrutin | None:
+    """Le vote qui **conclut** l'examen du texte, ancre du désaccord (Q2).
+
+    C'est ce vote-là que précèdent les explications de vote, et c'est de LUI que
+    viennent les positions de groupe affichées. Ordre de priorité — le premier
+    critère satisfait gagne :
+
+    1. le vote sur l'**ensemble** ;
+    2. le vote sur l'**article unique** (texte mono-article) ;
+    3. le vote sur le **texte cité directement** (résolution, approbation d'accord) ;
+    4. le vote **procédural** (motion de censure, déclaration de politique générale) ;
+    5. la **motion** de rejet préalable / référendaire / d'ajournement.
+
+    Jamais un vote d'article numéroté : le débat sur l'article 27 du budget n'est
+    pas une prise de position sur le texte. Un dossier qui n'a que de tels votes
+    (ou que des amendements, déjà filtrés en amont) n'a donc pas d'ancre et
+    restera sans désaccord (§2.5 : on ne fabrique rien).
+    """
+    criteres = (
+        lambda o: "ensemble" in o,
+        lambda o: _RE_ARTICLE_UNIQUE.match(o) is not None,
+        lambda o: _RE_TEXTE_DIRECT.match(o) is not None,
+        lambda o: est_texte_procedural(o),
+        lambda o: _RE_MOTION.match(o) is not None,
+    )
+    plies = [(s, fold(s.objet)) for s in votes_texte]
+    for critere in criteres:
+        for scrutin, objet in plies:
+            if critere(objet):
+                return scrutin
     return None
 
 
-def _vote_ancre_procedural(votes_texte: list[Scrutin]) -> Scrutin | None:
-    """Ancre de désaccord pour un texte procédural (motion de censure, déclaration
-    de politique générale) : ces votes n'ont pas d'« ensemble » mais ont un vrai
-    débat avec explications de vote. On ne l'utilise QUE pour ces textes — pas pour
-    un dossier amendements-seuls, où l'on ne fabrique pas de désaccord (§2.5)."""
-    for s in votes_texte:
-        if est_texte_procedural(s.objet):
-            return s
-    return None
+def _position_documentee(position: PositionGroupe) -> bool:
+    """Le groupe a-t-il un vote **exprimé** sur ce scrutin ?
+
+    ⚠️ Sur une **motion de censure**, la Constitution (art. 49) ne fait recenser
+    que les votes FAVORABLES : l'open data porte alors `positionMajoritaire =
+    « pour »` pour TOUS les groupes, y compris ceux dont aucun député n'a voté
+    (décompte 0/0/0). S'y fier reviendrait à afficher « Pour » en face de groupes
+    qui combattaient la motion — c'est le cas réel qui a motivé ce contrôle.
+
+    On ne retient donc une position que si la source la documente par au moins
+    une voix (§2.5). Un groupe sans vote exprimé est simplement absent du
+    désaccord, comme un groupe dont la paraphrase a été rejetée.
+    """
+    return (position.pour + position.contre + position.abstention) > 0
+
+
+def _positions_documentees(
+    arguments: list[ArgumentGroupe], ancre: Scrutin
+) -> list[ArgumentGroupe]:
+    """Réaligne les `sens` d'un désaccord sur le scrutin d'ancrage courant.
+
+    Le sens est une **donnée du scrutin**, jamais une sortie de modèle : on le
+    recompose à chaque run (comme Q3) plutôt que de faire confiance à ce qui est
+    en base — un désaccord stocké avant ce contrôle porte des positions que la
+    source ne documente pas. Groupe sans vote exprimé → argument retiré (§2.5).
+    """
+    par_nom = {
+        p.groupe_nom: p for p in ancre.positions_groupes if _position_documentee(p)
+    }
+    retenus: list[ArgumentGroupe] = []
+    for a in arguments:
+        pos = par_nom.get(a.groupe)
+        if pos is None:
+            continue
+        retenus.append(
+            ArgumentGroupe(
+                groupe=a.groupe,
+                sens=pos.position_majoritaire,
+                argument=a.argument,
+            )
+        )
+    return retenus
 
 
 def _dedupe_sources(sources: list[SourceOfficielle]) -> list[SourceOfficielle]:
@@ -751,16 +822,20 @@ class SyncJob:
     ) -> bool:
         """Renseigne Q2 (« principal désaccord ») depuis les débats de la séance.
 
-        Relie le vote (sur l'ensemble, ou celui de la motion pour un texte
-        procédural) au compte rendu (par numéro de texte, sinon date + titre) puis
-        joint, PAR GROUPE, ses prises de parole aux positions du scrutin : le SENS
-        (pour/contre) vient du scrutin, l'ARGUMENT est paraphrasé par le LLM et
-        validé. Source des arguments : les **explications de vote** formelles si
-        présentes, sinon **en repli** la **discussion générale** (mêmes garde-fous,
-        §7.4). Renvoie True si au moins un argument a été produit."""
+        Relie le **vote conclusif** du texte (`_vote_conclusif`) au compte rendu
+        (par numéro de texte, sinon date + titre) puis joint, PAR GROUPE, ses
+        prises de parole aux positions du scrutin : le SENS (pour/contre) vient du
+        scrutin, l'ARGUMENT est paraphrasé par le LLM et validé. Source des
+        arguments : les **explications de vote** formelles si présentes, sinon
+        **en repli** la **discussion générale** (mêmes garde-fous, §7.4).
+
+        L'objet du vote d'ancrage est conservé (`desaccord_objet`) : les positions
+        affichées sont celles exprimées SUR CE VOTE, et l'app doit pouvoir le dire
+        — « pour » sur une motion de rejet préalable veut dire « pour le rejet du
+        texte ». Renvoie True si au moins un argument a été produit."""
         if self._llm is None or self._index_debats is None:
             return False
-        ancre = _vote_ensemble(votes_texte) or _vote_ancre_procedural(votes_texte)
+        ancre = _vote_conclusif(votes_texte)
         if ancre is None:
             return False
         debat = self._index_debats.pour_vote(
@@ -790,7 +865,7 @@ class SyncJob:
             if groupe_id in vus:
                 continue
             pos = positions.get(groupe_id)
-            if pos is None:  # groupe sans position enregistrée sur ce vote
+            if pos is None or not _position_documentee(pos):
                 continue
             vus.add(groupe_id)
             interventions.append((groupe_nom, pos.position_majoritaire, pdp.texte))
@@ -798,6 +873,7 @@ class SyncJob:
         if not arguments:
             return False
         questions.desaccord = arguments
+        questions.desaccord_objet = ancre.objet
         questions.desaccord_source = SourceOfficielle(
             type="texte",
             libelle="Compte rendu de la séance (Assemblée nationale)",
@@ -849,9 +925,20 @@ class SyncJob:
             report.changements_factuels += 1
 
         # Q2 « désaccord » : on la (re)génère si elle n'est pas déjà en base.
+        # Les ARGUMENTS déjà validés sont réutilisés tels quels (pas de réappel au
+        # modèle), mais leur SENS et leur ancre sont recomposés depuis le scrutin
+        # à chaque run — ce sont des faits, pas des sorties de modèle.
         if prev is not None and prev.desaccord:
-            questions.desaccord = prev.desaccord
-            questions.desaccord_source = prev.desaccord_source
+            ancre = _vote_conclusif(votes_texte)
+            arguments = (
+                _positions_documentees(prev.desaccord, ancre)
+                if ancre is not None
+                else []
+            )
+            if arguments:
+                questions.desaccord = arguments
+                questions.desaccord_objet = ancre.objet
+                questions.desaccord_source = prev.desaccord_source
         elif await self._construire_desaccord(
             dossier, dossier_ref, votes_texte, questions, report
         ):
@@ -1011,8 +1098,11 @@ class SyncJob:
         # (PDF officiel) au niveau du dossier — bloc attribué, option (a).
         index_textes = construire_index_textes(documents, legislatures)
         # Index dossierRef → numéros de documents, pour la liaison certaine
-        # débat ↔ dossier (le CR cite « (n° X) »).
-        self._numeros_par_ref = construire_index_numeros(documents, legislatures)
+        # débat ↔ dossier (le CR cite « (n° X) »). Les numéros exposés sont ceux
+        # de la législature courante — la seule dont on lit les comptes rendus.
+        self._numeros_par_ref = construire_index_numeros(
+            documents, legislatures, courante=self._client.legislature
+        )
 
         # 2) Scrutins → parsing (avec nominatif) → regroupement par dossier.
         bruts = await self._client.download_scrutins(limit=limit)
@@ -1024,9 +1114,15 @@ class SyncJob:
             str((b.get("scrutin") or {}).get("uid")): b for b in bruts
         }
         par_dossier: dict[str, list[ScrutinParse]] = {}
+        # Les clés de `_groupe_par_acteur` sont exactement les députés du
+        # référentiel servi par l'API : ce sont eux, et eux seuls, dont la fiche
+        # est atteignable depuis un nom de votant (§5.2).
+        deputes_connus = frozenset(self._groupe_par_acteur)
         for brut in bruts:
             try:
-                parse = parse_scrutin(brut, resolver, acteurs, reconciliation)
+                parse = parse_scrutin(
+                    brut, resolver, acteurs, reconciliation, deputes_connus
+                )
             except (KeyError, TypeError) as exc:
                 report.anomalies.append(f"parsing échoué: {exc}")
                 continue

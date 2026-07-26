@@ -2,7 +2,7 @@ import { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { colors, radius, spacing, typography } from '@/theme';
 import type { ArgumentGroupe, PositionVote, QuestionsCitoyennes } from '@/types';
-import { positionLabel } from '@/utils/format';
+import { libelleScrutin, positionLabel } from '@/utils/format';
 import { SourceLink } from './SourceLink';
 
 interface Props {
@@ -65,9 +65,19 @@ function QARow({
  * + LIBELLÉ (jamais la couleur seule, §8/RGAA), nom du groupe, puis l'argument
  * qu'il a lui-même donné (§7.4), avec lien vers le compte rendu (§7.5).
  * Réponse absente → « Information non disponible » (§2.5).
+ *
+ * Les positions du désaccord sont celles exprimées sur UN vote précis, nommé
+ * au-dessus d'elles : « pour » sur une motion de rejet préalable veut dire
+ * « pour le rejet du texte », l'inverse de ce que le seul mot laisserait croire
+ * (§7.4). Vote non reconnu par `libelleScrutin` → pas de ligne (§2.5), plutôt
+ * que de recopier l'objet officiel entier.
  */
 export function QuestionsCard({ questions }: Props) {
   const desaccord = questions.desaccord;
+  const objet = questions.desaccordObjet;
+  const voteAncre = objet ? libelleScrutin(objet) : undefined;
+  const libelleAncre =
+    voteAncre && voteAncre.titre !== objet ? voteAncre.titre : undefined;
   return (
     <View style={styles.card}>
       <Text style={[typography.overline, styles.title]}>
@@ -81,6 +91,11 @@ export function QuestionsCard({ questions }: Props) {
       <QARow n={2} question="Quel était le principal désaccord ?">
         {desaccord && desaccord.length > 0 ? (
           <>
+            {libelleAncre ? (
+              <Text style={styles.ancre}>
+                Positions exprimées lors du vote : {libelleAncre}
+              </Text>
+            ) : null}
             <View style={styles.groupes}>
               {desaccord.map((a: ArgumentGroupe, i) => (
                 <View key={`${a.groupe}-${i}`} style={styles.groupe}>
@@ -192,6 +207,12 @@ const styles = StyleSheet.create({
   },
   indispo: {
     fontStyle: 'italic',
+  },
+  ancre: {
+    marginTop: spacing.xs,
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.textTertiary,
   },
   groupes: {
     marginTop: spacing.sm,

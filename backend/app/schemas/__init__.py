@@ -28,6 +28,7 @@ from app.schemas.scrutin import (
     ScrutinResume,
     SectionTheme,
     SourceOfficielle,
+    Votant,
 )
 
 __all__ = [
@@ -58,4 +59,5 @@ __all__ = [
     "ScrutinResume",
     "SectionTheme",
     "SourceOfficielle",
+    "Votant",
 ]

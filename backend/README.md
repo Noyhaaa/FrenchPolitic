@@ -249,6 +249,15 @@ tests/               Tests API + garde-fous + génération + ingestion (+ repo p
   idempotent (dossiers + détail des votes), journal `sync_run`.
   Le nominatif n'existe pas dans le seed (on n'invente pas des noms, §2.5) :
   il apparaît sur les données réellement ingérées.
+  Chaque votant (`Votant`) porte son `nom` et, **uniquement s'il figure au
+  référentiel `depute`**, son `depute_id` — c'est lui qui rend le nom cliquable
+  vers la fiche du député, et un lien ne doit jamais mener à un 404. Mesuré sur
+  la base de dev : 645 votants distincts, dont **577 siègent encore** (les 68
+  autres, mandats terminés en cours de législature, gardent leur nom sans lien).
+  Un acteur **absent de l'annuaire AMO** est en revanche **retiré de la liste** :
+  sa référence machine (« PA795808 ») n'est pas un nom, et l'afficher comme tel
+  trompait le lecteur (17 638 occurrences avant correction). Le décompte affiché
+  reste celui, officiel, du groupe — l'écart est donc visible, pas masqué.
 - **Députés** (§5.2) : référentiel (`depute`) construit depuis l'archive AMO —
   nom, groupe (mandat GP en cours, couleur partagée avec les ventilations),
   circonscription (« Pas-de-Calais, 5ᵉ circ. »), début de mandat — et **votes
@@ -338,23 +347,51 @@ tests/               Tests API + garde-fous + génération + ingestion (+ repo p
   Quel est le résultat du vote ? · Qu'est-ce que ça change concrètement ? » (§2.2).
 - **Résultat (Q3)** : composé de façon **déterministe** depuis le vote décisif
   (recalculé à chaque run). **Désaccord (Q2)** : issu des **comptes rendus des
-  débats** (`debats.py`, archive « SyceronBrut ») — la section « Explications de
+  débats** (`debats.py`, archive « SyceronBrut »). Trois viviers de prises de
+  position, par ordre de préférence (`_VIVIERS`) : la section « Explications de
   vote » (variantes « Explication de vote », « … communes » comprises), où
-  chaque groupe explique lui-même sa position, est reliée au dossier d'abord par
-  le **numéro de texte** cité au CR (« (n° 525) »), joint aux numéros de tous
+  chaque groupe explique lui-même sa position ; à défaut la **discussion
+  générale** ; à défaut seulement les débats **sans section dédiée** — motion de
+  rejet préalable (`MOTION_RP_1_1`) et paroles placées directement sous le titre
+  de discussion (motion de censure, déclaration au titre de l'article 50-1).
+  Les morceaux **consécutifs** d'un même orateur sont recollés (une parole
+  hachée par les interruptions ne doit pas être réduite à son premier fragment)
+  et la **présidence de séance est écartée** par sa fonction : elle est
+  elle-même députée, donc porteuse d'un `acteurRef`, et ses annonces d'ordre du
+  jour seraient sinon attribuées à son groupe (§7.4).
+
+  Le débat est relié au **vote conclusif** du dossier (`_vote_conclusif` :
+  ensemble > article unique > texte cité directement > vote procédural > motion ;
+  **jamais** un vote d'article numéroté — le débat sur l'article 27 du budget
+  n'est pas une position sur le texte). La liaison se fait d'abord par le
+  **numéro de texte** cité au CR (« (n° 525) »), joint aux numéros de tous
   les documents du dossier (`construire_index_numeros` — robuste aux
   renumérotations de la navette, et au **vote solennel** tenu quelques jours
-  après le débat, fenêtre 14 j) ; à défaut par **date de séance + recoupement
-  du titre** (coefficient de recouvrement — labels courts du CR). Un candidat
+  après le débat, fenêtre 14 j). ⚠️ La série des numéros **redémarre à chaque
+  législature** : le garde-fou « un numéro → un seul dossier » s'applique donc à
+  `(législature, numéro)`, et seuls les numéros de la législature **courante**
+  sont exposés (les CR ingérés sont les siens). Sans cette clé, la collision
+  entre le n° 959 de la 16e et celui de la 17e faisait jeter les deux dossiers —
+  2 540 numéros sur 3 026 perdus, couverture 54/237 dossiers officiels.
+  À défaut de numéro : **date de séance + recoupement du titre** (coefficient de
+  recouvrement — labels courts du CR). Un candidat
   unique le jour J **ne suffit jamais** sans recoupement : plusieurs textes
   sont votés le même jour et l'archive ne capture pas toutes les séances
   (leçon d'un mauvais rattachement constaté en réel) ; cas ambigus écartés,
-  §2.5. Chaque
+  §2.5. En revanche un même texte **rouvert plusieurs fois le même jour**
+  (reprise de séance) est **fusionné** en un seul débat avant l'index
+  (`fusionner_meme_texte`) : sans cela il se présentait comme deux candidats
+  quasi identiques et la liaison était refusée pour ambiguïté — 31 faux positifs
+  mesurés, zéro vraie collision. Chaque
   explication est **paraphrasée en une phrase par le LLM et validée**
   (`generer_desaccord` → `valider_reponse`), **attribuée à son groupe** (§7.4,
   même gabarit pour tous) ; le **sens pour/contre vient du scrutin**, jamais du
   LLM. Aucune synthèse éditoriale (« qui a raison ») : on juxtapose les positions
   que les groupes formulent eux-mêmes. Source = le compte rendu officiel (§7.5).
+  L'**objet du vote d'ancrage** est conservé (`desaccord_objet`) et affiché
+  au-dessus des positions : « pour » sur une motion de rejet préalable veut dire
+  « pour le rejet du texte », l'inverse de ce que le seul mot laisserait croire
+  (§7.4). Vote non reconnu par `libelleScrutin` côté app → ligne masquée (§2.5).
   **Pourquoi (Q1)** : généré depuis l'**exposé des motifs** (+ titre).
   **Changement (Q4)** : **deux sources, dans cet ordre** — le **dispositif
   officiel** du texte quand il existe (c'est un **fait** : réponse *sans*

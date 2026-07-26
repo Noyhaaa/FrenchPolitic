@@ -61,13 +61,26 @@ export interface PositionGroupe {
   /** Taux de cohésion 0..1, optionnel si non disponible. */
   cohesion?: number;
   /**
-   * Vote nominatif (§5.2, scrutins publics uniquement) : noms des députés du
-   * groupe par position. Absent si la donnée n'est pas fournie par la source
+   * Vote nominatif (§5.2, scrutins publics uniquement) : les députés du groupe
+   * par position. Absent si la donnée n'est pas fournie par la source
    * (§2.5 : on n'invente pas — le bloc est alors masqué).
    */
-  nomsPour?: string[];
-  nomsContre?: string[];
-  nomsAbstention?: string[];
+  votantsPour?: Votant[];
+  votantsContre?: Votant[];
+  votantsAbstention?: Votant[];
+}
+
+/**
+ * Un député nommé dans la ventilation nominative d'un scrutin (§5.2).
+ *
+ * `deputeId` n'est présent que si le député figure au référentiel servi par
+ * l'API : c'est lui, et lui seul, qui autorise à ouvrir la fiche du député
+ * depuis son vote — un lien ne doit jamais mener à un 404. Un ancien député
+ * garde donc son nom, sans lien.
+ */
+export interface Votant {
+  nom: string;
+  deputeId?: string;
 }
 
 /**
@@ -143,6 +156,13 @@ export interface ArgumentGroupe {
 export interface QuestionsCitoyennes {
   pourquoi?: string;
   desaccord?: ArgumentGroupe[];
+  /**
+   * Objet officiel du vote d'où viennent les `sens` de `desaccord` — le vote qui
+   * conclut le texte. À afficher AVEC les positions : « pour » sur une motion de
+   * rejet préalable veut dire « pour le rejet du texte » (§7.4). Absent → ligne
+   * masquée (§2.5).
+   */
+  desaccordObjet?: string;
   desaccordSource?: SourceOfficielle;
   resultat?: string;
   changement?: string;

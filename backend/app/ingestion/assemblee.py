@@ -41,6 +41,7 @@ from app.schemas import (
     ResultatGlobal,
     Scrutin,
     SourceOfficielle,
+    Votant,
 )
 
 SCRUTINS_URL = (
@@ -274,25 +275,37 @@ def dossier_source(legislature: str, dossier_ref: str) -> SourceOfficielle:
     )
 
 
-def _noms_votants(
-    bloc: object, acteurs: dict[str, str] | None
-) -> list[str] | None:
-    """Noms des votants d'un bloc `decompteNominatif` (pours/contres/abstentions).
+def _votants(
+    bloc: object,
+    acteurs: dict[str, str] | None,
+    deputes_connus: frozenset[str] | None = None,
+) -> list[Votant] | None:
+    """Votants d'un bloc `decompteNominatif` (pours/contres/abstentions).
 
     None si l'annuaire ou le bloc manque (§2.5 : le détail est alors masqué,
-    jamais inventé). Acteur inconnu de l'annuaire → on garde sa référence PA…
-    (factuel) plutôt que d'inventer un nom.
+    jamais inventé). Un acteur **absent de l'annuaire** est **omis** : sa
+    référence machine (« PA795808 ») n'est pas un nom, et l'afficher à la place
+    d'un nom trompe le lecteur (§2.5, §8). Le décompte officiel du groupe reste
+    affiché à côté, si bien que l'écart est visible plutôt que masqué.
+
+    `depute_id` n'est posé que pour les acteurs présents dans `deputes_connus`
+    (le référentiel servi par l'API) : c'est ce qui rend le nom cliquable côté
+    app, et un lien ne doit jamais mener à un 404. Un ancien député garde donc
+    son nom sans identifiant.
     """
     if acteurs is None or not isinstance(bloc, dict):
         return None
-    noms: list[str] = []
+    connus = deputes_connus or frozenset()
+    votants: list[Votant] = []
     for votant in as_list(bloc.get("votant")):
         if not isinstance(votant, dict):
             continue
         ref = votant.get("acteurRef") or ""
-        if ref:
-            noms.append(acteurs.get(ref, ref))
-    return noms or None
+        nom = acteurs.get(ref)
+        if not ref or not nom:
+            continue
+        votants.append(Votant(nom=nom, depute_id=ref if ref in connus else None))
+    return votants or None
 
 
 def parse_scrutin(
@@ -300,10 +313,13 @@ def parse_scrutin(
     resolver: GroupResolver,
     acteurs: dict[str, str] | None = None,
     reconciliation: Reconciliation | None = None,
+    deputes_connus: frozenset[str] | None = None,
 ) -> ScrutinParse:
     """Convertit un scrutin open data en `ScrutinParse` (fonction pure).
 
     `acteurs` (annuaire PA… → nom) active l'extraction du vote nominatif.
+    `deputes_connus` (identifiants du référentiel des députés) décide quels
+    votants portent un `depute_id`, donc lesquels sont cliquables dans l'app.
     `reconciliation` (titre ↔ dossierRef) permet, quand le scrutin n'a pas de
     dossierRef, de retrouver son vrai dossier via le titre cité dans l'objet.
     """
@@ -381,9 +397,11 @@ def parse_scrutin(
                 contre=to_int(dv.get("contre")),
                 abstention=to_int(dv.get("abstentions")),
                 cohesion=None,
-                noms_pour=_noms_votants(dn.get("pours"), acteurs),
-                noms_contre=_noms_votants(dn.get("contres"), acteurs),
-                noms_abstention=_noms_votants(dn.get("abstentions"), acteurs),
+                votants_pour=_votants(dn.get("pours"), acteurs, deputes_connus),
+                votants_contre=_votants(dn.get("contres"), acteurs, deputes_connus),
+                votants_abstention=_votants(
+                    dn.get("abstentions"), acteurs, deputes_connus
+                ),
             )
         )
 

@@ -119,18 +119,48 @@ def test_parse_nominatif_avec_annuaire():
     s = parse_scrutin(SCRUTIN, resolver, acteurs).scrutin
 
     rn, lfi = s.positions_groupes
-    assert rn.noms_contre == ["Jeanne Martin"]  # votant unique sérialisé en objet
-    assert rn.noms_pour is None  # bloc absent → masqué, pas inventé (§2.5)
-    # Acteur absent de l'annuaire → on garde sa référence (factuel).
-    assert lfi.noms_pour == ["Paul Durand", "PA_INCONNU"]
-    assert lfi.noms_abstention == ["Luc Bernard"]
+    # Votant unique sérialisé en objet (cas réel de l'open data).
+    assert [v.nom for v in rn.votants_contre] == ["Jeanne Martin"]
+    assert rn.votants_pour is None  # bloc absent → masqué, pas inventé (§2.5)
+    # Acteur absent de l'annuaire → RETIRÉ : sa référence machine (« PA_INCONNU »)
+    # n'est pas un nom, l'afficher tromperait le lecteur (§2.5, §8).
+    assert [v.nom for v in lfi.votants_pour] == ["Paul Durand"]
+    assert [v.nom for v in lfi.votants_abstention] == ["Luc Bernard"]
+
+
+def test_parse_nominatif_identifiant_reserve_aux_deputes_en_exercice():
+    # `depute_id` autorise l'app à ouvrir la fiche : il n'est posé que pour les
+    # acteurs du référentiel servi par l'API, jamais pour un ancien député —
+    # sinon le lien mènerait à un 404.
+    resolver = build_resolver_from_organes(ORGANES)
+    acteurs = build_acteurs_from_amo(ACTEURS)
+    s = parse_scrutin(
+        SCRUTIN, resolver, acteurs, deputes_connus=frozenset({"PA200"})
+    ).scrutin
+
+    rn, lfi = s.positions_groupes
+    assert lfi.votants_pour[0].depute_id == "PA200"  # siège aujourd'hui
+    assert rn.votants_contre[0].nom == "Jeanne Martin"
+    assert rn.votants_contre[0].depute_id is None  # nommée, mais plus en exercice
+
+
+def test_parse_nominatif_sans_referentiel_aucun_identifiant():
+    resolver = build_resolver_from_organes(ORGANES)
+    acteurs = build_acteurs_from_amo(ACTEURS)
+    s = parse_scrutin(SCRUTIN, resolver, acteurs).scrutin
+    assert all(
+        v.depute_id is None
+        for g in s.positions_groupes
+        for v in (g.votants_pour or []) + (g.votants_contre or [])
+    )
 
 
 def test_parse_sans_annuaire_pas_de_noms():
     resolver = build_resolver_from_organes(ORGANES)
     s = parse_scrutin(SCRUTIN, resolver).scrutin
     assert all(
-        g.noms_pour is None and g.noms_contre is None for g in s.positions_groupes
+        g.votants_pour is None and g.votants_contre is None
+        for g in s.positions_groupes
     )
 
 

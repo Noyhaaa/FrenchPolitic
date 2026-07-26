@@ -93,7 +93,14 @@ Six écrans du cœur de valeur :
    majoritairement voté pour / contre / se sont abstenus — factuel, sourcé par
    le scrutin, jamais un jugement §7.4, masquée si unanimité), la ventilation
    détaillée par groupe et les **noms des votants** dépliables groupe par
-   groupe quand le nominatif est disponible (§5.2).
+   groupe quand le nominatif est disponible (§5.2). Chaque nom **ouvre la fiche
+   du député** (souligné, jamais la couleur seule §8/RGAA) — mais **seulement**
+   si le backend a joint son `deputeId`, c'est-à-dire s'il siège encore : un
+   ancien député garde son nom sans lien, jamais de cul-de-sac vers un 404. Le
+   décompte affiché en tête de chaque position est le **chiffre officiel du
+   groupe**, pas la longueur de la liste : un votant que la source ne sait pas
+   nommer en est absent (on n'affiche jamais une référence machine `PA…` en
+   guise de nom, §2.5).
    — **Vote d'amendement / sous-amendement** : PAS de section « Vote par
    groupe » — après le résultat, la carte **« L'amendement en 4 questions »**
    (`QuestionsAmendementCard`, `Scrutin.questions`) : « Pourquoi ? » (exposé
@@ -145,7 +152,9 @@ et ceux des **députés** (`/deputes`, `/deputes/{id}`, `/deputes/{id}/votes`
 Le détail d'un dossier reste
 **léger** (liste de `ScrutinResume`) ; le détail complet d'un vote — groupes et
 **vote nominatif** (noms des députés, résolus via l'annuaire acteurs de l'archive
-AMO) — vit dans la table `scrutin` et est servi à la demande. Deux backends de
+AMO, chacun accompagné de son `deputeId` s'il siège encore — c'est le lien du
+vote vers la fiche du député) — vit dans la table `scrutin` et est servi à la
+demande. Deux backends de
 données commutables via
 `REPOSITORY_BACKEND` : `memory` (données seed, défaut) ou `postgres` (données
 ingérées). En dev, `backend/.env` fixe `REPOSITORY_BACKEND=postgres` + `DATABASE_URL`
@@ -237,15 +246,28 @@ d'**ajouter** un jugement, pas de reprendre les mots de la loi (cas réel :
 « contenus dangereux », écrit dans l'article unique d'une résolution) ; le **résultat** (Q3) est
 composé **déterministiquement** depuis le vote décisif ; le **désaccord** (Q2)
 vient des **comptes rendus des débats** (archive « SyceronBrut »,
-`app/ingestion/debats.py`) : la section **« Explications de vote »** (chaque
-groupe explique lui-même sa position) est reliée au dossier par le **numéro de
-texte** cité au CR (joint aux numéros de tous les documents du dossier — robuste
-à la navette et au vote solennel à J+n), sinon par **date de séance +
-recoupement du titre** avec le vote sur l'ensemble — un candidat unique le
-jour J ne suffit **jamais** sans recoupement (ambiguïtés écartées, §2.5),
-puis chaque explication est **paraphrasée en une phrase, validée et attribuée à
+`app/ingestion/debats.py`), par **trois viviers de prises de position** dans cet
+ordre : la section **« Explications de vote »** (chaque groupe explique lui-même
+sa position), sinon la **discussion générale**, sinon seulement les débats **sans
+section dédiée** — motion de rejet préalable et paroles placées directement sous
+le titre de discussion (motion de censure, déclaration art. 50-1). Les morceaux
+consécutifs d'un même orateur sont **recollés** et la **présidence de séance est
+écartée** (elle est députée, donc résoluble en groupe : ses annonces d'ordre du
+jour ne sont pas une position, §7.4). Le débat est relié au **vote conclusif** du
+dossier (`_vote_conclusif` : ensemble > article unique > texte cité directement >
+vote procédural > motion ; **jamais** un vote d'article numéroté) par le **numéro
+de texte** cité au CR — joint aux numéros de tous les documents du dossier,
+dédoublonnés par **(législature, numéro)** car la série redémarre à chaque
+législature, et robuste à la navette comme au vote solennel à J+n —, sinon par
+**date de séance + recoupement du titre** ; un candidat unique le jour J ne
+suffit **jamais** sans recoupement (ambiguïtés écartées, §2.5), mais un même
+texte rouvert plusieurs fois le même jour (reprise de séance) est **fusionné**
+avant l'index plutôt que traité comme deux candidats ambigus. Chaque explication
+est ensuite **paraphrasée en une phrase, validée et attribuée à
 son groupe** (§7.4) — le **sens pour/contre vient du scrutin**, jamais du LLM, et
-jamais de synthèse éditoriale (« qui a raison »). ⚠️ On **ne génère toujours PAS** le
+jamais de synthèse éditoriale (« qui a raison ») ; l'**objet du vote d'ancrage**
+accompagne les positions (`desaccordObjet`), sans quoi « pour » sur une motion de
+rejet se lirait comme « pour le texte ». ⚠️ On **ne génère toujours PAS** le
 résumé/prose neutre par LLM (mistral 7B distordait les faits invisiblement ; seul
 ce qui est attribuable à une source unique ET vérifiable déterministiquement
 passe par le modèle) — le **gabarit déterministe reste seul maître du résumé**.
@@ -412,9 +434,11 @@ fiche §7.5), `titreClair` (titre d'affichage raccourci) et `accroche?`
 texte / amendement / sous-amendement se fait à l'ingestion (`est_amendement`,
 `est_sous_amendement`, `numero_amendement_parent` sur l'objet du scrutin).
 Un `Scrutin` est **vote-niveau** : `dossierId`, `objet` (ce sur quoi on a voté),
-`statut`, `scrutinPublic`, `resultat`, `positionsGroupes` (avec `nomsPour` /
-`nomsContre` / `nomsAbstention` optionnels — le **nominatif**, absent = masqué,
-§2.5), `sousAmendements?` (pour le vote d'un amendement : ses sous-amendements),
+`statut`, `scrutinPublic`, `resultat`, `positionsGroupes` (avec `votantsPour` /
+`votantsContre` / `votantsAbstention` optionnels — le **nominatif**, absent =
+masqué, §2.5 ; chaque `Votant` porte son `nom` et, **uniquement s'il siège
+encore**, son `deputeId`, seule clé qui rend le nom cliquable vers sa fiche),
+`sousAmendements?` (pour le vote d'un amendement : ses sous-amendements),
 `cible?` / `dispositif?` / `exposeSommaire?` (pour un vote d'amendement : son
 contenu enrichi, cf. `amendements.py` — miroir des mêmes champs sur `Amendement`),
 `questions?` (`QuestionsAmendement` : les questions citoyennes du vote

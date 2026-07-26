@@ -120,10 +120,126 @@ def test_extraire_debats_discussion_generale_en_repli():
     assert d.explications == []
     # Orateur résolu par acteurRef (le CR n'écrit pas le groupe dans le nom).
     refs = [iv.acteur_ref for iv in d.interventions_generales]
-    assert refs == ["PA795808", "PA795100"]  # présidente exclue (pas d'id),
-    # 2e prise de Sebaihi dédupliquée, orateur « hors section » exclu (point suivant).
+    # Présidente exclue (pas d'id) ; orateur « hors section » exclu (point suivant).
+    assert refs == ["PA795808", "PA795100"]
     assert d.interventions_generales[0].orateur == "Mme Sabrina Sebaihi"
     assert d.interventions_generales[0].groupe == ""
+    # Les deux prises consécutives de Sebaihi forment UNE intervention recollée :
+    # une parole hachée par les interruptions ne doit pas être réduite à son
+    # premier fragment.
+    assert "garantir la reconstruction" in d.interventions_generales[0].texte
+    assert "Je reprends la parole" in d.interventions_generales[0].texte
+
+
+def test_extraire_debats_reprise_de_parole_non_consecutive_ignoree():
+    # Un orateur qui reprend la parole APRÈS un autre n'est compté qu'une fois :
+    # un seul argument par groupe (§7.4).
+    xml = _XML_DG.replace(
+        "<texte>Je reprends la parole mais cela ne doit pas créer un second argument pour mon groupe.</texte>",
+        "<texte>Ce paragraphe appartient à un autre orateur intercalé dans la discussion.</texte>",
+    ).replace(
+        "<nom>Mme Sabrina Sebaihi</nom><id>795808</id></orateur></orateurs>\n"
+        "      <texte>Ce paragraphe appartient",
+        "<nom>M. Intercalé</nom><id>795999</id></orateur></orateurs>\n"
+        "      <texte>Ce paragraphe appartient",
+    )
+    # Sebaihi reparle plus loin dans la séance (après M. Intercalé) : ignorée.
+    xml = xml.replace(
+        '<point code_grammaire="DISC_ARTICLES_1_2">',
+        '<paragraphe code_grammaire="PAROLE_GENERIQUE">'
+        '<orateurs><orateur><nom>Mme Sabrina Sebaihi</nom><id>795808</id></orateur></orateurs>'
+        '<texte>Je redemande la parole plus tard, cela ne doit pas créer un second argument.</texte>'
+        '</paragraphe>'
+        '<point code_grammaire="DISC_ARTICLES_1_2">',
+    )
+    d = extraire_debats(xml)[0]
+    refs = [iv.acteur_ref for iv in d.interventions_generales]
+    assert refs == ["PA795808", "PA795999", "PA795100"]
+
+
+# --- Débats sans section dédiée (motion de censure, motion de rejet préalable) ---
+
+_XML_CENSURE = """<?xml version="1.0" encoding="UTF-8"?>
+<compteRendu xmlns="http://schemas.assemblee-nationale.fr/referentiel">
+  <uid>CRSANR5L17S2025O1N092</uid>
+  <metadonnees><dateSeanceJour>mercredi 05 février 2025</dateSeanceJour></metadonnees>
+  <contenu>
+    <point code_grammaire="TITRE_TEXTE_DISCUSSION"><texte>Motion de censure</texte></point>
+    <paragraphe code_grammaire="ODJ_APPEL_DISCUSSION">
+      <orateurs><orateur><nom>Mme la présidente</nom></orateur></orateurs>
+      <texte>L'ordre du jour appelle la discussion et le vote sur la motion de censure.</texte>
+    </paragraphe>
+    <paragraphe code_grammaire="PAROLE_GENERIQUE">
+      <orateurs><orateur><nom>Mme Aurélie Trouvé</nom><id>795200</id></orateur></orateurs>
+      <texte>Ce gouvernement mène une politique budgétaire que nous jugeons intenable pour les services publics.</texte>
+    </paragraphe>
+    <paragraphe code_grammaire="INTERRUPTION_1_10">
+      <orateurs><orateur><nom>M. Thibault Bazin</nom><id>795300</id></orateur></orateurs>
+      <texte>C'est vous qui parlez de ruine ?</texte>
+    </paragraphe>
+    <paragraphe code_grammaire="PAROLE_GENERIQUE">
+      <orateurs><orateur><nom>Mme Aurélie Trouvé</nom><id>795200</id></orateur></orateurs>
+      <texte>Vous serez responsables d'une chute historique des recettes de l'État.</texte>
+    </paragraphe>
+    <point code_grammaire="SCRUTIN_1_10"><texte>Scrutin public</texte></point>
+    <paragraphe code_grammaire="PAROLE_GENERIQUE">
+      <orateurs><orateur><nom>M. Après Vote</nom><id>795400</id></orateur></orateurs>
+      <texte>Cette prise de parole suit le scrutin et ne doit pas être capturée du tout.</texte>
+    </paragraphe>
+  </contenu>
+</compteRendu>
+"""
+
+
+def test_extraire_debats_motion_de_censure_sans_section():
+    # Le CR d'une motion de censure n'ouvre NI « Explications de vote » NI
+    # « Discussion générale » : les paroles sont directement sous le titre.
+    d = extraire_debats(_XML_CENSURE)
+    assert len(d) == 1
+    interventions = d[0].interventions_generales
+    assert [iv.acteur_ref for iv in interventions] == ["PA795200"]
+    # Présidente exclue (paragraphe non PAROLE_GENERIQUE), interruption exclue,
+    # prise de parole d'après le scrutin exclue.
+    texte = interventions[0].texte
+    assert "politique budgétaire" in texte and "chute historique" in texte
+
+
+def test_extraire_debats_motion_de_rejet_prealable():
+    xml = _XML_CENSURE.replace(
+        '<point code_grammaire="TITRE_TEXTE_DISCUSSION"><texte>Motion de censure</texte></point>',
+        '<point code_grammaire="TITRE_TEXTE_DISCUSSION" valeur=" (n[[o]] 1025)">'
+        "<texte>Fermetures abusives de comptes bancaires</texte></point>"
+        '<point code_grammaire="MOTION_RP_1_1"><texte>Motion de rejet préalable</texte></point>',
+    )
+    d = extraire_debats(xml)[0]
+    assert d.numeros == frozenset({1025})
+    assert [iv.acteur_ref for iv in d.interventions_generales] == ["PA795200"]
+
+
+def test_extraire_debats_exclut_la_presidence_meme_avec_un_id():
+    # La présidence de séance est elle-même députée : elle porte un acteurRef et
+    # serait donc résolue en groupe. Ses annonces d'ordre du jour ne sont pas une
+    # prise de position (§7.4) — on l'écarte par sa fonction.
+    xml = _XML_CENSURE.replace(
+        "<nom>Mme Aurélie Trouvé</nom><id>795200</id>",
+        "<nom>Mme la présidente</nom><id>721908</id>",
+    )
+    assert extraire_debats(xml) == []
+
+
+def test_extraire_debats_repli_seulement_en_dernier_recours():
+    # Quand une discussion générale existe, le vivier de repli n'est PAS utilisé.
+    xml = _XML_CENSURE.replace(
+        '<point code_grammaire="SCRUTIN_1_10"><texte>Scrutin public</texte></point>',
+        '<point code_grammaire="DISC_GENERALE_1"><texte>Discussion générale</texte></point>'
+        '<paragraphe code_grammaire="PAROLE_GENERIQUE">'
+        "<orateurs><orateur><nom>M. Orateur DG</nom><id>795500</id></orateur></orateurs>"
+        "<texte>Notre groupe s'exprime ici dans le cadre de la discussion générale.</texte>"
+        "</paragraphe>"
+        '<point code_grammaire="SCRUTIN_1_10"><texte>Scrutin public</texte></point>',
+    )
+    d = extraire_debats(xml)[0]
+    assert [iv.acteur_ref for iv in d.interventions_generales] == ["PA795500"]
 
 
 def test_extraire_debats_explications_et_discussion_generale_coexistent():
@@ -193,12 +309,45 @@ def test_index_liaison_par_numero_vote_solennel_apres_le_debat():
     assert idx.pour_vote("2025-04-30", "l'ensemble…", numeros={1603}) is None
 
 
-def test_index_numero_ambigu_le_meme_jour_refuse():
+def test_index_fusionne_le_meme_texte_discute_deux_fois_le_meme_jour():
+    # Le CR rouvre un titre de discussion à chaque reprise de séance : le même
+    # numéro deux fois le même jour, c'est UN texte, pas deux candidats ambigus.
     idx = IndexDebats([
-        _debat("Première séance", numeros={99}),
-        _debat("Deuxième séance", numeros={99}),
+        DebatTexte(
+            titre="Statut de l'élu local", date="2025-03-06", seance_uid="CR1",
+            numeros=frozenset({99}),
+            explications=[ExplicationVote("RN", "M. X", "Un argument suffisamment long pour être gardé.")],
+        ),
+        DebatTexte(
+            titre="Statut de l'élu local (suite)", date="2025-03-06", seance_uid="CR2",
+            numeros=frozenset({99}),
+            explications=[ExplicationVote("SOC", "Mme Y", "Un autre argument, tout aussi long, du groupe SOC.")],
+        ),
     ])
-    assert idx.pour_vote("2025-03-06", "l'ensemble du texte…", numeros={99}) is None
+    d = idx.pour_vote("2025-03-06", "l'ensemble du texte…", numeros={99})
+    assert d is not None
+    assert [e.groupe for e in d.explications] == ["RN", "SOC"]
+
+
+def test_index_fusion_par_titre_quand_le_cr_ne_porte_pas_de_numero():
+    idx = IndexDebats([
+        _debat("Démarchage téléphonique consenti"),
+        _debat("Démarchage téléphonique consenti"),
+    ])
+    d = idx.pour_vote(
+        "2025-03-06", "l'ensemble de la proposition de loi sur le démarchage"
+    )
+    assert d is not None and d.titre.startswith("Démarchage")
+
+
+def test_index_deux_textes_reellement_differents_restent_ambigus():
+    # La fusion ne masque pas une vraie collision : deux textes distincts le
+    # même jour, aucun ne recoupant nettement l'objet du vote → None (§2.5).
+    idx = IndexDebats([
+        _debat("Report des élections provinciales", numeros={10}),
+        _debat("Simplification du millefeuille territorial", numeros={11}),
+    ])
+    assert idx.pour_vote("2025-03-06", "l'ensemble de la proposition de loi") is None
 
 
 def test_index_depart_par_titre_si_plusieurs_le_meme_jour():

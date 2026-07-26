@@ -7,6 +7,12 @@ JAMAIS une synthèse éditoriale : chaque prise de parole reste **attribuée à 
 groupe** (§7.4), et le sens du vote (pour/contre) vient du **scrutin**, pas du
 débat (donc jamais du LLM).
 
+Tous les débats n'ont pas de section « Explications de vote » : on retombe alors
+sur la **discussion générale**, puis en dernier ressort sur les débats sans
+section dédiée — motion de rejet préalable (`MOTION_RP_1_1`) et prises de parole
+placées directement sous le titre de discussion (motion de censure, déclaration
+au titre de l'article 50-1). Voir `_VIVIERS`.
+
 Liaison au dossier : le compte rendu ne porte aucune référence machine de
 dossier, mais le titre de discussion porte le **numéro du texte** (« (n[[o]]
 525) ») — le même numéro que les documents de l'archive dossiers législatifs.
@@ -138,17 +144,98 @@ def _est_section_explications(titre: str) -> bool:
     return f.startswith("explication") and "vote" in f
 
 
+# Les trois viviers de prises de position, par ordre de préférence décroissant.
+# `_REPLI` couvre deux formats de séance où le CR n'ouvre NI section
+# « Explications de vote » NI `DISC_GENERALE_1` : la motion de rejet préalable
+# (section `MOTION_RP_1_1`) et le débat placé directement sous le titre de
+# discussion — motion de censure, déclaration au titre de l'article 50-1.
+_EXPLICATIONS = "explications"
+_DISCUSSION = "discussion"
+_REPLI = "repli"
+_VIVIERS = (_EXPLICATIONS, _DISCUSSION, _REPLI)
+
+
+def _orateur(nom: str) -> str:
+    """« M. Yoann Gillet (RN) » → « M. Yoann Gillet »."""
+    return re.sub(r"\s*\([^()]+\)\s*$", "", nom).strip()
+
+
+# La présidence de séance est nommée par sa fonction (« Mme la présidente ») et
+# porte un identifiant d'acteur, car elle est elle-même députée : sans ce filtre,
+# ses annonces d'ordre du jour (« La parole est à M. X. ») seraient attribuées à
+# son groupe comme une prise de position (§7.4). Les ministres, eux, sont écartés
+# plus loin : nommés sans fonction, ils sont absents de l'annuaire des députés
+# (mandat suspendu) et leur `acteur_ref` ne se résout donc en aucun groupe.
+_RE_PRESIDENCE = re.compile(r"^(?:m\.|mme)\s+l[ae]\s+president", re.I)
+
+
+# Une prise de parole en cours de constitution : [nom brut, morceaux, acteurRef].
+_Prise = list
+
+
+def _explications_de_vote(prises: list[_Prise]) -> list[ExplicationVote]:
+    """Explications de vote formelles : le groupe est écrit dans le nom
+    (« M. Yoann Gillet (RN) »). Sans groupe (présidence, ministre) → ignoré."""
+    out: list[ExplicationVote] = []
+    for nom, morceaux, _ref in prises:
+        texte = " ".join(morceaux)
+        m = _RE_GROUPE.search(nom)
+        if not m or len(texte) < _MIN_LONGUEUR:
+            continue
+        out.append(
+            ExplicationVote(
+                groupe=m.group(1).strip(),
+                orateur=_orateur(nom),
+                texte=texte[:_MAX_LONGUEUR],
+            )
+        )
+    return out
+
+
+def _interventions(prises: list[_Prise]) -> list[ExplicationVote]:
+    """Prises de parole hors explications de vote : le CR n'y écrit PAS
+    l'abréviation de groupe, on garde donc l'identifiant d'acteur (résolu en
+    groupe via l'annuaire des députés, côté ingestion).
+
+    Un orateur qui reprend la parole plus tard dans la séance n'est compté
+    qu'une fois : un seul argument par groupe (§7.4)."""
+    out: list[ExplicationVote] = []
+    vus: set[str] = set()
+    for nom, morceaux, ref in prises:
+        texte = " ".join(morceaux)
+        if not ref or len(texte) < _MIN_LONGUEUR:
+            continue
+        if _RE_PRESIDENCE.match(fold(nom)):
+            continue
+        acteur_ref = ref if ref.startswith("PA") else f"PA{ref}"
+        if acteur_ref in vus:
+            continue
+        vus.add(acteur_ref)
+        out.append(
+            ExplicationVote(
+                groupe="",
+                orateur=_orateur(nom),
+                texte=texte[:_MAX_LONGUEUR],
+                acteur_ref=acteur_ref,
+            )
+        )
+    return out
+
+
 def extraire_debats(xml: str) -> list[DebatTexte]:
-    """Extrait, pour un compte rendu, les textes discutés, leurs explications de
-    vote par groupe et — en repli — les interventions en discussion générale.
+    """Extrait, pour un compte rendu, les textes discutés et les prises de
+    position de groupe qui les accompagnent.
 
     On parcourt la séance en ordre de lecture : chaque `TITRE_TEXTE_DISCUSSION`
-    ouvre un texte ; la sous-section « Explications de vote » capture les prises
-    de parole de groupe jusqu'au vote (VOTE_…) ou au texte suivant ; la section
-    `DISC_GENERALE_1` (« Discussion générale ») capture, elle, les orateurs de
-    groupe (repli quand il n'y a pas d'explications de vote formelles). On ignore
-    les interruptions/rappels au règlement (seul `PAROLE_GENERIQUE`) et les prises
-    de parole sans locuteur identifiable."""
+    ouvre un texte, et chaque parole tombe dans le vivier de la section courante
+    (cf. `_VIVIERS`). Les explications de vote formelles priment ; à défaut la
+    discussion générale ; à défaut seulement le vivier de repli. On ignore les
+    interruptions et rappels au règlement (seul `PAROLE_GENERIQUE` compte) et les
+    prises de parole sans locuteur identifiable.
+
+    Les morceaux **consécutifs** d'un même orateur sont recollés : une prise de
+    parole hachée par les interruptions ne doit pas être réduite à son premier
+    fragment (mesuré : longueur médiane 350 → 552 caractères)."""
     try:
         root = ET.fromstring(xml)
     except ET.ParseError:
@@ -158,8 +245,8 @@ def extraire_debats(xml: str) -> list[DebatTexte]:
 
     textes: list[DebatTexte] = []
     courant: DebatTexte | None = None
-    dans_explications = False
-    dans_discussion = False
+    section: str | None = None
+    prises: dict[int, dict[str, list[_Prise]]] = {}
 
     for e in root.iter():
         t = _tag(e)
@@ -174,25 +261,26 @@ def extraire_debats(xml: str) -> list[DebatTexte]:
                     numeros=_numeros_point(e),
                 )
                 textes.append(courant)
-                dans_explications = False
-                dans_discussion = False
+                prises[id(courant)] = {v: [] for v in _VIVIERS}
+                # Les paroles qui suivent immédiatement le titre, avant toute
+                # sous-section, sont celles d'un débat sans section dédiée.
+                section = _REPLI
+            elif courant is None:
+                continue
             elif cg == "DISC_GENERALE_1":
-                dans_discussion = True
-                dans_explications = False
+                section = _DISCUSSION
             elif _est_section_explications(titre):
-                dans_explications = True
-                dans_discussion = False
-            elif cg.startswith(("VOTE_", "APPEL_", "SCRUTIN")):
-                dans_explications = False
-                dans_discussion = False
-            else:
-                # Tout autre point (discussion des articles, motions…) ferme la
-                # discussion générale (ses orateurs sont des paragraphe, pas des
-                # point) ; la logique des explications de vote reste inchangée.
-                dans_discussion = False
-        elif t == "paragraphe" and courant is not None and (
-            dans_explications or dans_discussion
-        ):
+                section = _EXPLICATIONS
+            elif cg == "MOTION_RP_1_1":
+                section = _REPLI
+            elif section != _EXPLICATIONS or cg.startswith(
+                ("VOTE_", "APPEL_", "SCRUTIN")
+            ):
+                # Tout autre point (discussion des articles…) ferme le vivier
+                # courant ; les explications de vote, elles, se poursuivent à
+                # travers leurs sous-points jusqu'au vote.
+                section = None
+        elif t == "paragraphe" and courant is not None and section:
             if e.attrib.get("code_grammaire", "") != "PAROLE_GENERIQUE":
                 continue
             orateur_el = e.find(f"{_NS}orateurs/{_NS}orateur")
@@ -200,42 +288,31 @@ def extraire_debats(xml: str) -> list[DebatTexte]:
                 continue
             nom = (orateur_el.findtext(f"{_NS}nom") or "").strip()
             texte = (e.findtext(f"{_NS}texte") or "").strip()
-            if len(texte) < _MIN_LONGUEUR:
+            if not texte:
                 continue
-            orateur = re.sub(r"\s*\([^()]+\)\s*$", "", nom).strip()
-            if dans_explications:
-                m = _RE_GROUPE.search(nom)
-                if not m:  # présidence, ministre : pas de groupe → ignoré
-                    continue
-                courant.explications.append(
-                    ExplicationVote(
-                        groupe=m.group(1).strip(),
-                        orateur=orateur,
-                        texte=texte[:_MAX_LONGUEUR],
-                    )
-                )
-            else:  # discussion générale : le groupe n'est PAS dans le nom → id acteur
+            vivier = prises[id(courant)][section]
+            if vivier and vivier[-1][0] == nom:
+                vivier[-1][1].append(texte)  # même orateur : on recolle
+            else:
                 ref = (orateur_el.findtext(f"{_NS}id") or "").strip()
-                if not ref:  # présidence/gouvernement sans acteurRef → ignoré
-                    continue
-                acteur_ref = ref if ref.startswith("PA") else f"PA{ref}"
-                # Un même orateur peut reprendre la parole : on ne garde que sa
-                # première intervention (dédup par groupe faite à l'ingestion).
-                if any(
-                    x.acteur_ref == acteur_ref for x in courant.interventions_generales
-                ):
-                    continue
-                courant.interventions_generales.append(
-                    ExplicationVote(
-                        groupe="",
-                        orateur=orateur,
-                        texte=texte[:_MAX_LONGUEUR],
-                        acteur_ref=acteur_ref,
-                    )
-                )
-    # On garde les textes qui ont des explications de vote OU, à défaut, des
-    # interventions en discussion générale (repli pour le désaccord).
-    return [t for t in textes if t.explications or t.interventions_generales]
+                vivier.append([nom, [texte], ref])
+
+    out: list[DebatTexte] = []
+    for texte_discute in textes:
+        viviers = prises[id(texte_discute)]
+        texte_discute.explications.extend(
+            _explications_de_vote(viviers[_EXPLICATIONS])
+        )
+        texte_discute.interventions_generales.extend(
+            _interventions(viviers[_DISCUSSION])
+        )
+        if not texte_discute.explications and not texte_discute.interventions_generales:
+            texte_discute.interventions_generales.extend(
+                _interventions(viviers[_REPLI])
+            )
+        if texte_discute.explications or texte_discute.interventions_generales:
+            out.append(texte_discute)
+    return out
 
 
 # Recoupement de titre minimal (coefficient de recouvrement, adapté aux labels
@@ -258,18 +335,73 @@ def _recouvrement(cible: set[str], titre: set[str]) -> float:
     return len(cible & titre) / min(len(cible), len(titre))
 
 
+def _cle_texte(debat: DebatTexte) -> tuple:
+    """Ce qui identifie le texte discuté : ses numéros quand le CR les porte
+    (certain), sinon son titre plié."""
+    return tuple(sorted(debat.numeros)) if debat.numeros else fold(debat.titre)
+
+
+def fusionner_meme_texte(debats: list[DebatTexte]) -> list[DebatTexte]:
+    """Recolle les discussions d'un MÊME texte le MÊME jour en un seul débat.
+
+    Le compte rendu rouvre un `TITRE_TEXTE_DISCUSSION` à chaque reprise de
+    séance : un texte débattu matin et après-midi apparaît deux fois. Sans cette
+    fusion, `pour_vote` voit deux candidats quasi identiques, l'écart entre les
+    deux meilleurs scores tombe sous `_ECART_MIN` et la liaison est refusée comme
+    « ambiguë » — mesuré sur l'archive 17e législature : 31 cas d'ambiguïté,
+    31 faux positifs, zéro vraie collision entre deux textes différents.
+
+    La séance retenue est celle qui a fourni les prises de parole conservées, de
+    sorte que le lien « compte rendu » renvoie bien à ce qui est cité (§7.5).
+    """
+    groupes: dict[tuple, list[DebatTexte]] = {}
+    for d in debats:
+        groupes.setdefault((d.date, _cle_texte(d)), []).append(d)
+    fusionnes: list[DebatTexte] = []
+    for groupe in groupes.values():
+        if len(groupe) == 1:
+            fusionnes.append(groupe[0])
+            continue
+        # Les explications de vote priment sur la discussion générale, ici comme
+        # dans `extraire_debats` : si une seule des séances en porte, c'est elle
+        # qui fait foi (et qui donne l'uid de séance cité en source).
+        avec_explications = [d for d in groupe if d.explications]
+        retenus = avec_explications or groupe
+        fusionne = DebatTexte(
+            titre=retenus[0].titre,
+            date=retenus[0].date,
+            seance_uid=retenus[0].seance_uid,
+            numeros=frozenset().union(*(d.numeros for d in groupe)),
+        )
+        vus_groupes: set[str] = set()
+        for d in retenus:
+            for e in d.explications:
+                if e.groupe not in vus_groupes:
+                    vus_groupes.add(e.groupe)
+                    fusionne.explications.append(e)
+        if not fusionne.explications:
+            vus_acteurs: set[str | None] = set()
+            for d in retenus:
+                for e in d.interventions_generales:
+                    if e.acteur_ref not in vus_acteurs:
+                        vus_acteurs.add(e.acteur_ref)
+                        fusionne.interventions_generales.append(e)
+        fusionnes.append(fusionne)
+    return fusionnes
+
+
 class IndexDebats:
     """Index des explications de vote, interrogeable par (date, titre, numéros).
 
     Construit une fois par run à partir de tous les comptes rendus, puis
-    interrogé dossier par dossier avec la date et l'objet du vote sur
-    l'ensemble, et les numéros de texte connus du dossier (archive dossiers
-    législatifs) quand le dossier est officiel.
+    interrogé dossier par dossier avec la date et l'objet du vote conclusif, et
+    les numéros de texte connus du dossier (archive dossiers législatifs) quand
+    le dossier est officiel.
     """
 
     def __init__(self, debats: list[DebatTexte]) -> None:
         self._par_date: dict[str, list[DebatTexte]] = {}
-        for d in debats:
+        for d in fusionner_meme_texte(debats):
             if d.date:
                 self._par_date.setdefault(d.date, []).append(d)
 

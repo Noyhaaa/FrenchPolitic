@@ -124,6 +124,9 @@ export function libelleScrutin(objet: string): LibelleScrutin {
     titre = 'Motion référendaire';
   } else if (t.includes("motion d'ajournement")) {
     titre = "Motion d'ajournement";
+  } else if (t.includes("l'article unique")) {
+    // Texte mono-article : ce vote est le vote sur le texte lui-même.
+    titre = 'Article unique';
   } else if (/\barticle premier\b/.test(t)) {
     titre = 'Article 1er';
   } else if (numero(/\bl'article (\d+)/)) {

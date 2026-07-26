@@ -26,7 +26,7 @@ import {
   StatusBadge,
 } from '@/components';
 import { useScrutin } from '@/hooks';
-import { PositionGroupe, StatutScrutin } from '@/types';
+import { PositionGroupe, StatutScrutin, Votant } from '@/types';
 import {
   detailObjetAmendement,
   estVoteAmendement,
@@ -47,29 +47,57 @@ const SORT_SOUS = {
 } as const;
 
 /** Un groupe a-t-il un détail nominatif à montrer ? (§5.2, absent = masqué §2.5) */
-function aDesNoms(g: PositionGroupe): boolean {
+function aDesVotants(g: PositionGroupe): boolean {
   return Boolean(
-    g.nomsPour?.length || g.nomsContre?.length || g.nomsAbstention?.length,
+    g.votantsPour?.length ||
+      g.votantsContre?.length ||
+      g.votantsAbstention?.length,
   );
 }
 
 /** Liste des votants d'une position (« CONTRE (10) : … »), si documentée. */
 function NomsPosition({
   label,
-  noms,
+  votants,
+  decompte,
   color,
+  onOuvrirDepute,
 }: {
   label: string;
-  noms?: string[];
+  votants?: Votant[];
+  /** Décompte OFFICIEL du groupe (§5.2) : il fait foi, pas la longueur de la
+   *  liste — un votant que la source ne sait pas nommer en est absent. */
+  decompte: number;
   color: string;
+  onOuvrirDepute: (deputeId: string) => void;
 }) {
-  if (!noms || noms.length === 0) return null;
+  if (!votants || votants.length === 0) return null;
   return (
     <View style={styles.nomsBloc}>
       <Text style={[styles.nomsLabel, { color }]}>
-        {label} ({noms.length})
+        {label} ({decompte})
       </Text>
-      <Text style={styles.nomsListe}>{noms.join(' · ')}</Text>
+      {/* Un seul bloc de texte qui s'écoule : les noms cliquables sont des
+          <Text> imbriqués, pour garder le retour à la ligne naturel. */}
+      <Text style={styles.nomsListe}>
+        {votants.map((v, i) => (
+          <Text key={`${v.nom}-${i}`}>
+            {i > 0 ? ' · ' : ''}
+            {v.deputeId ? (
+              <Text
+                style={styles.nomLien}
+                onPress={() => onOuvrirDepute(v.deputeId as string)}
+                accessibilityRole="link"
+                accessibilityLabel={`Ouvrir la fiche de ${v.nom}`}
+              >
+                {v.nom}
+              </Text>
+            ) : (
+              v.nom
+            )}
+          </Text>
+        ))}
+      </Text>
     </View>
   );
 }
@@ -99,6 +127,11 @@ export function ScrutinDetailScreen() {
       else next.add(groupeId);
       return next;
     });
+
+  // Du vote au député (§5.2) : `push` empile la fiche par-dessus celle du vote,
+  // comme pour les sous-amendements — on revient au vote en fermant.
+  const ouvrirDepute = (deputeId: string) =>
+    navigation.push('DeputeDetail', { deputeId });
 
   const topBar = (
     <View style={styles.topBar}>
@@ -287,7 +320,7 @@ export function ScrutinDetailScreen() {
             ) : null}
             <View style={{ gap: spacing.sm }}>
               {scrutin.positionsGroupes.map((g) => {
-                const depliable = aDesNoms(g);
+                const depliable = aDesVotants(g);
                 const ouvert = ouverts.has(g.groupeId);
                 return (
                   <View key={g.groupeId} style={styles.groupCard}>
@@ -309,9 +342,27 @@ export function ScrutinDetailScreen() {
                     )}
                     {depliable && ouvert ? (
                       <View style={styles.nomsWrap}>
-                        <NomsPosition label="POUR" noms={g.nomsPour} color={colors.pour} />
-                        <NomsPosition label="CONTRE" noms={g.nomsContre} color={colors.contre} />
-                        <NomsPosition label="ABSTENTION" noms={g.nomsAbstention} color={colors.textSecondary} />
+                        <NomsPosition
+                          label="POUR"
+                          votants={g.votantsPour}
+                          decompte={g.pour}
+                          color={colors.pour}
+                          onOuvrirDepute={ouvrirDepute}
+                        />
+                        <NomsPosition
+                          label="CONTRE"
+                          votants={g.votantsContre}
+                          decompte={g.contre}
+                          color={colors.contre}
+                          onOuvrirDepute={ouvrirDepute}
+                        />
+                        <NomsPosition
+                          label="ABSTENTION"
+                          votants={g.votantsAbstention}
+                          decompte={g.abstention}
+                          color={colors.textSecondary}
+                          onOuvrirDepute={ouvrirDepute}
+                        />
                       </View>
                     ) : null}
                   </View>
@@ -328,7 +379,7 @@ export function ScrutinDetailScreen() {
               />
             </View>
             {/* Nominatif absent partout → on l'explique, sans combler (§2.5). */}
-            {!scrutin.positionsGroupes.some(aDesNoms) && (
+            {!scrutin.positionsGroupes.some(aDesVotants) && (
               <Text style={[typography.meta, styles.nominatifAbsent]}>
                 Le détail nominatif des votants n'est pas disponible pour ce
                 vote.
@@ -609,6 +660,12 @@ const styles = StyleSheet.create({
     ...typography.meta,
     color: colors.textSecondary,
     lineHeight: 18,
+  },
+  // Souligné EN PLUS de la couleur : l'affordance ne repose jamais sur la
+  // couleur seule (§8/RGAA). Un votant sans fiche reste en texte simple.
+  nomLien: {
+    color: colors.textPrimary,
+    textDecorationLine: 'underline',
   },
   legend: {
     marginTop: spacing.lg,

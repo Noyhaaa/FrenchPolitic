@@ -43,6 +43,19 @@ class ResultatGlobal(CamelModel):
     non_votants: int
 
 
+class Votant(CamelModel):
+    """Un député nommé dans la ventilation nominative d'un scrutin (§5.2).
+
+    `depute_id` n'est renseigné **que** si l'acteur figure dans le référentiel
+    des députés servi par l'API : c'est lui qui autorise l'app à ouvrir la fiche
+    du député, et un lien ne doit jamais mener à un 404. Un ancien député (mandat
+    terminé en cours de législature) garde donc son nom, sans identifiant.
+    """
+
+    nom: str
+    depute_id: str | None = None
+
+
 class PositionGroupe(CamelModel):
     groupe_id: str
     groupe_nom: str
@@ -52,11 +65,11 @@ class PositionGroupe(CamelModel):
     contre: int
     abstention: int
     cohesion: float | None = None
-    # Vote nominatif (§5.2) : noms des députés du groupe par position.
+    # Vote nominatif (§5.2) : les députés du groupe, par position.
     # None si la source ne le fournit pas (§2.5 : jamais de comblement).
-    noms_pour: list[str] | None = None
-    noms_contre: list[str] | None = None
-    noms_abstention: list[str] | None = None
+    votants_pour: list[Votant] | None = None
+    votants_contre: list[Votant] | None = None
+    votants_abstention: list[Votant] | None = None
 
 
 class Amendement(CamelModel):
@@ -130,6 +143,11 @@ class QuestionsCitoyennes(CamelModel):
 
     pourquoi: str | None = None
     desaccord: list[ArgumentGroupe] | None = None
+    # Objet officiel du vote d'où viennent les `sens` de `desaccord` — le vote
+    # conclusif du texte. À AFFICHER avec les positions : « pour » sur une motion
+    # de rejet préalable veut dire « pour le rejet du texte », l'inverse de ce que
+    # le seul mot « pour » laisserait croire (§7.4). Absent = ligne masquée (§2.5).
+    desaccord_objet: str | None = None
     desaccord_source: SourceOfficielle | None = None
     resultat: str | None = None
     changement: str | None = None
