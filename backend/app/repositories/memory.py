@@ -6,9 +6,11 @@ Alimentée par les données seed (`app.data.seed`). Sert de backend par défaut
 """
 from __future__ import annotations
 
+from collections import Counter
 from datetime import date, timedelta
 
 from app.domain.enums import PositionVote
+from app.domain.recherche import ChampsRecherche, index_recherche, score, termes
 from app.repositories.base import (
     DossierRepository,
     construire_portrait,
@@ -26,12 +28,25 @@ from app.schemas import (
     RecapMensuel,
     Scrutin,
     SectionTheme,
+    ThemeListItem,
     VoteDepute,
 )
 from app.utils.text import fold as _fold
 
 # Même fenêtre que le repository Postgres (§5.2) : les 12 derniers mois.
 FENETRE_PORTRAIT_JOURS = 365
+
+
+def _champs(d: Dossier) -> ChampsRecherche:
+    """Mêmes champs de pertinence qu'en Postgres, l'index recalculé à la
+    volée (le seed n'a pas de colonne `search_index`)."""
+    return ChampsRecherche(
+        titre_clair=d.titre_clair,
+        titre_officiel=d.titre_officiel,
+        accroche=d.accroche,
+        theme=d.theme,
+        index=index_recherche(d),
+    )
 
 
 def _sort_key(d: Dossier) -> str:
@@ -69,19 +84,31 @@ class InMemoryDossierRepository(DossierRepository):
     async def get_scrutin(self, scrutin_id: str) -> Scrutin | None:
         return self._scrutins.get(scrutin_id)
 
-    async def search(self, query: str, limit: int = 20) -> list[DossierListItem]:
-        q = _fold(query.strip())
-        if not q:
-            return await self.list(limit=limit)
-        results = [
-            d
-            for d in self._ordered
-            if q
-            in _fold(
-                f"{d.titre_clair} {d.titre_officiel} {d.accroche or ''} {d.theme}"
-            )
+    async def search(
+        self, query: str, limit: int = 20, theme: str | None = None
+    ) -> list[DossierListItem]:
+        """Même contrat, mêmes fonctions pures et donc même classement que le
+        backend Postgres (§3.3) : les tests tournent ici, ils doivent prouver le
+        comportement servi en production."""
+        candidats = [d for d in self._ordered if not theme or d.theme == theme]
+        mots = termes(query)
+        if not mots:
+            return [DossierListItem.from_dossier(d) for d in candidats[:limit]]
+        pertinents = [
+            (score(_champs(d), mots, query), d) for d in candidats
         ]
-        return [DossierListItem.from_dossier(d) for d in results[:limit]]
+        # `_ordered` est déjà trié par date : le tri stable par score conserve
+        # la date comme départage.
+        classes = sorted(
+            (p for p in pertinents if p[0] > 0), key=lambda p: p[0], reverse=True
+        )
+        return [DossierListItem.from_dossier(d) for _, d in classes[:limit]]
+
+    async def list_themes(self) -> list[ThemeListItem]:
+        comptes = Counter(d.theme for d in self._ordered)
+        return [
+            ThemeListItem(nom=nom, nombre=comptes[nom]) for nom in sorted(comptes)
+        ]
 
     async def accueil(self, par_section: int = 10) -> Accueil:
         items = [DossierListItem.from_dossier(d) for d in self._ordered]

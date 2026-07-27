@@ -1,4 +1,11 @@
-import { Accueil, Dossier, DossierListItem, RecapMensuel, Scrutin } from '@/types';
+import {
+  Accueil,
+  Dossier,
+  DossierListItem,
+  RecapMensuel,
+  Scrutin,
+  ThemeListItem,
+} from '@/types';
 import { apiGet } from './client';
 
 /**
@@ -25,10 +32,27 @@ export function fetchRecap(signal?: AbortSignal): Promise<RecapMensuel | null> {
   return apiGet<RecapMensuel | null>('/recap', undefined, signal);
 }
 
-/** Recherche plein texte (§3.3). */
+/**
+ * Recherche multi-termes classée par pertinence (§3.3).
+ *
+ * Tous les mots sont exigés, pas forcément côte à côte ni dans le titre :
+ * l'index du backend couvre aussi les réponses « pourquoi » / « ce que ça
+ * change » et les publics concernés. `theme` seul (requête vide) parcourt le
+ * thème.
+ */
 export function searchDossiers(
   query: string,
+  theme?: string,
   signal?: AbortSignal,
 ): Promise<DossierListItem[]> {
-  return apiGet<DossierListItem[]>('/recherche', { q: query }, signal);
+  return apiGet<DossierListItem[]>(
+    '/recherche',
+    { q: query, theme: theme ?? '' },
+    signal,
+  );
+}
+
+/** Thèmes proposés en filtre de recherche (uniquement ceux qui ont des dossiers). */
+export function fetchThemes(signal?: AbortSignal): Promise<ThemeListItem[]> {
+  return apiGet<ThemeListItem[]>('/themes', undefined, signal);
 }

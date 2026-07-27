@@ -18,6 +18,7 @@ from app.schemas import (
     RecapMensuel,
     Scrutin,
     SectionTheme,
+    ThemeListItem,
     VoteDepute,
 )
 
@@ -76,8 +77,20 @@ class DossierRepository(Protocol):
         """Détail d'un vote : groupes + nominatif si disponible (§3.2, §5.2)."""
         ...
 
-    async def search(self, query: str, limit: int = 20) -> list[DossierListItem]:
-        """Recherche plein texte titre clair + titre officiel + thème (§3.3)."""
+    async def search(
+        self, query: str, limit: int = 20, theme: str | None = None
+    ) -> list[DossierListItem]:
+        """Recherche **multi-termes**, classée par pertinence (§3.3).
+
+        Tous les termes doivent apparaître (ET) dans l'index du dossier
+        (`app.domain.recherche.index_recherche`) ; le classement suit `score`,
+        et à score égal la date décroissante. `theme` restreint au thème exact,
+        et fonctionne **seul** (requête vide) pour parcourir un thème.
+        """
+        ...
+
+    async def list_themes(self) -> list[ThemeListItem]:
+        """Thèmes réellement présents + nombre de dossiers (filtre §3.3)."""
         ...
 
     async def recap_mensuel(self) -> RecapMensuel | None:

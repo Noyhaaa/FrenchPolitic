@@ -182,12 +182,35 @@ finissait par préserver le bon thème, mais après un appel gaspillé).
 | GET     | `/dossiers`        | Fil paginé       | Derniers dossiers, du plus récent au plus ancien |
 | GET     | `/dossiers/{id}`   | Fiche dossier (2)| Résumé sourcé + votes sur le texte + amendements |
 | GET     | `/scrutins/{id}`   | Fiche vote (3)   | Détail d'un vote (texte ou amendement) : groupes + nominatif |
-| GET     | `/recherche?q=`    | Recherche (4)    | Plein texte sur titre clair + officiel + thème |
+| GET     | `/recherche?q=&theme=` | Recherche (4) | Multi-termes (tous exigés) classée par pertinence ; `theme` seul parcourt le thème |
+| GET     | `/themes`          | Recherche (4)    | Thèmes réellement présents + nombre de dossiers — les filtres |
 | GET     | `/deputes?q=&groupe=` | Annuaire       | Députés (ordre alphabétique), filtrables par groupe et recherche libre |
 | GET     | `/deputes/{id}`    | Fiche député     | Identité + portrait de vote (12 mois) + 1re page d'historique |
 | GET     | `/deputes/{id}/votes` | Fiche député  | Historique paginé (« charger les votes plus anciens ») |
 | GET     | `/groupes`         | Annuaire         | Groupes politiques (nom, abréviation, couleur) — filtres |
 | GET     | `/health`          | —                | Statut du service                             |
+
+**Recherche (§3.3)** — `app/domain/recherche.py`, trois fonctions **pures**
+partagées par les deux repositories (les tests tournent sur `memory`, ils doivent
+donc prouver le comportement servi en production) :
+
+- `index_recherche(dossier)` est la **source unique** de `search_index`, appelée
+  à l'ingestion comme par `reformater`. Au-delà des titres, de l'accroche et du
+  thème, elle indexe les réponses **Q1 « pourquoi »** et **Q4 « ce que ça
+  change »** et les **publics concernés** — c'est là que vit le vocabulaire du
+  lecteur (« logement », « hôpital »), absent des titres officiels (« habitat »,
+  « loi de finances »). Mesuré sur 17 requêtes réalistes : **7 sans aucun
+  résultat avant, 2 après**. L'**exposé des motifs** est délibérément exclu :
+  long et argumentatif, il ramenait 41 % du corpus sur « fin de vie ».
+- `termes(requete)` découpe et plie ; les termes de moins de 2 caractères sont
+  écartés. **Tous** les termes sont exigés (ET) — « loi mayotte » trouve les
+  textes qui portent les deux mots, même éloignés, ce qu'un `LIKE` du bloc
+  entier ne faisait pas.
+- `score(champs, termes, requete)` classe : phrase exacte dans un titre (4) >
+  tous les termes dans les titres (3) > accroche/thème (2) > ailleurs dans
+  l'index (1). À score égal, la date décroissante — le tri d'origine. Côté
+  Postgres le `LIKE` par terme sert de **préfiltre** (l'index B-tree reste
+  exploité), le classement se fait ensuite sur au plus 200 candidats.
 
 Le JSON est en **camelCase**, miroir exact des types `Dossier` / `Scrutin` du
 frontend (`src/types/index.ts`) : l'app consomme l'API sans transformation.
@@ -208,6 +231,7 @@ app/
   api/routes/        dossiers.py (fil, fiche dossier, fiche vote, recherche), health.py
   schemas/           Contrat d'API (Pydantic, camelCase) = §5.3 — Dossier + Scrutin
   domain/enums.py    Statuts, positions, niveaux de confiance…
+  domain/recherche.py  Index, découpage en termes et pertinence (pur, partagé par les 2 repos)
   db/                models.py (dossier, scrutin, groupe, depute, vote_depute, sync_run) · session.py (moteur async)
   repositories/      Protocole + in-memory (seed) + postgres (ingéré) — choix via config
   data/seed.py       Dossiers + députés FICTIFS de démonstration (backend « memory »)

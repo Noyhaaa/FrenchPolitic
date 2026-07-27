@@ -34,6 +34,7 @@ from app.ingestion.deputes import (
     upsert_deputes,
     votes_du_scrutin,
 )
+from app.domain.recherche import index_recherche
 from app.ingestion.debats import IndexDebats, url_compte_rendu
 from app.ingestion.dossiers_legislatifs import construire_reconciliation
 from app.ingestion.textes_an import (
@@ -518,10 +519,7 @@ def _dossier_row_values(dossier: Dossier) -> dict:
             else None
         ),
         "payload": dossier.model_dump(mode="json", by_alias=True),
-        "search_index": fold(
-            f"{dossier.titre_clair} {dossier.titre_officiel} "
-            f"{dossier.accroche or ''} {dossier.theme}"
-        ),
+        "search_index": index_recherche(dossier),
     }
 
 

@@ -8,7 +8,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import get_dossier_repository
 from app.repositories.base import DossierRepository
-from app.schemas import Accueil, Dossier, DossierListItem, RecapMensuel, Scrutin
+from app.schemas import (
+    Accueil,
+    Dossier,
+    DossierListItem,
+    RecapMensuel,
+    Scrutin,
+    ThemeListItem,
+)
 
 router = APIRouter(prefix="/dossiers", tags=["dossiers"])
 
@@ -59,12 +66,30 @@ search_router = APIRouter(tags=["dossiers"])
     "/recherche", response_model=list[DossierListItem], summary="Recherche simple"
 )
 async def search(
-    q: str = Query("", description="Mots-clés (titre, thème)"),
+    q: str = Query("", description="Mots-clés (tous exigés)"),
+    theme: str | None = Query(None, description="Restreint à un thème exact"),
     limit: int = Query(20, ge=1, le=100),
     repo: DossierRepository = Depends(get_dossier_repository),
 ) -> list[DossierListItem]:
-    """Recherche plein texte sur titre clair + titre officiel + thème (écran 3)."""
-    return await repo.search(q, limit=limit)
+    """Recherche multi-termes classée par pertinence (écran 3, §3.3).
+
+    Tous les mots doivent apparaître, pas forcément côte à côte ni dans le
+    titre : l'index couvre aussi les réponses « pourquoi » / « ce que ça
+    change » et les publics concernés. `theme` seul (sans `q`) parcourt le thème.
+    """
+    return await repo.search(q, limit=limit, theme=theme)
+
+
+@search_router.get(
+    "/themes", response_model=list[ThemeListItem], summary="Thèmes disponibles"
+)
+async def list_themes(
+    repo: DossierRepository = Depends(get_dossier_repository),
+) -> list[ThemeListItem]:
+    """Thèmes réellement présents et leur nombre de dossiers — ce qui alimente
+    les filtres de la recherche. Un thème sans dossier n'est pas proposé (§2.5).
+    """
+    return await repo.list_themes()
 
 
 @search_router.get(

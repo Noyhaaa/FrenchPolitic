@@ -8,7 +8,9 @@ Recalcule, depuis le payload déjà stocké :
     la fiche) via `titre_court` ;
   - `accroche` (colonne + payload) via `accroche_depuis_q1`, depuis la Q1 déjà
     validée — aucune génération, aucun appel LLM, aucun réseau ;
-  - `search_index`, qui dérive des deux.
+  - `search_index` via `index_recherche` — la MÊME fonction qu'à l'ingestion,
+    donc titres + accroche + thème **et** les réponses Q1/Q4 et les publics
+    concernés (§3.3 : c'est là que vit le vocabulaire du lecteur).
 
 Sans cette commande, le nouveau format n'apparaîtrait qu'après une ingestion
 complète (plusieurs heures). Idempotent : relancer ne change plus rien.
@@ -24,8 +26,9 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.ai.questions import accroche_depuis_q1
 from app.db.models import DossierRow
 from app.db.session import make_engine, make_session_factory
+from app.domain.recherche import index_recherche
 from app.ingestion.normalize import titre_court
-from app.utils.text import fold
+from app.schemas import Dossier
 
 
 async def _main(dry_run: bool) -> None:
@@ -59,9 +62,10 @@ async def _main(dry_run: bool) -> None:
             row.accroche = accroche or ""
             row.payload = payload
             flag_modified(row, "payload")
-            row.search_index = fold(
-                f"{titre} {row.titre_officiel} {accroche or ''} {row.theme}"
-            )
+            # Même fonction qu'à l'ingestion : l'index ne peut pas diverger
+            # selon la porte d'entrée (c'était le cas quand la chaîne était
+            # recopiée ici et dans `sync.py`).
+            row.search_index = index_recherche(Dossier.model_validate(payload))
 
         if dry_run:
             await session.rollback()

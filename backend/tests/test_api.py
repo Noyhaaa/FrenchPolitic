@@ -122,6 +122,59 @@ def test_recherche_insensible_aux_accents(client):
     assert any("énergie" in i["titreClair"].lower() for i in r.json())
 
 
+def test_recherche_termes_non_adjacents(client):
+    # LE cas que l'ancienne recherche (un seul LIKE du bloc entier) ratait :
+    # les deux mots existent, mais pas côte à côte.
+    r = client.get("/recherche", params={"q": "acces logement"})
+    assert r.status_code == 200
+    assert any("logement" in i["titreClair"].lower() for i in r.json())
+
+
+def test_recherche_atteint_les_reponses_citoyennes(client):
+    # « zones tendues » n'apparaît que dans la Q1 du dossier logement : c'est
+    # l'élargissement de l'index qui le rend trouvable (§3.3).
+    r = client.get("/recherche", params={"q": "zones tendues"})
+    assert r.status_code == 200
+    assert [i["theme"] for i in r.json()] == ["Logement"]
+
+
+def test_recherche_titre_avant_reponse_citoyenne(client):
+    # Un mot présent dans un titre doit sortir avant le même mot trouvé
+    # ailleurs dans l'index : la pertinence prime sur la date.
+    r = client.get("/recherche", params={"q": "logement"})
+    results = r.json()
+    assert len(results) >= 1
+    assert "logement" in results[0]["titreClair"].lower()
+
+
+def test_recherche_tous_les_termes_exiges(client):
+    r = client.get("/recherche", params={"q": "logement narcotrafic"})
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_recherche_filtre_theme_seul(client):
+    r = client.get("/recherche", params={"theme": "Logement"})
+    assert r.status_code == 200
+    results = r.json()
+    assert results and all(i["theme"] == "Logement" for i in results)
+
+
+def test_recherche_filtre_theme_avec_requete(client):
+    r = client.get("/recherche", params={"q": "logement", "theme": "Énergie"})
+    assert r.status_code == 200
+    assert r.json() == []  # le thème restreint, il n'élargit pas
+
+
+def test_themes(client):
+    r = client.get("/themes")
+    assert r.status_code == 200
+    themes = r.json()
+    # Uniquement des thèmes réellement présents (§2.5) : jamais un filtre vide.
+    assert themes and all(t["nombre"] > 0 for t in themes)
+    assert "Logement" in [t["nom"] for t in themes]
+
+
 def test_recap_mensuel(client):
     """La carte récap de l'accueil : votes du dernier mois actif, en camelCase.
 

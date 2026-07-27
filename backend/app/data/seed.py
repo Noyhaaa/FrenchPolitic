@@ -19,6 +19,7 @@ from app.schemas import (
     PhraseSourcee,
     PositionGroupe,
     QuestionsAmendement,
+    QuestionsCitoyennes,
     ResultatGlobal,
     ResumeScrutin,
     Scrutin,
@@ -382,6 +383,19 @@ SEED_DOSSIERS: list[Dossier] = [
                 apres="Hausse plafonnée à l'indice de référence.",
             ),
             public_concerne=["Particuliers", "Entreprises", "Collectivités", "Associations"],
+            # Les 4 questions citoyennes, ici pour que le backend `memory` —
+            # celui sur lequel tournent les tests — exerce la partie de l'index
+            # de recherche qui vient des réponses Q1/Q4 (§3.3). Contenu fictif.
+            questions=QuestionsCitoyennes(
+                pourquoi=(
+                    "Les députés ont examiné ce texte pour freiner la hausse "
+                    "des loyers dans les zones tendues."
+                ),
+                changement=(
+                    "Le texte plafonnerait les hausses de loyer entre deux "
+                    "locataires et financerait des rénovations."
+                ),
+            ),
             confiance="moyenne",
             relu_par_humain=True,
             champs_non_documentes=[],

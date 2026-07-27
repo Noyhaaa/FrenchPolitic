@@ -5,6 +5,7 @@ export {
   fetchDossier,
   fetchRecap,
   fetchScrutin,
+  fetchThemes,
   searchDossiers,
 } from './dossiers';
 export {

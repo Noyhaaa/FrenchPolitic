@@ -113,7 +113,20 @@ Six écrans du cœur de valeur :
    (exposé sommaire, bloc attribué non neutre §4.3), et
    **ses sous-amendements** (chacun ouvrant sa propre fiche vote, empilée via
    `navigation.push`).
-4. **Recherche simple** (`SearchScreen` → `useDossierSearch`, avec debounce)
+4. **Recherche** (`SearchScreen` → `useRecherche` + `useThemes`, avec debounce) :
+   un champ, des **chips de thème** (`GET /themes` — seuls les thèmes qui ont
+   des dossiers, §2.5), et des résultats en **deux sections** — les *textes*
+   puis les *députés* (`GET /deputes?q=`, plafonné à 5), section vide masquée.
+   La requête est **multi-termes** : tous les mots sont exigés mais pas
+   forcément côte à côte ni dans le titre, car l'index de recherche
+   (`app/domain/recherche.py`, source unique de `search_index`) couvre aussi les
+   réponses **Q1/Q4** et les **publics concernés** — c'est là qu'est le
+   vocabulaire du lecteur (« logement », « hôpital »), pas dans les titres
+   officiels. Les résultats sont **classés par pertinence** (titre > accroche et
+   thème > réponses citoyennes ; à égalité, le plus récent), et un **thème seul**
+   parcourt le thème. L'exposé des motifs est hors index (trop de bruit). Le
+   filtre de thème ne s'applique pas aux personnes : les députés disparaissent
+   quand il est actif.
 5. **Annuaire des députés** (`DeputesScreen` → `useDeputes`, `GET /deputes`) :
    recherche par nom (debounce) et filtres par groupe (chips `GET /groupes`,
    pastille de couleur **+ libellé**), une ligne par député (`DeputeRow` :
@@ -350,7 +363,7 @@ src/
   types/index.ts             Modèle de données (miroir des schémas backend, §5.3 MVP)
   api/                       Client HTTP : config (URL), client (fetch+timeout), dossiers+scrutins,
                              deputes, cache offline
-  hooks/                     useDossiers / useDossier / useScrutin / useDossierSearch
+  hooks/                     useDossiers / useDossier / useScrutin / useRecherche + useThemes
                              + useDeputes / useDepute (chargement + cache + états)
   constants/themes.ts        Emoji + teintes par thème
   utils/format.ts            Formatage dates, libellés de statut/position, temps de lecture

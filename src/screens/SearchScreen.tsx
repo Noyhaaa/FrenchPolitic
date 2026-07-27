@@ -1,7 +1,9 @@
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
+  Pressable,
+  ScrollView,
+  SectionList,
   StyleSheet,
   Text,
   TextInput,
@@ -12,28 +14,89 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, radius, spacing, typography } from '@/theme';
-import { DossierCard, EmptyView } from '@/components';
-import { useDossierSearch } from '@/hooks';
-import { DossierListItem } from '@/types';
+import { DeputeRow, DossierCard, EmptyView } from '@/components';
+import { themeEmoji } from '@/constants/themes';
+import { useRecherche, useThemes } from '@/hooks';
+import { DeputeListItem, DossierListItem } from '@/types';
 import type { RootStackParamList } from '@/navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
+/** Une entrée de résultat : un texte ou un député (sections distinctes). */
+type Resultat =
+  | { type: 'dossier'; dossier: DossierListItem }
+  | { type: 'depute'; depute: DeputeListItem };
+
+/** Chip de filtre, même gabarit que l'annuaire des députés. */
+function Chip({
+  actif,
+  label,
+  onPress,
+}: {
+  actif: boolean;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[styles.chip, actif && styles.chipActif]}
+      accessibilityRole="button"
+      accessibilityState={{ selected: actif }}
+      accessibilityLabel={`Filtrer : ${label}`}
+    >
+      <Text style={[styles.chipTexte, actif && styles.chipTexteActif]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 /**
- * Recherche simple (§3.3) : un champ, recherche plein texte via l'API sur le
- * titre reformulé + titre officiel + thème. Pas de filtres avancés en V1.
+ * Recherche (§3.3) : un champ, des filtres de thème, et des résultats en deux
+ * sections — les **textes** puis les **députés**.
+ *
+ * La requête est multi-termes et classée par pertinence côté API : tous les
+ * mots sont exigés, pas forcément côte à côte ni dans le titre (l'index couvre
+ * aussi les réponses « pourquoi » / « ce que ça change » et les publics
+ * concernés). Un thème seul, sans mot-clé, parcourt le thème. Une section vide
+ * est masquée (§2.5), et les députés disparaissent sous filtre de thème — un
+ * thème ne qualifie pas une personne.
  */
 export function SearchScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
-  const { results, loading, error } = useDossierSearch(query);
+  const [theme, setTheme] = useState<string | undefined>();
+  const themes = useThemes();
+  const { dossiers, deputes, loading, error } = useRecherche(query, theme);
 
   const onPressDossier = useCallback(
     (dossier: DossierListItem) =>
       navigation.navigate('DossierDetail', { dossierId: dossier.id }),
     [navigation],
   );
+  const onPressDepute = useCallback(
+    (depute: DeputeListItem) =>
+      navigation.navigate('DeputeDetail', { deputeId: depute.id }),
+    [navigation],
+  );
+
+  const sections: { titre: string; data: Resultat[] }[] = [];
+  if (dossiers.length > 0) {
+    sections.push({
+      titre: 'Textes',
+      data: dossiers.map((d) => ({ type: 'dossier', dossier: d })),
+    });
+  }
+  if (deputes.length > 0) {
+    sections.push({
+      titre: 'Députés',
+      data: deputes.map((d) => ({ type: 'depute', depute: d })),
+    });
+  }
+
+  const chercheQuelqueChose = Boolean(query.trim() || theme);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -44,23 +107,49 @@ export function SearchScreen() {
           <TextInput
             value={query}
             onChangeText={setQuery}
-            placeholder="Un thème, un texte, un mot-clé…"
+            placeholder="Un thème, un texte, un député…"
             placeholderTextColor={colors.textTertiary}
             style={styles.input}
             returnKeyType="search"
             autoCorrect={false}
             clearButtonMode="while-editing"
-            accessibilityLabel="Rechercher un dossier"
+            accessibilityLabel="Rechercher un dossier ou un député"
           />
           {loading ? (
             <ActivityIndicator size="small" color={colors.textTertiary} />
           ) : null}
         </View>
+
+        {themes.length > 0 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.chips}
+          >
+            <Chip
+              actif={!theme}
+              label="Tous"
+              onPress={() => setTheme(undefined)}
+            />
+            {themes.map((t) => (
+              <Chip
+                key={t.nom}
+                actif={theme === t.nom}
+                label={`${themeEmoji[t.nom] ?? ''} ${t.nom}`.trim()}
+                onPress={() =>
+                  setTheme((actuel) => (actuel === t.nom ? undefined : t.nom))
+                }
+              />
+            ))}
+          </ScrollView>
+        ) : null}
       </View>
 
-      <FlatList
-        data={results}
-        keyExtractor={(item) => item.id}
+      <SectionList
+        sections={sections}
+        keyExtractor={(item) =>
+          item.type === 'dossier' ? item.dossier.id : item.depute.id
+        }
         contentContainerStyle={[
           styles.list,
           { paddingBottom: insets.bottom + spacing.xl },
@@ -68,9 +157,22 @@ export function SearchScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
-        renderItem={({ item }) => (
-          <DossierCard dossier={item} onPress={onPressDossier} />
-        )}
+        stickySectionHeadersEnabled={false}
+        renderSectionHeader={({ section }) =>
+          // Un seul type de résultat → l'intitulé de section n'apprend rien.
+          sections.length > 1 ? (
+            <Text style={[typography.overline, styles.sectionTitre]}>
+              {section.titre}
+            </Text>
+          ) : null
+        }
+        renderItem={({ item }) =>
+          item.type === 'dossier' ? (
+            <DossierCard dossier={item.dossier} onPress={onPressDossier} />
+          ) : (
+            <DeputeRow depute={item.depute} onPress={onPressDepute} />
+          )
+        }
         ItemSeparatorComponent={() => <View style={{ height: spacing.md }} />}
         ListEmptyComponent={
           loading ? null : error ? (
@@ -78,15 +180,15 @@ export function SearchScreen() {
               title="Recherche indisponible"
               subtitle="Impossible de joindre le serveur. Réessayez."
             />
-          ) : query.trim() ? (
+          ) : chercheQuelqueChose ? (
             <EmptyView
               title="Aucun résultat"
               subtitle="Essayez un autre mot-clé (ex. « logement », « énergie »)."
             />
           ) : (
             <EmptyView
-              title="Recherchez un dossier"
-              subtitle="Tapez un thème ou un mot-clé pour commencer."
+              title="Recherchez un texte ou un député"
+              subtitle="Tapez un mot-clé, ou choisissez un thème ci-dessus."
             />
           )
         }
@@ -123,6 +225,31 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: spacing.md,
     ...typography.body,
+  },
+  chips: {
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  chip: {
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.pill,
+    paddingVertical: 6,
+    paddingHorizontal: 13,
+  },
+  chipActif: {
+    backgroundColor: colors.textPrimary,
+  },
+  chipTexte: {
+    ...typography.label,
+    color: colors.textSecondary,
+  },
+  chipTexteActif: {
+    color: colors.textOnLight,
+  },
+  sectionTitre: {
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+    color: colors.textTertiary,
   },
   list: {
     paddingHorizontal: spacing.lg,

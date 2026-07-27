@@ -380,6 +380,17 @@ class SectionTheme(CamelModel):
     dossiers: list[DossierListItem] = []
 
 
+class ThemeListItem(CamelModel):
+    """Un thème tel qu'exposé par le filtre de la recherche (§3.3).
+
+    Seuls les thèmes **réellement présents** sont listés, avec leur nombre de
+    dossiers : un filtre qui ne ramènerait rien n'a pas à être proposé (§2.5).
+    """
+
+    nom: str
+    nombre: int
+
+
 class Accueil(CamelModel):
     """Écran d'accueil complet, servi en UNE réponse.
 

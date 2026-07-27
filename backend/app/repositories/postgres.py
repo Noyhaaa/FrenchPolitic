@@ -12,6 +12,7 @@ from datetime import date, timedelta
 
 from app.db.models import DeputeRow, DossierRow, GroupeRow, ScrutinRow, VoteDeputeRow
 from app.domain.enums import ObjetVote, PositionVote
+from app.domain.recherche import ChampsRecherche, score, termes
 from app.ingestion.normalize import nature_texte, type_objet_vote
 from app.repositories.base import (
     DossierRepository,
@@ -31,12 +32,30 @@ from app.schemas import (
     Scrutin,
     ScrutinResume,
     SectionTheme,
+    ThemeListItem,
     VoteDepute,
 )
 from app.utils.text import fold
 
 # Fenêtre des statistiques de la fiche député (§5.2) : les 12 derniers mois.
 FENETRE_PORTRAIT_JOURS = 365
+
+# Candidats ramenés avant classement. Le préfiltre `LIKE` a déjà réduit
+# l'ensemble ; ce plafond borne le coût du tri en Python même sur un terme très
+# fréquent, sans jamais tronquer une recherche réaliste.
+_MAX_CANDIDATS = 200
+
+
+def _champs(row: DossierRow) -> ChampsRecherche:
+    """Les champs de pertinence, tous en colonnes : marquer un résultat ne
+    demande jamais d'ouvrir le payload."""
+    return ChampsRecherche(
+        titre_clair=row.titre_clair,
+        titre_officiel=row.titre_officiel,
+        accroche=row.accroche or None,
+        theme=row.theme,
+        index=row.search_index,
+    )
 
 # Positions effectivement exprimées (le non-votant ne compte ni dans les votes
 # ni dans la cohésion).
@@ -109,18 +128,50 @@ class PostgresDossierRepository(DossierRepository):
             row = await session.get(ScrutinRow, scrutin_id)
         return Scrutin.model_validate(row.payload) if row else None
 
-    async def search(self, query: str, limit: int = 20) -> list[DossierListItem]:
-        folded = fold(query.strip())
+    async def search(
+        self, query: str, limit: int = 20, theme: str | None = None
+    ) -> list[DossierListItem]:
+        """Recherche multi-termes classée par pertinence (§3.3).
+
+        Le `LIKE` par terme sert de **préfiltre** (l'index B-tree de
+        `search_index` reste exploité) ; le classement, lui, se fait avec la
+        fonction pure `score`, la même que le backend `memory` — c'est ce qui
+        rend les tests représentatifs.
+        """
+        mots = termes(query)
         stmt = select(DossierRow).order_by(
             DossierRow.date.desc(), DossierRow.id.desc()
         )
-        if folded:
-            like = f"%{folded}%"
-            stmt = stmt.where(DossierRow.search_index.like(like))
-        stmt = stmt.limit(limit)
+        if theme:
+            stmt = stmt.where(DossierRow.theme == theme)
+        for mot in mots:
+            stmt = stmt.where(DossierRow.search_index.like(f"%{mot}%"))
+        if not mots:
+            # Requête vide : le fil récent, éventuellement borné au thème.
+            stmt = stmt.limit(limit)
+            async with self._sf() as session:
+                rows = (await session.execute(stmt)).scalars().all()
+            return [_to_list_item(r) for r in rows]
+
+        stmt = stmt.limit(_MAX_CANDIDATS)
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
-        return [_to_list_item(r) for r in rows]
+        # Les lignes arrivent déjà triées par date : un tri stable par score
+        # décroissant conserve donc la date comme départage (§3.3).
+        classes = sorted(
+            rows, key=lambda r: score(_champs(r), mots, query), reverse=True
+        )
+        return [_to_list_item(r) for r in classes[:limit]]
+
+    async def list_themes(self) -> list[ThemeListItem]:
+        stmt = (
+            select(DossierRow.theme, func.count())
+            .group_by(DossierRow.theme)
+            .order_by(DossierRow.theme)
+        )
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).all()
+        return [ThemeListItem(nom=nom, nombre=nombre) for nom, nombre in rows]
 
     async def accueil(self, par_section: int = 10) -> Accueil:
         jour_expr = func.substr(DossierRow.date, 1, 10)

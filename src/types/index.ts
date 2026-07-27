@@ -392,6 +392,17 @@ export interface SectionTheme {
 }
 
 /**
+ * Un thème proposé en filtre de recherche (§3.3, miroir backend).
+ *
+ * Seuls les thèmes qui ont réellement des dossiers sont servis : on ne propose
+ * pas un filtre qui ne ramènerait rien (§2.5).
+ */
+export interface ThemeListItem {
+  nom: ThemeScrutin;
+  nombre: number;
+}
+
+/**
  * Écran d'accueil complet, servi en UNE réponse (miroir backend).
  * Construit côté serveur pour un affichage atomique — pas de remplissage
  * progressif des rangées. « Aujourd'hui » / « Hier » vides hors jours de
