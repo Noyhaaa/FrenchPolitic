@@ -85,6 +85,28 @@ def est_texte_procedural(*textes: str) -> bool:
     return any(p in blob for p in _PHRASES_PROCEDURALES)
 
 
+# Votes portant sur la CONDUITE DE LA SÉANCE, pas sur un contenu : ils sont
+# archivés comme les autres scrutins publics et peuvent être très serrés, mais
+# « les députés ont refusé de prolonger la séance au-delà de minuit » ne dit rien
+# de ce que le Parlement a décidé. Liste fermée, relevée sur les objets réels de
+# la base — on n'écarte que ce qu'on a constaté (§2.5).
+#
+# À distinguer d'`est_texte_procedural` : une motion de censure ou une
+# déclaration de politique générale sont, elles, des événements de fond.
+_PHRASES_CONDUITE_DE_SEANCE: tuple[str, ...] = (
+    "suspension de seance",
+    "prolonger la seance",
+    "seconde deliberation",
+)
+
+
+def est_vote_de_conduite_de_seance(objet: str) -> bool:
+    """Le vote porte-t-il sur le déroulement de la séance (suspension,
+    prolongation au-delà de minuit, demande de seconde délibération) ?"""
+    blob = fold(objet)
+    return any(p in blob for p in _PHRASES_CONDUITE_DE_SEANCE)
+
+
 def guess_theme(*textes: str) -> str:
     if est_texte_procedural(*textes):
         return THEME_PROCEDURAL
@@ -135,9 +157,29 @@ _RE_NUMERO_PARENT = re.compile(r"(?<!sous-)amendements?[^,]*?n[°o]\s*(\d+)")
 _RE_AUTEUR = re.compile(r"\bde\s+(M\.|Mme)\s+([A-ZÀ-Þ][\w'’/-]*)")
 
 
+# Zone de l'objet qui décrit l'amendement voté, avant toute référence à un AUTRE
+# amendement (« … à l'amendement n° 80 » d'un sous-amendement). Même découpe que
+# `auteur_amendement`, pour la même raison.
+_RE_RENVOI_AMENDEMENT = re.compile(r"(?:à\s+l['’]|aux\s+)amendements?\b", re.IGNORECASE)
+# Un objet au pluriel (« les amendements identiques n° 154 …, n° 207 … et n° 410 »)
+# porte plusieurs numéros : aucun ne désigne « l'amendement » voté à lui seul.
+_RE_PLURIEL = re.compile(r"\bamendements\b")
+_RE_TOUT_NUMERO = re.compile(r"n[°o]\s*\d+")
+
+
 def numero_amendement(objet: str) -> str | None:
     """Numéro de l'amendement (ou du sous-amendement) voté, extrait de l'objet
-    officiel. None si non identifiable (§2.5 : on n'invente pas)."""
+    officiel. None si non identifiable (§2.5 : on n'invente pas).
+
+    Un vote sur des **amendements identiques** (« les amendements identiques
+    n° 154 rectifié, …, n° 207 rectifié bis, et n° 410 ») porte plusieurs
+    numéros : en retenir un seul laisserait croire que le vote ne concernait que
+    celui-là. On n'en retient donc aucun, et l'objet officiel est restitué tel
+    quel par l'app.
+    """
+    zone = _RE_RENVOI_AMENDEMENT.split(objet, maxsplit=1)[0]
+    if _RE_PLURIEL.search(fold(zone)) and len(_RE_TOUT_NUMERO.findall(fold(zone))) > 1:
+        return None
     m = _RE_NUMERO.search(fold(objet))
     return m.group(1) if m else None
 
@@ -159,6 +201,58 @@ def auteur_amendement(objet: str) -> str | None:
     zone = re.split(r"(?:à\s+l['’]|aux\s+)amendements?\b", objet, flags=re.IGNORECASE)[0]
     auteurs = {f"{civ} {nom}" for civ, nom in _RE_AUTEUR.findall(zone)}
     return auteurs.pop() if len(auteurs) == 1 else None
+
+
+# Qui a déposé, tel que l'objet officiel le désigne. L'Assemblée écrit « du
+# Gouvernement », le Sénat « présenté par le Gouvernement » ; et la nature du
+# texte porte le même fait, par définition constitutionnelle (art. 39 : un
+# PROJET de loi émane du Gouvernement, une PROPOSITION d'un parlementaire).
+_RE_DEPOSANT_GOUVERNEMENT = re.compile(r"\b(?:du|par le)\s+gouvernement\b", re.I)
+# « de la commission des lois » désigne un déposant ; « de la commission mixte
+# paritaire » désigne le TEXTE examiné (mention de procédure), pas un auteur.
+_RE_DEPOSANT_COMMISSION = re.compile(
+    r"\b(?:de|par)\s+la\s+commission\b(?!\s+mixte\s+paritaire)", re.I
+)
+_RE_NATURE_GOUVERNEMENT = re.compile(r"\bprojet de loi\b", re.I)
+_RE_NATURE_PARLEMENTAIRE = re.compile(r"\bproposition de (?:loi|r[ée]solution)\b", re.I)
+# Le Sénat écrit « présenté par M. Prénom Nom » là où l'AN écrit « de M. Nom » :
+# une seule des deux formes suffit à désigner un parlementaire.
+_RE_AUTEUR_PERSONNE = re.compile(r"\b(?:de|par)\s+(?:M\.|Mme|MM\.|Mmes)\s", re.I)
+
+
+def deposant(objet: str) -> str | None:
+    """« gouvernement » / « commission » / « parlementaire » si l'objet officiel
+    du vote désigne le déposant **sans ambiguïté** — sinon None (§2.5).
+
+    Sert de garde-fou aux réponses générées : le modèle ne doit pas requalifier
+    l'auteur (cas réel : « Selon son auteur, LE DÉPUTÉ a proposé cet
+    amendement » sur l'amendement n° 7 **du Gouvernement**).
+
+    Deux indices concordants sont exigés dans les faits : quand la mention du
+    déposant et la nature du texte se contredisent — « l'amendement n° 3 de
+    M. Fugit … de la proposition de loi » concorde, mais « de M. X au projet de
+    loi » désigne un amendement parlementaire sur un texte gouvernemental —, on
+    renvoie None plutôt que de trancher. C'est ce qui rend le garde-fou sûr : il
+    ne s'applique que là où la source est univoque.
+    """
+    zone = _RE_RENVOI_AMENDEMENT.split(objet)[0]
+    trouves: set[str] = set()
+    if _RE_DEPOSANT_GOUVERNEMENT.search(zone):
+        trouves.add("gouvernement")
+    if _RE_DEPOSANT_COMMISSION.search(zone):
+        trouves.add("commission")
+    if _RE_AUTEUR_PERSONNE.search(zone):
+        trouves.add("parlementaire")
+    # La nature du texte ne désigne que le déposant DU TEXTE : sur un vote
+    # d'amendement, « … à l'article 5 du projet de loi » ne dit rien de qui a
+    # déposé l'AMENDEMENT (un député amende couramment un projet de loi). On ne
+    # s'en sert donc que pour un vote portant sur le texte lui-même.
+    if not est_amendement(objet) and not est_sous_amendement(objet):
+        if _RE_NATURE_GOUVERNEMENT.search(zone):
+            trouves.add("gouvernement")
+        if _RE_NATURE_PARLEMENTAIRE.search(zone):
+            trouves.add("parlementaire")
+    return trouves.pop() if len(trouves) == 1 else None
 
 
 # Texte de loi cité dans l'objet d'un vote (« … à l'article 2 de la proposition

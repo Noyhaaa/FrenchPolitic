@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
 from app.domain.enums import (
+    Chambre,
     NiveauConfiance,
     PositionVote,
     SortAmendement,
@@ -44,12 +45,15 @@ class ResultatGlobal(CamelModel):
 
 
 class Votant(CamelModel):
-    """Un député nommé dans la ventilation nominative d'un scrutin (§5.2).
+    """Un parlementaire nommé dans la ventilation nominative d'un scrutin (§5.2).
 
     `depute_id` n'est renseigné **que** si l'acteur figure dans le référentiel
-    des députés servi par l'API : c'est lui qui autorise l'app à ouvrir la fiche
-    du député, et un lien ne doit jamais mener à un 404. Un ancien député (mandat
-    terminé en cours de législature) garde donc son nom, sans identifiant.
+    servi par l'API : c'est lui qui autorise l'app à ouvrir la fiche du
+    parlementaire, et un lien ne doit jamais mener à un 404. Un ancien député
+    (mandat terminé en cours de législature) garde donc son nom, sans
+    identifiant. Le champ garde son nom historique alors qu'il porte aussi des
+    sénateurs (`SEN-…`) : c'est la clé du référentiel commun, pas une assertion
+    sur la chambre — celle-ci est portée par `Scrutin.chambre`.
     """
 
     nom: str
@@ -105,8 +109,23 @@ class ChangementTexte(CamelModel):
 
 
 class PhaseScrutin(CamelModel):
+    """Une étape de la trajectoire du texte au Parlement (frise de la fiche).
+
+    Documentée par les **actes législatifs officiels** du dossier (AN, Sénat,
+    CMP, Conseil constitutionnel) quand l'archive les fournit, sinon par les
+    mentions de navette portées par les objets de vote.
+
+    `statut` reste optionnel : il n'est posé que si un vote sur l'ensemble de
+    CETTE étape le documente. Une étape connue mais pas encore conclue s'affiche
+    donc avec sa seule date, plutôt qu'avec un statut deviné (§2.5).
+    `chambre` est absente pour les étapes communes aux deux assemblées (CMP) ou
+    extérieures au Parlement (Conseil constitutionnel).
+    """
+
     label: str
-    statut: StatutScrutin
+    chambre: Chambre | None = None
+    statut: StatutScrutin | None = None
+    date: str | None = None  # ISO 8601
 
 
 class ArgumentGroupe(CamelModel):
@@ -207,6 +226,9 @@ class Scrutin(CamelModel):
     date: str  # ISO 8601
     objet: str
     statut: StatutScrutin
+    # Chambre où le vote a eu lieu. À afficher : un dossier agrège les votes des
+    # deux assemblées, et « 214 pour » n'a pas le même sens selon l'hémicycle.
+    chambre: Chambre = Chambre.assemblee
     scrutin_public: bool
     resultat: ResultatGlobal
     positions_groupes: list[PositionGroupe] = []
@@ -232,6 +254,7 @@ class ScrutinResume(CamelModel):
     date: str
     objet: str
     statut: StatutScrutin
+    chambre: Chambre = Chambre.assemblee
     scrutin_public: bool
     resultat: ResultatGlobal
 
@@ -242,6 +265,7 @@ class ScrutinResume(CamelModel):
             date=s.date,
             objet=s.objet,
             statut=s.statut,
+            chambre=s.chambre,
             scrutin_public=s.scrutin_public,
             resultat=s.resultat,
         )
@@ -308,6 +332,10 @@ class Dossier(CamelModel):
     accroche: str | None = None
     statut: StatutScrutin
     phase: PhaseScrutin | None = None
+    # Trajectoire du texte au Parlement, dans l'ordre chronologique (frise de la
+    # fiche). Vide quand aucune étape n'est documentée — la frise est alors
+    # masquée plutôt que devinée (§2.5).
+    trajectoire: list[PhaseScrutin] = []
     theme: str
     temps_lecture_sec: int
     date_dernier_scrutin: str
@@ -342,9 +370,26 @@ class DossierListItem(CamelModel):
     temps_lecture_sec: int
     nombre_scrutins: int
     mise_a_jour: MiseAJourDossier | None = None
+    # Chambres qui ont voté ce texte, dans l'ordre chronologique. Une carte du
+    # fil doit dire d'où vient le vote qu'elle résume : sans ça, un texte encore
+    # au Sénat se lirait comme un vote de l'Assemblée (§2.5).
+    chambres: list[Chambre] = []
     # Résultat du dernier scrutin **public** (voix pour/contre) pour la barre de
     # la carte. None si le dernier vote n'est pas nominatif (§5.2, §2.5).
     resultat_dernier_scrutin: ResultatGlobal | None = None
+
+    @staticmethod
+    def _chambres(scrutins: list[ScrutinResume]) -> list[Chambre]:
+        """Chambres ayant voté, du plus ancien vote au plus récent, sans doublon.
+
+        `scrutins` arrive du plus récent au plus ancien : on le remonte pour
+        retrouver l'ordre dans lequel le texte a circulé.
+        """
+        ordre: list[Chambre] = []
+        for s in reversed(scrutins):
+            if s.chambre not in ordre:
+                ordre.append(s.chambre)
+        return ordre
 
     @staticmethod
     def _resultat_dernier(scrutins: list[ScrutinResume]) -> ResultatGlobal | None:
@@ -369,6 +414,7 @@ class DossierListItem(CamelModel):
             temps_lecture_sec=d.temps_lecture_sec,
             nombre_scrutins=len(d.scrutins),
             mise_a_jour=d.mise_a_jour,
+            chambres=cls._chambres(d.scrutins),
             resultat_dernier_scrutin=cls._resultat_dernier(d.scrutins),
         )
 
@@ -391,6 +437,35 @@ class ThemeListItem(CamelModel):
     nombre: int
 
 
+class VoteDisputeItem(CamelModel):
+    """Un vote de la rangée « Les votes les plus disputés » de l'accueil.
+
+    « Disputé » qualifie **l'arithmétique du scrutin**, jamais la mesure votée
+    (§4.3) : l'ordre vient de `app/domain/division.py`, qui ne lit que les
+    décomptes officiels. C'est pourquoi l'item porte les chiffres bruts — la
+    carte les affiche à côté du rang, pour que le lecteur voie le fait.
+
+    `groupesDisperses` est **absent au Sénat** : la délégation de vote par
+    groupe y rend le fait indéfendable (même doctrine que « contre son
+    groupe »), et le client masque alors la mention.
+    """
+
+    scrutin_id: str
+    dossier_id: str
+    # Titre d'affichage du dossier : situer le vote, qui n'a aucun sens seul.
+    dossier_titre: str
+    objet: str
+    date: str
+    chambre: Chambre
+    statut: StatutScrutin
+    resultat: ResultatGlobal
+    # Écart de voix entre le pour et le contre — le fait le plus parlant.
+    ecart: int
+    # Positions majoritaires distinctes parmi les groupes (1 = unanimité).
+    camps: int
+    groupes_disperses: int | None = None
+
+
 class Accueil(CamelModel):
     """Écran d'accueil complet, servi en UNE réponse.
 
@@ -403,4 +478,6 @@ class Accueil(CamelModel):
     a_la_une: DossierListItem | None = None
     aujourdhui: list[DossierListItem] = []
     hier: list[DossierListItem] = []
+    # Vide si aucun vote récent n'est classable → le client masque la rangée.
+    votes_disputes: list[VoteDisputeItem] = []
     sections: list[SectionTheme] = []

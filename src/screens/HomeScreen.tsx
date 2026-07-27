@@ -22,10 +22,11 @@ import {
   LoadingView,
   OfflineBanner,
   RecapVotes,
+  VoteDisputeTile,
 } from '@/components';
 import { themeEmoji } from '@/constants/themes';
 import { useAccueil, useRecap } from '@/hooks';
-import { DossierListItem } from '@/types';
+import { DossierListItem, VoteDisputeItem } from '@/types';
 import type { RootStackParamList } from '@/navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -65,6 +66,41 @@ function TuilesRow({
   );
 }
 
+/**
+ * Rangée « Les votes les plus disputés » (§2.2 : voir où le Parlement s'est
+ * divisé). L'ordre vient du backend, calculé sur les seuls décomptes officiels
+ * — le sous-titre le dit, pour qu'aucun lecteur ne prenne le classement pour un
+ * jugement sur les mesures (§4.3). Rangée vide → masquée (§2.5).
+ */
+function VotesDisputesRow({
+  votes,
+  onPress,
+}: {
+  votes: VoteDisputeItem[];
+  onPress: (v: VoteDisputeItem) => void;
+}) {
+  if (votes.length === 0) return null;
+  return (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Text style={typography.sectionTitle}>Les votes les plus disputés</Text>
+      </View>
+      <Text style={[typography.meta, styles.sectionSousTitre]}>
+        Classés par l'écart de voix, l'abstention et la division des groupes.
+      </Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.rail}
+      >
+        {votes.map((v) => (
+          <VoteDisputeTile key={v.scrutinId} vote={v} onPress={onPress} />
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
 export function HomeScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
@@ -75,6 +111,14 @@ export function HomeScreen() {
   const onPressDossier = useCallback(
     (dossier: DossierListItem) =>
       navigation.navigate('DossierDetail', { dossierId: dossier.id }),
+    [navigation],
+  );
+
+  // Un vote disputé ouvre sa fiche vote : c'est là que vivent la ventilation
+  // par groupe et le nominatif qui expliquent la division.
+  const onPressVoteDispute = useCallback(
+    (vote: VoteDisputeItem) =>
+      navigation.navigate('ScrutinDetail', { scrutinId: vote.scrutinId }),
     [navigation],
   );
 
@@ -174,6 +218,11 @@ export function HomeScreen() {
               onPress={onPressDossier}
             />
 
+            <VotesDisputesRow
+              votes={accueil.votesDisputes ?? []}
+              onPress={onPressVoteDispute}
+            />
+
             {recap ? (
               <View style={styles.recapWrap}>
                 <RecapVotes recap={recap} />
@@ -244,6 +293,12 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
+  },
+  // Dit sur quoi porte le classement : sans cette ligne, « disputés » se lirait
+  // comme un jugement de l'app plutôt que comme une lecture des décomptes.
+  sectionSousTitre: {
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
   },
   rail: {
     gap: spacing.md,

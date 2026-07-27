@@ -1,5 +1,6 @@
 import {
   Amendement,
+  Chambre,
   ObjetVote,
   PositionVote,
   ScrutinResume,
@@ -166,61 +167,20 @@ export function natureTexte(titre: string): string | undefined {
   return undefined;
 }
 
-/** Phases de la navette reconnues dans les objets officiels des votes AN.
- * (Les « parties » du budget ne sont pas des phases de navette — exclues.) */
-const PHASES_NAVETTE: ReadonlyArray<[RegExp, string]> = [
-  [/premiere lecture/, 'Première lecture'],
-  [/deuxieme lecture/, 'Deuxième lecture'],
-  [/troisieme lecture/, 'Troisième lecture'],
-  [/commission mixte paritaire/, 'Commission mixte paritaire'],
-  [/nouvelle lecture/, 'Nouvelle lecture'],
-  [/lecture definitive/, 'Lecture définitive'],
-];
-
-/** Une étape de la trajectoire du texte À L'ASSEMBLÉE (frise de la fiche). */
-export interface PhaseNavette {
-  label: string;
-  /** Statut du vote sur l'ensemble de cette phase — absent si la phase n'a pas
-   * (encore) de vote d'ensemble documenté (§2.5 : on n'infère pas). */
-  statut?: StatutScrutin;
-  /** Date du vote le plus récent de la phase (ISO). */
-  date: string;
+/**
+ * Nom d'une chambre du Parlement, tel qu'on l'écrit à l'écran.
+ *
+ * Un dossier agrège désormais les votes des deux assemblées : chaque vote et
+ * chaque étape de navette doit dire d'où elle vient, sinon « 214 pour » se lit
+ * comme un vote de l'Assemblée alors que c'en est un du Sénat (§2.5).
+ */
+export function libelleChambre(chambre: Chambre): string {
+  return chambre === 'senat' ? 'Sénat' : 'Assemblée nationale';
 }
 
-/**
- * Trajectoire du texte à l'Assemblée : les phases de navette que les libellés
- * officiels des votes documentent, dans l'ordre chronologique. 100 % factuel :
- * une phase n'apparaît que si un vote la mentionne, et son statut ne vient que
- * du vote sur l'ensemble de cette phase. Les étapes hors AN (Sénat) ne sont
- * pas couvertes par nos données — elles ne sont donc pas affichées (§2.5).
- * Vide si aucun vote ne porte de mention de phase.
- */
-export function phasesNavette(scrutins: ScrutinResume[]): PhaseNavette[] {
-  const parLabel = new Map<string, PhaseNavette & { ordre: number }>();
-  // La liste arrive du plus récent au plus ancien → on remonte le fil.
-  const chrono = [...scrutins].reverse();
-  chrono.forEach((s, ordre) => {
-    const t = plier(s.objet);
-    for (const [re, label] of PHASES_NAVETTE) {
-      if (!re.test(t)) continue;
-      const estEnsemble = t.includes('ensemble');
-      const connu = parLabel.get(label);
-      if (!connu) {
-        parLabel.set(label, {
-          label,
-          date: s.date,
-          ordre,
-          statut: estEnsemble ? s.statut : undefined,
-        });
-      } else {
-        connu.date = s.date;
-        if (estEnsemble) connu.statut = s.statut;
-      }
-    }
-  });
-  return [...parLabel.values()]
-    .sort((a, b) => a.ordre - b.ordre)
-    .map(({ ordre: _ordre, ...phase }) => phase);
+/** Variante courte, pour les vignettes et les lignes de liste. */
+export function libelleChambreCourt(chambre: Chambre): string {
+  return chambre === 'senat' ? 'Sénat' : 'Assemblée nat.';
 }
 
 /**

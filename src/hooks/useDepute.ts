@@ -17,7 +17,7 @@ interface State {
 }
 
 /**
- * Fiche d'un député : profil, portrait de vote et historique paginé, avec
+ * Fiche d'un parlementaire : profil, portrait de vote et historique paginé, avec
  * repli cache hors-ligne (§8). Une page plus courte que `PAGE_VOTES` signale
  * la fin de l'historique — on ne demande alors plus rien.
  */

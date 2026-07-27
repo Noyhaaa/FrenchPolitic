@@ -2,15 +2,11 @@ import { Fragment } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { colors, radius, spacing, typography } from '@/theme';
-import { StatutScrutin } from '@/types';
-import {
-  formatDateLong,
-  statutLabel,
-  type PhaseNavette,
-} from '@/utils/format';
+import { PhaseScrutin, StatutScrutin } from '@/types';
+import { formatDateLong, libelleChambre, statutLabel } from '@/utils/format';
 
 interface Props {
-  phases: PhaseNavette[];
+  phases: PhaseScrutin[];
 }
 
 /** Icône + couleur par statut — jamais la couleur seule (RGAA §8) : le libellé
@@ -22,26 +18,34 @@ const STATUT_UI: Record<StatutScrutin, { icon: string; color: string }> = {
 };
 
 /**
- * Frise de la trajectoire du texte **à l'Assemblée** (fiche dossier) : les
- * phases de navette documentées par les libellés officiels des votes
- * (« Première lecture », « Commission mixte paritaire », « Lecture
- * définitive »…), dans l'ordre chronologique, avec le statut du vote sur
- * l'ensemble de chaque phase quand il existe (§2.5 : sans vote d'ensemble,
- * la phase s'affiche sans statut — on n'infère rien). Les étapes hors AN
- * (Sénat) ne sont pas dans nos données, donc pas dans la frise.
+ * Frise de la trajectoire du texte **au Parlement** (fiche dossier) : les
+ * étapes de la navette dans l'ordre chronologique — lectures à l'Assemblée ET
+ * au Sénat, commission mixte paritaire, Conseil constitutionnel, promulgation.
+ *
+ * Elle est **calculée côté backend** (`Dossier.trajectoire`) depuis les actes
+ * législatifs officiels du dossier : l'app ne peut pas la déduire des scrutins,
+ * qui ne documentent que ce que chaque chambre a voté. Le statut d'une étape
+ * n'est affiché que si la source le dit (§2.5 : une étape en cours s'affiche
+ * avec sa seule date, on n'infère rien), et la chambre est écrite en toutes
+ * lettres — jamais portée par la seule couleur (RGAA §8).
  */
 export function TrajectoireNavette({ phases }: Props) {
   if (phases.length === 0) return null;
   return (
     <View style={styles.card}>
       <Text style={[typography.overline, styles.titre]}>
-        Trajectoire à l'Assemblée
+        Trajectoire au Parlement
       </Text>
       <View style={styles.steps}>
         {phases.map((p, i) => {
           const ui = p.statut ? STATUT_UI[p.statut] : null;
+          const chambre = p.chambre ? libelleChambre(p.chambre) : null;
+          const date = p.date ? formatDateLong(p.date) : null;
+          // Une étape peut n'avoir ni statut ni date (rare) : on n'affiche
+          // alors que son libellé officiel plutôt qu'une ligne vide.
+          const detail = ui && p.statut ? statutLabel(p.statut) : date;
           return (
-            <Fragment key={p.label}>
+            <Fragment key={`${p.label}-${p.chambre ?? 'commune'}`}>
               {i > 0 ? (
                 <Text style={styles.fleche} importantForAccessibility="no">
                   →
@@ -50,20 +54,26 @@ export function TrajectoireNavette({ phases }: Props) {
               <View
                 style={styles.step}
                 accessibilityRole="text"
-                accessibilityLabel={
-                  p.statut
-                    ? `${p.label} : ${statutLabel(p.statut)}, ${formatDateLong(p.date)}.`
-                    : `${p.label}, ${formatDateLong(p.date)}.`
-                }
+                accessibilityLabel={[
+                  chambre ? `${chambre} :` : null,
+                  p.label,
+                  p.statut ? `: ${statutLabel(p.statut)}` : null,
+                  date ? `, ${date}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
               >
+                {chambre ? (
+                  <Text style={styles.stepChambre}>{chambre}</Text>
+                ) : null}
                 <Text style={styles.stepLabel}>{p.label}</Text>
                 {ui && p.statut ? (
                   <Text style={[styles.stepStatut, { color: ui.color }]}>
                     {ui.icon} {statutLabel(p.statut)}
                   </Text>
-                ) : (
-                  <Text style={styles.stepDate}>{formatDateLong(p.date)}</Text>
-                )}
+                ) : detail ? (
+                  <Text style={styles.stepDate}>{detail}</Text>
+                ) : null}
               </View>
             </Fragment>
           );
@@ -96,6 +106,10 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
     gap: 2,
+  },
+  stepChambre: {
+    ...typography.meta,
+    color: colors.textTertiary,
   },
   stepLabel: {
     ...typography.label,

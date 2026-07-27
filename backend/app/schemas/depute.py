@@ -1,24 +1,33 @@
-"""Contrat d'API des députés — miroir exact des types du frontend
+"""Contrat d'API des parlementaires — miroir exact des types du frontend
 (`src/types/index.ts`).
 
-Le sens de vote d'un député n'existe que pour les **scrutins publics**
-(nominatifs, §5.2) : c'est la seule source de l'historique. « Contre son
-groupe » est un **fait déduit** (position du député ≠ `positionMajoritaire` de
-son groupe sur le MÊME scrutin), jamais une interprétation (§7.4). Toute
-statistique non calculable reste `None` — le client masque alors la donnée
-plutôt que de la combler (§2.5).
+Le sens de vote n'existe que pour les **scrutins publics** (nominatifs, §5.2) :
+c'est la seule source de l'historique. « Contre son groupe » est un **fait
+déduit** (position ≠ `positionMajoritaire` de son groupe sur le MÊME scrutin),
+jamais une interprétation (§7.4). Toute statistique non calculable reste
+`None` — le client masque alors la donnée plutôt que de la combler (§2.5).
+
+⚠️ **Sénateurs.** Le référentiel est commun aux deux chambres (les noms
+`Depute`/`depute_id` sont historiques, `chambre` est le discriminant). Mais au
+Sénat, les bulletins d'un scrutin public ordinaire sont déposés par un délégué
+de groupe pour l'ensemble de ses membres : le nominatif y reflète la position du
+GROUPE, pas l'acte individuel de chaque sénateur — et la source ne permet pas de
+distinguer ces scrutins de ceux à la tribune. `contre_son_groupe` et
+`cohesion_groupe` restent donc **toujours `None`** pour un sénateur : ce sont
+des faits que la source ne soutient pas (§7.4).
 """
 from __future__ import annotations
 
-from app.domain.enums import ObjetVote, PositionVote
+from app.domain.enums import Chambre, ObjetVote, PositionVote
 from app.schemas.scrutin import CamelModel
 
 
 class Depute(CamelModel):
-    """Un député (organe « acteur » de l'open data AN)."""
+    """Un parlementaire (« acteur » de l'open data AN, ou sénateur senat.fr)."""
 
-    id: str  # acteurRef AMO (PA…)
+    id: str  # acteurRef AMO (PA…) ou matricule Sénat préfixé (SEN-…)
     nom: str
+    chambre: Chambre = Chambre.assemblee
     groupe_id: str
     groupe_nom: str
     groupe_couleur: str
@@ -33,6 +42,7 @@ class DeputeListItem(CamelModel):
 
     id: str
     nom: str
+    chambre: Chambre = Chambre.assemblee
     groupe_nom: str
     groupe_couleur: str
     circonscription: str
@@ -43,6 +53,7 @@ class DeputeListItem(CamelModel):
         return cls(
             id=d.id,
             nom=d.nom,
+            chambre=d.chambre,
             groupe_nom=d.groupe_nom,
             groupe_couleur=d.groupe_couleur,
             circonscription=d.circonscription,
@@ -61,7 +72,9 @@ class PortraitVote(CamelModel):
 
     `cohesion_groupe` est un ratio 0..1, absent quand il n'est pas calculable
     (aucun vote exprimé dont le groupe avait une position majoritaire) —
-    « information non disponible » plutôt qu'un zéro trompeur (§2.5).
+    « information non disponible » plutôt qu'un zéro trompeur (§2.5). Toujours
+    absent pour un **sénateur** (délégation de vote par groupe, cf. l'en-tête
+    de ce module).
     """
 
     cohesion_groupe: float | None = None
@@ -81,7 +94,8 @@ class VoteDepute(CamelModel):
     dossier_id: str | None = None
     position: PositionVote
     # True si la position diffère de la majorité de son groupe sur ce scrutin.
-    # None quand le groupe n'a pas de position majoritaire documentée (§2.5).
+    # None quand le groupe n'a pas de position majoritaire documentée (§2.5),
+    # et TOUJOURS None au Sénat (délégation de vote, cf. en-tête du module).
     contre_son_groupe: bool | None = None
 
 
@@ -103,3 +117,4 @@ class GroupeListItem(CamelModel):
     nom: str
     abrev: str
     couleur: str
+    chambre: Chambre = Chambre.assemblee

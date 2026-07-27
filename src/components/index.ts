@@ -2,6 +2,7 @@ export { StatusBadge } from './StatusBadge';
 export { ThemeAvatar } from './ThemeAvatar';
 export { DossierCard } from './DossierCard';
 export { DossierTile, TILE_WIDTH } from './DossierTile';
+export { VoteDisputeTile, DISPUTE_TILE_WIDTH } from './VoteDisputeTile';
 export { HeroDossier } from './HeroDossier';
 export { MiniResultat } from './MiniResultat';
 export { RecapVotes } from './RecapVotes';

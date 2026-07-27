@@ -6,7 +6,7 @@ sans dépendre d'une base. Unité : le dossier (texte) et ses scrutins.
 """
 from __future__ import annotations
 
-from app.domain.enums import ObjetVote, PositionVote
+from app.domain.enums import Chambre, ObjetVote, PositionVote
 from app.ingestion.normalize import type_objet_vote
 from app.schemas import (
     Amendement,
@@ -50,6 +50,14 @@ _GROUPES = {
     "ECO": ("Écologistes", "#2F8F4E"),
 }
 
+# Groupes du Sénat (fictifs eux aussi). Identifiants préfixés comme à
+# l'ingestion : les deux chambres partagent les tables, jamais les ids.
+_GROUPES_SENAT = {
+    "SEN-UC": ("Union Centriste (Sénat)", "#6EC1E4"),
+    "SEN-SOC": ("Socialistes (Sénat)", "#E24A6E"),
+    "SEN-LR": ("Les Républicains (Sénat)", "#2E6FB5"),
+}
+
 
 def _grp(gid: str, position: str, pour: int, contre: int, abst: int, cohesion: float):
     nom, couleur = _GROUPES[gid]
@@ -62,6 +70,27 @@ def _grp(gid: str, position: str, pour: int, contre: int, abst: int, cohesion: f
         contre=contre,
         abstention=abst,
         cohesion=cohesion,
+    )
+
+
+def _grp_senat(gid: str, position: str, pour: int, contre: int, abst: int):
+    """Position d'un groupe du Sénat — **sans cohésion**.
+
+    Au Sénat les bulletins d'un scrutin public ordinaire sont déposés par un
+    délégué pour tout le groupe : une cohésion calculée là-dessus mesurerait la
+    procédure, pas les votes (§7.4). Le seed reflète donc ce que l'ingestion
+    produit réellement.
+    """
+    nom, couleur = _GROUPES_SENAT[gid]
+    return PositionGroupe(
+        groupe_id=gid,
+        groupe_nom=nom,
+        couleur=couleur,
+        position_majoritaire=position,
+        pour=pour,
+        contre=contre,
+        abstention=abst,
+        cohesion=None,
     )
 
 
@@ -235,6 +264,31 @@ SEED_SCRUTINS: list[Scrutin] = [
             _grp("ECO", "contre", 1, 33, 2, 0.94),
         ],
         sources=_sources("scrutin", "amendements"),
+    ),
+    # Vote du SÉNAT sur le même dossier que « scr-2026-0410 » : c'est la
+    # démonstration de la jointure bicamérale (un texte, un dossier, deux
+    # chambres). Pas de cohésion, pas de « contre son groupe » — cf. `_grp_senat`.
+    Scrutin(
+        id="SEN-2026-118",
+        dossier_id="dos-energie-2026",
+        date="2026-07-09T15:00:00Z",
+        objet="L'ensemble du projet de loi relatif à la sobriété énergétique",
+        statut="adopte",
+        chambre="senat",
+        scrutin_public=True,
+        resultat=ResultatGlobal(pour=201, contre=112, abstention=25, non_votants=10),
+        positions_groupes=[
+            _grp_senat("SEN-LR", "pour", 120, 2, 6),
+            _grp_senat("SEN-UC", "pour", 48, 1, 5),
+            _grp_senat("SEN-SOC", "contre", 3, 60, 4),
+        ],
+        sources=[
+            SourceOfficielle(
+                type="scrutin",
+                libelle="Scrutin",
+                url="https://www.senat.fr/scrutin-public/2025/scr2025-118.html",
+            )
+        ],
     ),
     Scrutin(
         id="scr-2026-0410",
@@ -412,8 +466,29 @@ SEED_DOSSIERS: list[Dossier] = [
         statut="adopte",
         theme="Énergie",
         temps_lecture_sec=30,
-        date_dernier_scrutin="2026-07-07T16:00:00Z",
-        scrutins=[_resume_scrutin("scr-2026-0410")],
+        date_dernier_scrutin="2026-07-09T15:00:00Z",
+        # Trajectoire BICAMÉRALE : le texte a été voté à l'Assemblée puis au
+        # Sénat. La dernière étape n'a pas de statut — elle est documentée par
+        # les actes officiels mais aucun vote ne la conclut encore (§2.5).
+        trajectoire=[
+            PhaseScrutin(
+                label="1ère lecture (1ère assemblée saisie)",
+                chambre="assemblee",
+                statut="adopte",
+                date="2026-07-07",
+            ),
+            PhaseScrutin(
+                label="1ère lecture (2ème assemblée saisie)",
+                chambre="senat",
+                statut="adopte",
+                date="2026-07-09",
+            ),
+            PhaseScrutin(label="Commission Mixte Paritaire", date="2026-07-20"),
+        ],
+        scrutins=[
+            _resume_scrutin("SEN-2026-118"),
+            _resume_scrutin("scr-2026-0410"),
+        ],
         amendements=[],
         sources=_sources("texte", "debats"),
         resume=ResumeScrutin(
@@ -525,8 +600,17 @@ SEED_DOSSIERS: list[Dossier] = [
 _DOSSIER_PAR_ID = {d.id: d for d in SEED_DOSSIERS}
 
 SEED_GROUPES: list[GroupeListItem] = [
-    GroupeListItem(id=gid, nom=nom, abrev=gid, couleur=couleur)
+    GroupeListItem(id=gid, nom=nom, abrev=gid, couleur=couleur, chambre="assemblee")
     for gid, (nom, couleur) in _GROUPES.items()
+] + [
+    GroupeListItem(
+        id=gid,
+        nom=nom,
+        abrev=gid.removeprefix("SEN-"),
+        couleur=couleur,
+        chambre="senat",
+    )
+    for gid, (nom, couleur) in _GROUPES_SENAT.items()
 ]
 
 # (id, nom, groupe, circonscription, début de mandat)
@@ -545,6 +629,7 @@ SEED_DEPUTES: list[Depute] = [
     Depute(
         id=identifiant,
         nom=nom,
+        chambre="assemblee",
         groupe_id=groupe,
         groupe_nom=_GROUPES[groupe][0],
         groupe_couleur=_GROUPES[groupe][1],
@@ -555,13 +640,39 @@ SEED_DEPUTES: list[Depute] = [
     for identifiant, nom, groupe, circo, depuis in _DEPUTES
 ]
 
+# Sénateurs FICTIFS. L'annuaire du Sénat ne publie pas de début de mandat :
+# `depuis` reste absent, comme à l'ingestion (§2.5).
+_SENATEURS: tuple[tuple[str, str, str, str], ...] = (
+    ("sen-seed-01", "Martine Ravel", "SEN-LR", "Aveyron"),
+    ("sen-seed-02", "Bernard Lestrade", "SEN-UC", "Ille-et-Vilaine"),
+    ("sen-seed-03", "Sylvie Nogaro", "SEN-SOC", "Nord"),
+)
+
+SEED_DEPUTES += [
+    Depute(
+        id=identifiant,
+        nom=nom,
+        chambre="senat",
+        groupe_id=groupe,
+        groupe_nom=_GROUPES_SENAT[groupe][0],
+        groupe_couleur=_GROUPES_SENAT[groupe][1],
+        circonscription=circo,
+        depuis=None,
+        portrait_url=None,
+    )
+    for identifiant, nom, groupe, circo in _SENATEURS
+]
+
 
 def _vote_depute(scrutin_id: str, groupe_id: str, position: str) -> VoteDepute:
     """Une entrée d'historique, dérivée du scrutin seed correspondant.
 
     « Contre son groupe » est calculé (position ≠ position majoritaire du
     groupe sur CE scrutin) — jamais saisi à la main, comme à l'ingestion
-    (§7.4). Absent si le groupe n'a pas de position sur ce vote (§2.5).
+    (§7.4). Absent si le groupe n'a pas de position sur ce vote (§2.5), et
+    **toujours** absent sur un vote du Sénat : les bulletins d'un scrutin public
+    ordinaire y sont déposés par un délégué pour tout le groupe, une divergence
+    calculée là-dessus mesurerait la procédure, pas le vote.
     """
     scrutin = _SCRUTIN[scrutin_id]
     objet_type = type_objet_vote(scrutin.objet)
@@ -579,7 +690,12 @@ def _vote_depute(scrutin_id: str, groupe_id: str, position: str) -> VoteDepute:
     )
     exprime = position != PositionVote.non_votant.value
     contre_son_groupe = None
-    if exprime and majoritaire is not None and majoritaire != PositionVote.non_votant:
+    if (
+        scrutin.chambre is Chambre.assemblee
+        and exprime
+        and majoritaire is not None
+        and majoritaire != PositionVote.non_votant
+    ):
         contre_son_groupe = position != majoritaire.value
     return VoteDepute(
         scrutin_id=scrutin.id,
@@ -641,6 +757,12 @@ _POSITIONS: dict[str, dict[str, str]] = {
         "scr-2026-0405": "pour",
         "scr-2026-0398": "pour",
     },
+    # Sénateurs : leur seul vote possible est celui du Sénat. « sen-seed-03 »
+    # vote à l'inverse de son groupe, et pourtant `contreSonGroupe` reste absent
+    # — c'est exactement ce que la délégation de vote impose (§7.4).
+    "sen-seed-01": {"SEN-2026-118": "pour"},
+    "sen-seed-02": {"SEN-2026-118": "pour"},
+    "sen-seed-03": {"SEN-2026-118": "pour"},
 }
 
 # Historique par député, du plus récent au plus ancien (comme l'API réelle).

@@ -3,7 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { colors, radius, spacing, typography } from '@/theme';
 import { DossierListItem } from '@/types';
 import { themeEmoji, themeTintDark } from '@/constants/themes';
-import { formatDateRelative } from '@/utils/format';
+import { formatDateRelative, libelleChambreCourt } from '@/utils/format';
 import { StatusBadge } from './StatusBadge';
 import { MiniResultat } from './MiniResultat';
 
@@ -59,7 +59,11 @@ export function DossierTile({ dossier, onPress }: Props) {
           <MiniResultat resultat={dossier.resultatDernierScrutin} height={4} />
         ) : null}
         <View style={styles.footer}>
-          <Text style={typography.meta}>Assemblée nat.</Text>
+          {/* Chambre(s) qui ont voté — pas « Assemblée nat. » en dur : un texte
+              peut n'avoir été voté qu'au Sénat, ou dans les deux (§2.5). */}
+          <Text style={typography.meta}>
+            {(dossier.chambres ?? []).map(libelleChambreCourt).join(' · ')}
+          </Text>
           <Text style={typography.meta}>{formatDateRelative(dossier.date)}</Text>
         </View>
       </View>

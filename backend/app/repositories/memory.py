@@ -9,11 +9,14 @@ from __future__ import annotations
 from collections import Counter
 from datetime import date, timedelta
 
+from app.domain.division import division
 from app.domain.enums import PositionVote
 from app.domain.recherche import ChampsRecherche, index_recherche, score, termes
 from app.repositories.base import (
+    MAX_DISPUTES_PAR_DOSSIER,
     DossierRepository,
     construire_portrait,
+    limiter_par_dossier,
     ordonner_sections,
 )
 from app.schemas import (
@@ -30,11 +33,16 @@ from app.schemas import (
     SectionTheme,
     ThemeListItem,
     VoteDepute,
+    VoteDisputeItem,
 )
 from app.utils.text import fold as _fold
 
 # Même fenêtre que le repository Postgres (§5.2) : les 12 derniers mois.
 FENETRE_PORTRAIT_JOURS = 365
+
+# Mêmes règles que le repository Postgres pour la rangée des votes disputés.
+FENETRE_DISPUTES_JOURS = 90
+_MAX_DISPUTES = 10
 
 
 def _champs(d: Dossier) -> ChampsRecherche:
@@ -126,6 +134,7 @@ class InMemoryDossierRepository(DossierRepository):
             a_la_une=a_la_une,
             aujourdhui=[d for d in reste if d.date[:10] == aujourdhui_str],
             hier=[d for d in reste if d.date[:10] == hier_str],
+            votes_disputes=self._votes_disputes(),
             sections=ordonner_sections(
                 [
                     SectionTheme(theme=t, dossiers=liste[:par_section])
@@ -133,6 +142,59 @@ class InMemoryDossierRepository(DossierRepository):
                 ]
             ),
         )
+
+    def _votes_disputes(self) -> list[VoteDisputeItem]:
+        """Mêmes règles qu'en Postgres, calculées à la volée sur le seed."""
+        classes: list[tuple[float, VoteDisputeItem]] = []
+        dates = [s.date for s in self._scrutins.values() if s.date]
+        if not dates:
+            return []
+        try:
+            depuis = (
+                date.fromisoformat(max(dates)[:10])
+                - timedelta(days=FENETRE_DISPUTES_JOURS)
+            ).isoformat()
+        except ValueError:
+            return []
+
+        for scrutin in self._scrutins.values():
+            if not scrutin.date or scrutin.date < depuis:
+                continue
+            dossier = self._by_id.get(scrutin.dossier_id)
+            if dossier is None:
+                continue  # un vote sans son texte ne peut pas être situé (§2.5)
+            mesure = division(
+                scrutin.resultat,
+                scrutin.positions_groupes,
+                scrutin.chambre,
+                objet=scrutin.objet,
+                scrutin_public=scrutin.scrutin_public,
+            )
+            if mesure is None:
+                continue
+            classes.append(
+                (
+                    mesure.indice,
+                    VoteDisputeItem(
+                        scrutin_id=scrutin.id,
+                        dossier_id=scrutin.dossier_id,
+                        dossier_titre=dossier.titre_clair,
+                        objet=scrutin.objet,
+                        date=scrutin.date,
+                        chambre=scrutin.chambre,
+                        statut=scrutin.statut,
+                        resultat=scrutin.resultat,
+                        ecart=mesure.ecart,
+                        camps=mesure.camps,
+                        groupes_disperses=mesure.groupes_disperses,
+                    ),
+                )
+            )
+        classes.sort(key=lambda c: (c[0], c[1].scrutin_id), reverse=True)
+        retenus = limiter_par_dossier(
+            [item for _, item in classes], MAX_DISPUTES_PAR_DOSSIER
+        )
+        return retenus[:_MAX_DISPUTES]
 
     async def recap_mensuel(self) -> RecapMensuel | None:
         dates = [s for s in self._scrutins.values() if s.date]
@@ -150,16 +212,21 @@ class InMemoryDossierRepository(DossierRepository):
             textes=len({s.dossier_id for s in du_mois}),
         )
 
-    # --- Députés (§5.2) ---------------------------------------------------
+    # --- Parlementaires (§5.2) --------------------------------------------
 
     async def list_deputes(
-        self, q: str = "", groupe_id: str | None = None, limit: int = 600
+        self,
+        q: str = "",
+        groupe_id: str | None = None,
+        limit: int = 600,
+        chambre: str | None = None,
     ) -> list[DeputeListItem]:
         terme = _fold(q.strip())
         resultats = [
             d
             for d in self._deputes
             if (not groupe_id or d.groupe_id == groupe_id)
+            and (not chambre or d.chambre.value == chambre)
             and (
                 not terme
                 or terme in _fold(f"{d.nom} {d.groupe_nom} {d.circonscription}")
@@ -185,8 +252,11 @@ class InMemoryDossierRepository(DossierRepository):
         votes = self._votes_deputes.get(depute_id, [])
         return votes[offset : offset + limit]
 
-    async def list_groupes(self) -> list[GroupeListItem]:
-        return sorted(self._groupes, key=lambda g: g.nom)
+    async def list_groupes(self, chambre: str | None = None) -> list[GroupeListItem]:
+        groupes = [
+            g for g in self._groupes if not chambre or g.chambre.value == chambre
+        ]
+        return sorted(groupes, key=lambda g: (g.chambre.value, g.nom))
 
     def _portrait(self, depute_id: str) -> PortraitVote:
         """Mêmes règles que le repository Postgres : 12 mois glissants, ratios

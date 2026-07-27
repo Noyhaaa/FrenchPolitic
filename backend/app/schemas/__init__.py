@@ -29,6 +29,7 @@ from app.schemas.scrutin import (
     SectionTheme,
     SourceOfficielle,
     ThemeListItem,
+    VoteDisputeItem,
     Votant,
 )
 
@@ -61,5 +62,6 @@ __all__ = [
     "SectionTheme",
     "SourceOfficielle",
     "ThemeListItem",
+    "VoteDisputeItem",
     "Votant",
 ]

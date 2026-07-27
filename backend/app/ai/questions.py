@@ -32,7 +32,7 @@ import re
 
 from app.ai.guardrails import LEXIQUE_ORIENTE
 from app.ai.llm import LLMClient
-from app.ingestion.normalize import truncate_mots
+from app.ingestion.normalize import deposant, truncate_mots
 from app.schemas import (
     ArgumentGroupe,
     DispositifTexte,
@@ -66,6 +66,10 @@ _CONSIGNES_COMMUNES = (
     "- Ne cite AUCUN chiffre qui n'est pas écrit tel quel dans les données fournies.\n"
     "- Ne change pas la nature du texte (une proposition de loi n'est pas un "
     "projet de loi).\n"
+    "- Ne développe JAMAIS un sigle (Anses, Arcom, CNIL…) et n'ajoute aucune "
+    "explication entre parenthèses : recopie le sigle tel quel.\n"
+    "- Ne dis pas qui a déposé le texte ou l'amendement si les données ne le "
+    "disent pas : n'écris ni « le député », ni « le Gouvernement », par défaut.\n"
     "- 1 à 3 phrases maximum. Réponds uniquement par ces phrases, rien d'autre."
 )
 
@@ -95,7 +99,11 @@ _SYS_CHANGEMENT_TEXTE = (
 )
 
 _SYS_POURQUOI_AMENDEMENT = (
-    "Tu expliques à un citoyen pourquoi un député a proposé un amendement à un "
+    # « son auteur » et non « un député » : un amendement peut être déposé par
+    # le Gouvernement ou par une commission (art. 44). L'ancienne formulation
+    # faisait écrire au modèle « le député a proposé » sur un amendement
+    # gouvernemental — d'où le garde-fou `deposant` en plus de la consigne.
+    "Tu expliques à un citoyen pourquoi son auteur a déposé un amendement à un "
     "texte de loi, uniquement à partir de l'exposé sommaire de l'amendement "
     "(écrit par son auteur, donc non neutre).\n"
     f"Commence obligatoirement ta réponse par « {PREFIXE_AUTEUR_AMENDEMENT}, ».\n"
@@ -150,6 +158,65 @@ def _caracteres_hors_francais(texte: str) -> bool:
     )
 
 
+# Glose entre parenthèses : un sigle ne se développe pas tout seul. Si la source
+# écrit « l'Anses » sans jamais la développer, une réponse qui ajoute
+# « (Agence nationale de sécurité du médicament et des produits de santé) »
+# invente — et se trompe au passage (c'est le développement de l'ANSM). Cas réel,
+# vu en base sur l'amendement n° 7 du projet de loi agricole.
+_RE_PARENTHESE = re.compile(r"\(([^)]*)\)")
+
+
+def _mots(texte: str) -> list[str]:
+    """Suite des mots/nombres d'un texte, sans accents ni ponctuation."""
+    return re.findall(r"[a-z0-9]+", fold(texte))
+
+
+def _glose_ajoutee(reponse: str, sources: str) -> bool:
+    """Une parenthèse dont le contenu n'est pas dans les sources = fait ajouté.
+
+    Comparaison sur la suite des mots (ponctuation et accents neutralisés) :
+    « (article 8) » passe si la source écrit « à l'article 8 ».
+    """
+    src = " ".join(_mots(sources))
+    return any(
+        (glose := " ".join(_mots(contenu))) and glose not in src
+        for contenu in _RE_PARENTHESE.findall(reponse)
+    )
+
+
+# Termes désignant un parlementaire. Contrôle **asymétrique** : on rejette
+# « le député » quand la source dit « du Gouvernement », mais pas l'inverse —
+# l'exposé d'un amendement parlementaire mentionne légitimement le Gouvernement
+# (« le Gouvernement n'a pas répondu à… »), alors que le Gouvernement n'est
+# jamais un député.
+_TERMES_PARLEMENTAIRE = frozenset(
+    {
+        "depute",
+        "deputee",
+        "deputes",
+        "deputees",
+        "senateur",
+        "senatrice",
+        "senateurs",
+        "senatrices",
+        "parlementaire",
+        "parlementaires",
+    }
+)
+
+
+def _deposant_requalifie(reponse: str, sources: str, deposant: str | None) -> bool:
+    """Le déposant est le Gouvernement (ou une commission) et la réponse en fait
+    un parlementaire, sans que la source emploie le mot."""
+    if deposant not in ("gouvernement", "commission"):
+        return False
+    dans_la_source = set(_mots(sources))
+    return any(
+        mot in _TERMES_PARLEMENTAIRE and mot not in dans_la_source
+        for mot in _mots(reponse)
+    )
+
+
 def valider_reponse(
     reponse: str,
     sources: str,
@@ -157,6 +224,7 @@ def valider_reponse(
     prefixe: str | None = None,
     max_chars: int = _MAX_CHARS,
     lexique_de_la_source_admis: bool = False,
+    deposant: str | None = None,
 ) -> str | None:
     """Contrôles déterministes d'une réponse LLM ; None au moindre doute (§2.5).
 
@@ -165,7 +233,14 @@ def valider_reponse(
     - lexique évaluatif (liste noire §4.3) → rejet ;
     - un nombre absent des sources → rejet (chiffre inventé ou converti) ;
     - nature du texte inversée (proposition ↔ projet) → rejet ;
-    - préfixe d'attribution manquant (Q4 tirée de l'exposé) → rejet.
+    - préfixe d'attribution manquant (Q4 tirée de l'exposé) → rejet ;
+    - glose entre parenthèses absente des sources → rejet (sigle « développé »
+      de son propre chef, donc de travers) ;
+    - déposant requalifié en parlementaire alors que la source désigne le
+      Gouvernement ou une commission (`deposant`) → rejet.
+
+    Les deux derniers contrôles relèvent de la même règle que les chiffres : le
+    modèle **reformule** une source, il n'y **ajoute** rien.
 
     `lexique_de_la_source_admis` n'est activé que lorsque la source est un
     **texte officiel** (dispositif d'un texte ou d'un amendement) : un mot de la
@@ -191,6 +266,14 @@ def valider_reponse(
     ):
         return None
     if not _chiffres(reponse) <= _chiffres(sources):
+        return None
+    if _glose_ajoutee(reponse, sources):
+        return None
+    # Uniquement sur une réponse ATTRIBUÉE (« Selon son auteur, … ») : là, le
+    # sujet de la phrase EST le déposant. Une réponse non attribuée nomme
+    # légitimement les députés comme ceux qui ont examiné le texte — c'est même
+    # l'amorce imposée à la Q1 (« Les députés ont examiné ce texte pour… »).
+    if prefixe is not None and _deposant_requalifie(reponse, sources, deposant):
         return None
     for nature, opposee in (
         ("proposition de loi", "projet de loi"),
@@ -381,6 +464,9 @@ async def generer_questions(
     expose = expose_texte[:_MAX_EXPOSE_PROMPT]
     sources = f"{titre_officiel}\n{expose}"
     user = f"TITRE : {titre_officiel}\n\nEXPOSÉ DES MOTIFS :\n{expose}"
+    # Un PROJET de loi émane du Gouvernement (art. 39) : la Q4, attribuée à
+    # « l'auteur du texte », ne doit pas en faire un député.
+    qui_depose = deposant(titre_officiel)
 
     reponse = await llm.generate_text(_SYS_POURQUOI, user)
     questions.pourquoi = valider_reponse(reponse, sources)
@@ -389,7 +475,7 @@ async def generer_questions(
     if not questions.changement:
         reponse = await llm.generate_text(_SYS_CHANGEMENT, user)
         questions.changement = valider_reponse(
-            reponse, sources, prefixe=PREFIXE_AUTEUR
+            reponse, sources, prefixe=PREFIXE_AUTEUR, deposant=qui_depose
         )
 
     return questions
@@ -433,6 +519,9 @@ async def generer_questions_amendement(
 
     # L'objet officiel fait partie des sources : le numéro de l'amendement (ou
     # un article cité) peut légitimement apparaître dans la réponse.
+    # Le déposant est lisible dans l'objet officiel (« … n° 7 du Gouvernement »).
+    qui_depose = deposant(scrutin.objet)
+
     if scrutin.expose_sommaire:
         sources = f"{scrutin.objet}\n{scrutin.expose_sommaire}"
         user = (
@@ -441,7 +530,10 @@ async def generer_questions_amendement(
         )
         reponse = await llm.generate_text(_SYS_POURQUOI_AMENDEMENT, user)
         questions.pourquoi = valider_reponse(
-            reponse, sources, prefixe=PREFIXE_AUTEUR_AMENDEMENT
+            reponse,
+            sources,
+            prefixe=PREFIXE_AUTEUR_AMENDEMENT,
+            deposant=qui_depose,
         )
 
     if scrutin.dispositif:
@@ -451,7 +543,10 @@ async def generer_questions_amendement(
         # Source officielle (le dispositif de l'amendement) : ses propres mots
         # sont admis, seul un jugement AJOUTÉ par le modèle est rejeté.
         questions.changement = valider_reponse(
-            reponse, sources, lexique_de_la_source_admis=True
+            reponse,
+            sources,
+            lexique_de_la_source_admis=True,
+            deposant=qui_depose,
         )
 
     return questions

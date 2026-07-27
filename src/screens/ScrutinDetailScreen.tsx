@@ -32,6 +32,7 @@ import {
   estVoteAmendement,
   estVoteSousAmendement,
   formatDateLong,
+  libelleChambre,
   libelleScrutin,
   statutLabel,
 } from '@/utils/format';
@@ -220,7 +221,11 @@ export function ScrutinDetailScreen() {
           </Text>
         ) : null}
         <Text style={[typography.meta, styles.subtitle]}>
-          {['Assemblée nationale', formatDateLong(scrutin.date), lib.complement]
+          {[
+            libelleChambre(scrutin.chambre),
+            formatDateLong(scrutin.date),
+            lib.complement,
+          ]
             .filter(Boolean)
             .join(' · ')}
         </Text>
@@ -385,12 +390,24 @@ export function ScrutinDetailScreen() {
                 vote.
               </Text>
             )}
+            {/* Sénat : la liste nominative existe, mais elle ne dit pas ce
+                qu'elle semble dire. Le lecteur doit le savoir AVANT d'en tirer
+                une conclusion sur un sénateur en particulier (§7.4). */}
+            {scrutin.chambre === 'senat' && (
+              <Text style={[typography.meta, styles.nominatifAbsent]}>
+                Au Sénat, les bulletins d'un scrutin public ordinaire sont
+                déposés par un délégué de groupe pour l'ensemble de ses
+                membres : les noms ci-dessus reflètent la position du groupe,
+                pas nécessairement le vote personnel de chaque sénateur.
+              </Text>
+            )}
           </SectionCard>
         ) : (
           <SectionCard title="Vote par groupe">
             <Text style={typography.readingBody}>
               Ce vote s'est fait à main levée : il n'existe pas de ventilation
-              par groupe ni par député. Seul le résultat global est disponible.
+              par groupe ni par parlementaire. Seul le résultat global est
+              disponible.
             </Text>
           </SectionCard>
         )}

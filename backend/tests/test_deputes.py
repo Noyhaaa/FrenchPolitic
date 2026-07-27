@@ -377,5 +377,21 @@ def test_liste_groupes(client):
     assert r.status_code == 200
     groupes = r.json()
     assert groupes
-    assert {"id", "nom", "abrev", "couleur"} <= set(groupes[0])
-    assert [g["nom"] for g in groupes] == sorted(g["nom"] for g in groupes)
+    assert {"id", "nom", "abrev", "couleur", "chambre"} <= set(groupes[0])
+    # Groupés par chambre (les chips de l'annuaire suivent le filtre de
+    # chambre), et alphabétiques à l'intérieur de chaque chambre.
+    for chambre in ("assemblee", "senat"):
+        noms = [g["nom"] for g in groupes if g["chambre"] == chambre]
+        assert noms, f"aucun groupe pour la chambre {chambre}"
+        assert noms == sorted(noms)
+
+
+def test_liste_groupes_filtree_par_chambre(client):
+    """Le filtre de chambre ne ramène que les groupes de cette chambre."""
+    senat = client.get("/groupes", params={"chambre": "senat"}).json()
+    assert senat
+    assert {g["chambre"] for g in senat} == {"senat"}
+    assemblee = client.get("/groupes", params={"chambre": "assemblee"}).json()
+    assert {g["chambre"] for g in assemblee} == {"assemblee"}
+    # Les deux ensembles sont disjoints et couvrent la liste complète.
+    assert len(senat) + len(assemblee) == len(client.get("/groupes").json())

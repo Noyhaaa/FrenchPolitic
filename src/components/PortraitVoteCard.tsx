@@ -20,7 +20,7 @@ function Stat({ valeur, label }: { valeur: string; label: string }) {
 }
 
 /**
- * Portrait de vote d'un député sur les 12 derniers mois : ce qu'il a voté et
+ * Portrait de vote d'un parlementaire sur les 12 derniers mois : ce qu'il a voté et
  * son alignement sur son groupe, puis la ventilation de ses votes. Purement
  * descriptif (§7.4) — aucun classement, aucune appréciation, et pas de taux de
  * participation (l'open data ne recense que les votants physiques d'un scrutin :

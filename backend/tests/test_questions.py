@@ -103,6 +103,104 @@ def test_rejette_prefixe_manquant():
     )
 
 
+# --- Garde-fous « rien d'ajouté » : gloses et déposant ---------------------
+#
+# Les deux cas ci-dessous viennent d'une réponse RÉELLE trouvée en base sur
+# l'amendement n° 7 du Gouvernement au projet de loi agricole (acétamipride) :
+# le modèle y requalifiait le Gouvernement en « député » ET développait « Anses »
+# en le confondant avec l'ANSM. Aucun contrôle ne les attrapait.
+
+_OBJET_GOUVERNEMENT = (
+    "l'amendement n° 7 du Gouvernement au projet de loi d'urgence pour la "
+    "protection et la souveraineté agricoles (texte de la commission mixte "
+    "paritaire)"
+)
+_EXPOSE_ANSES = (
+    "Dans le cadre légal inchangé d'interdiction de l'acétamipride, le présent "
+    "amendement allonge à six mois le délai dont dispose l'Anses pour se "
+    "prononcer sur les dérogations."
+)
+_SOURCES_ANSES = f"{_OBJET_GOUVERNEMENT}\n{_EXPOSE_ANSES}"
+
+
+def test_rejette_une_glose_absente_de_la_source():
+    # « Anses » n'est jamais développé dans la source — et ce développement-ci
+    # est celui de l'ANSM, une autre agence.
+    r = (
+        "Selon son auteur, cet amendement donne plus de temps à l'Anses "
+        "(Agence nationale de sécurité du médicament et des produits de santé)."
+    )
+    assert valider_reponse(r, _SOURCES_ANSES, prefixe=PREFIXE_AUTEUR_AMENDEMENT) is None
+
+
+def test_accepte_une_parenthese_presente_dans_la_source():
+    # Une parenthèse n'est pas suspecte en soi : seule compte son absence.
+    r = (
+        "Selon son auteur, il modifie le texte de la commission mixte paritaire "
+        "(texte de la commission mixte paritaire)."
+    )
+    assert valider_reponse(r, _SOURCES_ANSES, prefixe=PREFIXE_AUTEUR_AMENDEMENT) == r
+
+
+def test_glose_comparee_sans_accents_ni_ponctuation():
+    # « (a l'article 8) » doit passer si la source écrit « à l'article 8 ».
+    sources = "l'amendement n° 4 de M. Durand à l'article 8 du projet de loi"
+    r = "Cet amendement modifierait une règle (à l'article 8)."
+    assert valider_reponse(r, sources) == r
+
+
+def test_rejette_le_gouvernement_requalifie_en_depute():
+    r = (
+        "Selon son auteur, le député a proposé cet amendement pour allonger le "
+        "délai dont dispose l'Anses."
+    )
+    assert valider_reponse(
+        r,
+        _SOURCES_ANSES,
+        prefixe=PREFIXE_AUTEUR_AMENDEMENT,
+        deposant="gouvernement",
+    ) is None
+
+
+def test_accepte_le_mot_depute_s_il_est_dans_la_source():
+    # Le contrôle interdit d'AJOUTER une qualité d'auteur, pas de reprendre la
+    # source : si l'exposé parle des députés, la réponse peut le faire aussi.
+    sources = f"{_OBJET_GOUVERNEMENT}\nLes députés ont demandé un délai plus long."
+    r = "Selon son auteur, les députés ont demandé un délai plus long."
+    assert (
+        valider_reponse(
+            r, sources, prefixe=PREFIXE_AUTEUR_AMENDEMENT, deposant="gouvernement"
+        )
+        == r
+    )
+
+
+def test_le_gouvernement_peut_etre_cite_dans_un_amendement_parlementaire():
+    # Contrôle ASYMÉTRIQUE : l'exposé d'un amendement de député mentionne
+    # légitimement le Gouvernement — rien à rejeter là.
+    sources = (
+        "l'amendement n° 12 de M. Durand à la proposition de loi visant à agir\n"
+        "Le Gouvernement n'a pas répondu à cette demande."
+    )
+    r = "Selon son auteur, le Gouvernement n'a pas répondu à cette demande."
+    assert (
+        valider_reponse(
+            r, sources, prefixe=PREFIXE_AUTEUR_AMENDEMENT, deposant="parlementaire"
+        )
+        == r
+    )
+
+
+def test_sans_deposant_connu_aucune_requalification_n_est_jugee():
+    # Source muette sur le déposant → on ne tranche pas (§2.5).
+    r = "Selon son auteur, le député a demandé un délai plus long."
+    sources = "l'amendement n° 12 à l'article 3\nUn délai plus long est demandé."
+    assert (
+        valider_reponse(r, sources, prefixe=PREFIXE_AUTEUR_AMENDEMENT, deposant=None)
+        == r
+    )
+
+
 # --- phrase_resultat : Q3 déterministe ---
 
 

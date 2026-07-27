@@ -5,6 +5,7 @@ from app.domain.enums import PositionVote, StatutScrutin
 from app.ingestion.assemblee import parse_scrutin
 from app.ingestion.normalize import (
     auteur_amendement,
+    deposant,
     est_amendement,
     est_sous_amendement,
     guess_theme,
@@ -544,6 +545,59 @@ def test_auteur_amendement():
         is None
     )
     assert auteur_amendement("l'ensemble du projet de loi") is None
+
+
+def test_deposant_lu_dans_l_objet_officiel():
+    # Mention explicite (AN puis Sénat), et nature du texte (art. 39).
+    assert deposant("l'amendement n° 7 du Gouvernement au projet de loi agricole") == (
+        "gouvernement"
+    )
+    assert deposant(
+        "l'amendement n° 441, présenté par le Gouvernement, à l'article 8 du "
+        "projet de loi portant simplification"
+    ) == "gouvernement"
+    assert deposant("l'ensemble du projet de loi de finances") == "gouvernement"
+    assert deposant(
+        "l'amendement n° 3 de M. Fugit à la proposition de loi visant à informer"
+    ) == "parlementaire"
+    assert deposant("l'ensemble de la proposition de résolution") == "parlementaire"
+    # Sous-amendement : le déposant du parent ne compte pas, comme pour l'auteur.
+    assert deposant(
+        "le sous-amendement n° 9 du Gouvernement à l'amendement n° 80 de Mme Galzy"
+    ) == "gouvernement"
+
+
+def test_deposant_d_un_amendement_ignore_la_nature_du_texte():
+    # Un député amende couramment un PROJET de loi : « … à l'article 3 du projet
+    # de loi » désigne le déposant du TEXTE, pas celui de l'amendement. Seule la
+    # mention explicite compte ici (sinon le garde-fou accuserait à tort).
+    assert deposant(
+        "l'amendement n° 12 de M. Dupont à l'article 3 du projet de loi"
+    ) == "parlementaire"
+    assert deposant(
+        "l'amendement n° 900 du Gouvernement à la proposition de loi visant à agir"
+    ) == "gouvernement"
+    assert deposant(
+        "l'amendement n° 5 de la commission des lois à la proposition de loi"
+    ) == "commission"
+    # Auteur non cité par l'objet → rien de déduit de la nature du texte (§2.5).
+    assert deposant(
+        "l'amendement n° 500 après l'article 4 du projet de loi de finances"
+    ) is None
+
+
+def test_deposant_none_quand_la_source_est_ambigue():
+    # « texte de la commission mixte paritaire » = mention de procédure, pas un
+    # déposant : elle ne doit pas rendre l'objet ambigu.
+    assert deposant(
+        "l'amendement n° 7 du Gouvernement au projet de loi agricole "
+        "(texte de la commission mixte paritaire)"
+    ) == "gouvernement"
+    # Amendements identiques de deux camps → on ne choisit pas.
+    assert deposant(
+        "les amendements identiques n° 4 du Gouvernement et n° 9 de Mme Deux"
+    ) is None
+    assert deposant("l'ensemble de la motion de censure") is None
 
 
 def test_build_dossier_partitionne_texte_et_amendement():

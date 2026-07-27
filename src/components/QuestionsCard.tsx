@@ -84,7 +84,7 @@ export function QuestionsCard({ questions }: Props) {
         Le vote en 4 questions
       </Text>
 
-      <QARow n={1} question="Pourquoi les députés ont-ils débattu ?" reponse={questions.pourquoi} />
+      <QARow n={1} question="Pourquoi ce texte a-t-il été débattu ?" reponse={questions.pourquoi} />
 
       <View style={styles.sep} />
 

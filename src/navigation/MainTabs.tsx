@@ -47,7 +47,7 @@ export function MainTabs() {
       <Tab.Screen
         name="Deputes"
         component={DeputesScreen}
-        options={{ title: 'Députés' }}
+        options={{ title: 'Parlementaires' }}
       />
       <Tab.Screen name="Assistant" component={AssistantScreen} />
       <Tab.Screen name="Profil" component={ProfileScreen} />

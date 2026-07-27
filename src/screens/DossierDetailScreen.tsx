@@ -32,9 +32,9 @@ import {
   formatDateLong,
   formatMicroResultat,
   formatTempsLecture,
+  libelleChambre,
   libelleScrutin,
   natureTexte,
-  phasesNavette,
   statutLabel,
   voteDecisif,
 } from '@/utils/format';
@@ -224,7 +224,13 @@ export function DossierDetailScreen() {
   }
 
   const { resume } = dossier;
-  const badge = dossier.phase ?? { label: undefined, statut: dossier.statut };
+  // Badge de tête : la phase précise si elle est documentée, sinon le statut du
+  // dossier. Une phase peut être connue sans statut (étape en cours) — on
+  // retombe alors sur celui du dossier plutôt que d'afficher un badge vide.
+  const badge = {
+    label: dossier.phase?.label,
+    statut: dossier.phase?.statut ?? dossier.statut,
+  };
   // Le vote décisif (sur l'ensemble du texte) sort de la liste : mis en avant
   // en tête de section pour que l'utilisateur voie quel vote a tranché — les
   // autres votes (articles, motions…) restent en liste compacte.
@@ -232,8 +238,15 @@ export function DossierDetailScreen() {
   const autresVotes = decisif
     ? dossier.scrutins.filter((s) => s.id !== decisif.id)
     : dossier.scrutins;
-  // Frise des phases de navette documentées par les votes AN (vide → masquée).
-  const phases = phasesNavette(dossier.scrutins);
+  // Trajectoire au Parlement : servie par l'API (actes législatifs officiels,
+  // les deux chambres comprises). Vide → frise masquée (§2.5).
+  const phases = dossier.trajectoire ?? [];
+  // Chambres qui ont voté ce texte, dans l'ordre où elles l'ont fait : c'est ce
+  // qui situe le dossier quand il a circulé (« Assemblée nationale · Sénat »).
+  const chambres = [...dossier.scrutins]
+    .reverse()
+    .map((s) => s.chambre)
+    .filter((c, i, tous) => tous.indexOf(c) === i);
   const pourquoi = [
     resume.contexte && (['CONTEXTE', resume.contexte] as const),
     resume.objectif && (['OBJECTIF', resume.objectif] as const),
@@ -296,7 +309,9 @@ export function DossierDetailScreen() {
         <Text style={[typography.meta, styles.subtitle]}>
           {[
             natureTexte(dossier.titreOfficiel),
-            'Assemblée nationale',
+            // Les chambres qui ont réellement voté ce texte — pas « Assemblée
+            // nationale » en dur : un texte peut n'avoir été voté qu'au Sénat.
+            ...chambres.map(libelleChambre),
             formatDateLong(dossier.dateDernierScrutin),
           ]
             .filter(Boolean)
@@ -321,10 +336,11 @@ export function DossierDetailScreen() {
           </View>
         ) : null}
 
-        {/* 1bis. Trajectoire à l'Assemblée — frise des phases de navette que
-            les libellés des votes documentent (1re lecture, CMP, lecture
-            définitive…), statut d'une phase = son vote sur l'ensemble.
-            Masquée si aucune phase documentée (§2.5). */}
+        {/* 1bis. Trajectoire au Parlement — frise des étapes officielles du
+            dossier (1re lecture à l'Assemblée puis au Sénat, CMP, Conseil
+            constitutionnel…), calculée à l'ingestion. Le statut d'une étape
+            n'est posé que si la source le documente. Masquée si aucune étape
+            n'est documentée (§2.5). */}
         {phases.length > 0 ? <TrajectoireNavette phases={phases} /> : null}
 
         {/* 2. Le vote en 4 questions — l'entrée de compréhension (§2.2) :
@@ -427,9 +443,9 @@ export function DossierDetailScreen() {
                   pressed && { opacity: 0.7 },
                 ]}
                 accessibilityRole="button"
-                accessibilityLabel={`${s.objet}. ${statutLabel(s.statut)}, ${
-                  s.resultat.pour
-                } pour, ${s.resultat.contre} contre. Voir le détail du vote.`}
+                accessibilityLabel={`${libelleChambre(s.chambre)} : ${s.objet}. ${statutLabel(
+                  s.statut
+                )}, ${s.resultat.pour} pour, ${s.resultat.contre} contre. Voir le détail du vote.`}
               >
                 <View style={styles.voteInfo}>
                   <Text style={styles.voteObjet} numberOfLines={2}>
@@ -437,8 +453,11 @@ export function DossierDetailScreen() {
                   </Text>
                   <View style={styles.voteMeta}>
                     <StatusBadge statut={s.statut} />
+                    {/* La chambre est écrite : un dossier mêle les votes des
+                        deux assemblées, et les décomptes n'ont pas la même
+                        échelle (577 députés vs 348 sénateurs). */}
                     <Text style={typography.meta}>
-                      {formatDateLong(s.date)}
+                      {libelleChambre(s.chambre)} · {formatDateLong(s.date)}
                       {lib.complement ? ` · ${lib.complement}` : ''}
                     </Text>
                   </View>

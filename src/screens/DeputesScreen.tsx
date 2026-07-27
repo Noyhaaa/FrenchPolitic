@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, spacing, typography } from '@/theme';
 import { DeputeRow, EmptyView, OfflineBanner } from '@/components';
 import { useDeputes } from '@/hooks';
-import type { DeputeListItem } from '@/types';
+import type { Chambre, DeputeListItem } from '@/types';
 import type { RootStackParamList } from '@/navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -53,19 +53,28 @@ function Chip({
   );
 }
 
+/** Filtres de chambre, dans l'ordre constitutionnel des assemblées. */
+const CHAMBRES: ReadonlyArray<{ valeur?: Chambre; label: string }> = [
+  { valeur: undefined, label: 'Les deux' },
+  { valeur: 'assemblee', label: 'Assemblée nationale' },
+  { valeur: 'senat', label: 'Sénat' },
+];
+
 /**
- * Annuaire des députés : recherche par nom et filtre par groupe. Même gabarit
- * pour tous les groupes, dans l'ordre renvoyé par l'API (§7.4 : aucun groupe
- * n'est mis en avant).
+ * Annuaire des parlementaires : recherche par nom, filtre par chambre puis par
+ * groupe. Même gabarit pour tous les groupes, dans l'ordre renvoyé par l'API
+ * (§7.4 : aucun groupe n'est mis en avant).
  */
 export function DeputesScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
+  const [chambre, setChambre] = useState<Chambre | undefined>();
   const [groupeId, setGroupeId] = useState<string | undefined>();
   const { deputes, groupes, loading, offline, error } = useDeputes(
     query,
     groupeId,
+    chambre,
   );
 
   const onPressDepute = useCallback(
@@ -74,16 +83,32 @@ export function DeputesScreen() {
     [navigation],
   );
 
+  // Les chips de groupe suivent la chambre choisie : proposer un groupe du
+  // Sénat en filtrant l'Assemblée ne ramènerait rien (§2.5).
+  const groupesVisibles = chambre
+    ? groupes.filter((g) => g.chambre === chambre)
+    : groupes;
+
+  // Changer de chambre invalide un filtre de groupe qui n'y appartient pas.
+  const choisirChambre = (valeur?: Chambre) => {
+    setChambre(valeur);
+    setGroupeId((actuel) => {
+      if (!actuel || !valeur) return actuel;
+      const groupe = groupes.find((g) => g.id === actuel);
+      return groupe && groupe.chambre !== valeur ? undefined : actuel;
+    });
+  };
+
   const filtre = query.trim();
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Text style={typography.title}>Assemblée nationale</Text>
+        <Text style={typography.title}>Parlementaires</Text>
         {/* Effectif réel de la liste servie — jamais un chiffre en dur (§2.5). */}
         <Text style={typography.meta}>
-          {deputes.length} député{deputes.length > 1 ? 's' : ''}
-          {filtre || groupeId ? ' (filtrés)' : ''}
+          {deputes.length} parlementaire{deputes.length > 1 ? 's' : ''}
+          {filtre || groupeId || chambre ? ' (filtrés)' : ''}
         </Text>
 
         <View style={styles.searchBox}>
@@ -93,20 +118,37 @@ export function DeputesScreen() {
           <TextInput
             value={query}
             onChangeText={setQuery}
-            placeholder="Chercher un député…"
+            placeholder="Chercher un député, un sénateur…"
             placeholderTextColor={colors.textTertiary}
             style={styles.input}
             returnKeyType="search"
             autoCorrect={false}
             clearButtonMode="while-editing"
-            accessibilityLabel="Rechercher un député"
+            accessibilityLabel="Rechercher un parlementaire"
           />
           {loading ? (
             <ActivityIndicator size="small" color={colors.textTertiary} />
           ) : null}
         </View>
 
-        {groupes.length > 0 ? (
+        {/* Chambre d'abord : c'est le filtre le plus large, et il conditionne
+            les groupes proposés en dessous. */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chips}
+        >
+          {CHAMBRES.map((c) => (
+            <Chip
+              key={c.label}
+              actif={chambre === c.valeur}
+              label={c.label}
+              onPress={() => choisirChambre(c.valeur)}
+            />
+          ))}
+        </ScrollView>
+
+        {groupesVisibles.length > 0 ? (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -114,10 +156,10 @@ export function DeputesScreen() {
           >
             <Chip
               actif={!groupeId}
-              label="Tous"
+              label="Tous les groupes"
               onPress={() => setGroupeId(undefined)}
             />
-            {groupes.map((g) => (
+            {groupesVisibles.map((g) => (
               <Chip
                 key={g.id}
                 actif={groupeId === g.id}
@@ -156,8 +198,8 @@ export function DeputesScreen() {
             />
           ) : (
             <EmptyView
-              title="Aucun député"
-              subtitle="Essayez un autre nom ou un autre groupe."
+              title="Aucun parlementaire"
+              subtitle="Essayez un autre nom, une autre chambre ou un autre groupe."
             />
           )
         }

@@ -3,7 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { colors, mono, radius, serif, spacing, typography } from '@/theme';
 import { DossierListItem, StatutScrutin } from '@/types';
 import { themeEmoji, themeTintDark } from '@/constants/themes';
-import { formatDateRelative } from '@/utils/format';
+import { formatDateRelative, libelleChambreCourt } from '@/utils/format';
 import { statutLabel } from '@/utils/format';
 import { MiniResultat } from './MiniResultat';
 
@@ -62,8 +62,10 @@ export function HeroDossier({ dossier, onPress, topInset }: Props) {
           <Text style={[styles.overlineStatut, { color: statutFg }]}>
             {statutLabel(dossier.statut)}
           </Text>
+          {/* Nature du texte si le titre officiel la porte, sinon la ou les
+              chambres qui l'ont voté — jamais une institution supposée (§2.5). */}
           <Text style={styles.overlineRest}>
-            · {nature ?? 'Assemblée nationale'}
+            · {nature ?? (dossier.chambres ?? []).map(libelleChambreCourt).join(' · ')}
           </Text>
         </View>
 

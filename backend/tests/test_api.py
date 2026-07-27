@@ -199,6 +199,42 @@ def test_recap_mensuel(client):
     assert body["adoptes"] + body["rejetes"] <= body["votes"]
 
 
+def test_accueil_votes_disputes_factuels_et_ordonnes(client):
+    """La rangée « Les votes les plus disputés » ne sert que des faits.
+
+    Chaque entrée porte ses décomptes officiels et son écart ; l'ordre suit
+    l'indice de division, jamais un jugement sur la mesure (§4.3). Un même texte
+    n'occupe pas la rangée à lui seul.
+    """
+    body = client.get("/accueil").json()
+    votes = body["votesDisputes"]
+    assert votes, "le seed doit produire au moins un vote classable"
+
+    ecarts = []
+    par_dossier = {}
+    for v in votes:
+        r = v["resultat"]
+        # L'écart affiché est bien celui des décomptes servis.
+        assert v["ecart"] == abs(r["pour"] - r["contre"])
+        assert v["camps"] >= 1
+        # Le vote s'ouvre : la fiche existe et porte les mêmes chiffres.
+        fiche = client.get(f"/scrutins/{v['scrutinId']}")
+        assert fiche.status_code == 200
+        assert fiche.json()["resultat"] == r
+        # Au Sénat, jamais de groupes divisés (délégation de vote, §7.4).
+        if v["chambre"] == "senat":
+            assert v.get("groupesDisperses") is None
+        ecarts.append(v["ecart"])
+        par_dossier[v["dossierId"]] = par_dossier.get(v["dossierId"], 0) + 1
+
+    assert len(votes) <= 10
+    assert max(par_dossier.values()) <= 2
+    # L'ordre est déterministe : deux appels donnent la même rangée (l'indice
+    # ne dépend que des décomptes, jamais de l'ordre de lecture en base).
+    encore = client.get("/accueil").json()["votesDisputes"]
+    assert [v["scrutinId"] for v in encore] == [v["scrutinId"] for v in votes]
+
+
 def test_accueil_complet_en_une_reponse(client):
     """L'accueil est servi en une réponse : à la une + rangées par thème
     (l'affichage client est atomique, pas de remplissage progressif)."""

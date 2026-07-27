@@ -22,12 +22,12 @@ import type { RootStackParamList } from '@/navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-/** Une entrée de résultat : un texte ou un député (sections distinctes). */
+/** Une entrée de résultat : un texte ou un parlementaire (sections distinctes). */
 type Resultat =
   | { type: 'dossier'; dossier: DossierListItem }
   | { type: 'depute'; depute: DeputeListItem };
 
-/** Chip de filtre, même gabarit que l'annuaire des députés. */
+/** Chip de filtre, même gabarit que l'annuaire des parlementaires. */
 function Chip({
   actif,
   label,
@@ -54,13 +54,13 @@ function Chip({
 
 /**
  * Recherche (§3.3) : un champ, des filtres de thème, et des résultats en deux
- * sections — les **textes** puis les **députés**.
+ * sections — les **textes** puis les **parlementaires**.
  *
  * La requête est multi-termes et classée par pertinence côté API : tous les
  * mots sont exigés, pas forcément côte à côte ni dans le titre (l'index couvre
  * aussi les réponses « pourquoi » / « ce que ça change » et les publics
  * concernés). Un thème seul, sans mot-clé, parcourt le thème. Une section vide
- * est masquée (§2.5), et les députés disparaissent sous filtre de thème — un
+ * est masquée (§2.5), et les parlementaires disparaissent sous filtre de thème — un
  * thème ne qualifie pas une personne.
  */
 export function SearchScreen() {
@@ -91,7 +91,7 @@ export function SearchScreen() {
   }
   if (deputes.length > 0) {
     sections.push({
-      titre: 'Députés',
+      titre: 'Parlementaires',
       data: deputes.map((d) => ({ type: 'depute', depute: d })),
     });
   }
@@ -107,13 +107,13 @@ export function SearchScreen() {
           <TextInput
             value={query}
             onChangeText={setQuery}
-            placeholder="Un thème, un texte, un député…"
+            placeholder="Un thème, un texte, un parlementaire…"
             placeholderTextColor={colors.textTertiary}
             style={styles.input}
             returnKeyType="search"
             autoCorrect={false}
             clearButtonMode="while-editing"
-            accessibilityLabel="Rechercher un dossier ou un député"
+            accessibilityLabel="Rechercher un dossier ou un parlementaire"
           />
           {loading ? (
             <ActivityIndicator size="small" color={colors.textTertiary} />
@@ -187,7 +187,7 @@ export function SearchScreen() {
             />
           ) : (
             <EmptyView
-              title="Recherchez un texte ou un député"
+              title="Recherchez un texte ou un parlementaire"
               subtitle="Tapez un mot-clé, ou choisissez un thème ci-dessus."
             />
           )

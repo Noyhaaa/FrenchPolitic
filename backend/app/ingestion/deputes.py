@@ -272,6 +272,7 @@ def _depute_row_values(d: Depute) -> dict:
     return {
         "id": d.id,
         "nom": d.nom,
+        "chambre": d.chambre.value,
         "groupe_id": d.groupe_id,
         "groupe_nom": d.groupe_nom,
         "groupe_couleur": d.groupe_couleur,

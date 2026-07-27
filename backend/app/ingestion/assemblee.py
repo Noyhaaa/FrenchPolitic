@@ -82,6 +82,11 @@ class ScrutinParse:
     theme: str
     legislature: str
     numero: str
+    # Source de NIVEAU DOSSIER quand le dossier n'a pas de page à l'Assemblée :
+    # c'est le cas des dossiers d'origine sénatoriale, dont la page officielle
+    # vit sur senat.fr. Sans elle, la fiche retomberait sur les sources des
+    # votes, moins utiles au lecteur (§7.5).
+    source_dossier: SourceOfficielle | None = None
 
 
 class AssembleeOpenDataClient:
@@ -173,20 +178,43 @@ class AssembleeOpenDataClient:
         return out
 
     async def download_dossiers(self, legislature: int | None = None) -> list[dict]:
-        """Télécharge l'archive des dossiers législatifs et renvoie les JSON des
-        **documents** (titre + dossierRef, pour la réconciliation). `legislature`
-        permet de récupérer l'archive d'une législature différente de la
-        courante (typiquement la précédente : un dossier reporté après une
+        """Les seuls **documents** de l'archive des dossiers législatifs (titre +
+        dossierRef, pour la réconciliation par titre)."""
+        documents, _ = await self.download_dossiers_complet(legislature)
+        return documents
+
+    async def download_dossiers_complet(
+        self, legislature: int | None = None
+    ) -> tuple[list[dict], list[dict]]:
+        """Archive des dossiers législatifs : `(documents, dossiers)`.
+
+        Un seul téléchargement pour les deux usages (même patron que
+        `download_amo`) :
+        - les **documents** portent titre + `dossierRef` → réconciliation par
+          titre des scrutins sans dossier officiel ;
+        - les **dossiers parlementaires** portent `titreDossier.senatChemin` et
+          `titreDossier.titreChemin` (les deux clés de jointure AN ↔ Sénat) ainsi
+          que `actesLegislatifs`, l'enchaînement officiel des étapes de la
+          navette — Sénat et CMP compris, ce qu'aucun scrutin AN ne documente.
+
+        `legislature` permet de récupérer l'archive d'une législature différente
+        de la courante (typiquement la précédente : un dossier reporté après une
         dissolution garde son `dossierRef` d'origine)."""
         zf = await self._download_zip(
             DOSSIERS_URL.format(leg=legislature or self.legislature)
         )
-        out: list[dict] = []
+        documents: list[dict] = []
+        dossiers: list[dict] = []
         for name in zf.namelist():
-            if name.endswith(".json") and "/document/" in name:
+            if not name.endswith(".json"):
+                continue
+            if "/document/" in name:
                 with zf.open(name) as f:
-                    out.append(json.load(f))
-        return out
+                    documents.append(json.load(f))
+            elif "/dossierParlementaire/" in name:
+                with zf.open(name) as f:
+                    dossiers.append(json.load(f))
+        return documents, dossiers
 
     async def download_texte_pdf(self, url_pdf: str) -> bytes | None:
         """Télécharge le PDF d'un texte (exposé des motifs). None si absent ou

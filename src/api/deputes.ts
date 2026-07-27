@@ -1,4 +1,5 @@
 import {
+  Chambre,
   DeputeDetail,
   DeputeListItem,
   GroupeListItem,
@@ -9,14 +10,21 @@ import { apiGet } from './client';
 /** Taille d'une page d'historique de votes (« charger les plus anciens »). */
 export const PAGE_VOTES = 30;
 
-/** Annuaire des députés (§5.2) : recherche par nom, filtre par groupe. */
+/**
+ * Annuaire des parlementaires (§5.2) : recherche par nom, filtres par groupe
+ * et par chambre. Sans `chambre`, l'API sert les deux assemblées.
+ */
 export function fetchDeputes(
-  params: { q?: string; groupeId?: string } = {},
+  params: { q?: string; groupeId?: string; chambre?: Chambre } = {},
   signal?: AbortSignal,
 ): Promise<DeputeListItem[]> {
   return apiGet<DeputeListItem[]>(
     '/deputes',
-    { q: params.q ?? '', groupe: params.groupeId ?? '' },
+    {
+      q: params.q ?? '',
+      groupe: params.groupeId ?? '',
+      chambre: params.chambre ?? '',
+    },
     signal,
   );
 }

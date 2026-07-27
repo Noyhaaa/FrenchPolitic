@@ -11,12 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from datetime import date, timedelta
 
 from app.db.models import DeputeRow, DossierRow, GroupeRow, ScrutinRow, VoteDeputeRow
-from app.domain.enums import ObjetVote, PositionVote
+from app.domain.division import division
+from app.domain.enums import Chambre, ObjetVote, PositionVote
 from app.domain.recherche import ChampsRecherche, score, termes
 from app.ingestion.normalize import nature_texte, type_objet_vote
 from app.repositories.base import (
+    MAX_DISPUTES_PAR_DOSSIER,
     DossierRepository,
     construire_portrait,
+    limiter_par_dossier,
     ordonner_sections,
 )
 from app.schemas import (
@@ -34,11 +37,22 @@ from app.schemas import (
     SectionTheme,
     ThemeListItem,
     VoteDepute,
+    VoteDisputeItem,
 )
 from app.utils.text import fold
 
 # Fenêtre des statistiques de la fiche député (§5.2) : les 12 derniers mois.
 FENETRE_PORTRAIT_JOURS = 365
+
+# Fenêtre de la rangée « Les votes les plus disputés », comptée depuis le dernier
+# scrutin en base (et non depuis aujourd'hui : en intersession, une fenêtre
+# calendaire viderait la rangée alors que les votes existent). 90 jours couvrent
+# une session de travail parlementaire complète tout en laissant la rangée
+# évoluer à chaque ingestion — un classement « de tous les temps » serait figé.
+FENETRE_DISPUTES_JOURS = 90
+
+# Nombre de votes de la rangée. Au-delà, c'est une liste, plus une sélection.
+_MAX_DISPUTES = 10
 
 # Candidats ramenés avant classement. Le préfiltre `LIKE` a déjà réduit
 # l'ensemble ; ce plafond borne le coût du tri en Python même sur un terme très
@@ -70,6 +84,7 @@ def _to_depute_item(row: DeputeRow) -> DeputeListItem:
     return DeputeListItem(
         id=row.id,
         nom=row.nom,
+        chambre=row.chambre,  # type: ignore[arg-type]  (str -> enum coercé)
         groupe_nom=row.groupe_nom,
         groupe_couleur=row.groupe_couleur,
         circonscription=row.circonscription,
@@ -99,6 +114,7 @@ def _to_list_item(row: DossierRow) -> DossierListItem:
             if row.mise_a_jour
             else None
         ),
+        chambres=DossierListItem._chambres(scrutins),
         resultat_dernier_scrutin=DossierListItem._resultat_dernier(scrutins),
     )
 
@@ -203,6 +219,7 @@ class PostgresDossierRepository(DossierRepository):
 
             aujourdhui = await _du_jour(aujourdhui_str)
             hier = await _du_jour(hier_str)
+            votes_disputes = await self._votes_disputes(session)
 
             # Une requête ciblée par thème (jamais tous les payloads d'un coup).
             themes = (
@@ -233,8 +250,79 @@ class PostgresDossierRepository(DossierRepository):
             a_la_une=a_la_une,
             aujourdhui=aujourdhui,
             hier=hier,
+            votes_disputes=votes_disputes,
             sections=ordonner_sections(sections),
         )
+
+    async def _votes_disputes(self, session) -> list[VoteDisputeItem]:
+        """Les votes récents les plus disputés, du plus divisé au moins divisé.
+
+        « Disputé » = arithmétique du scrutin (`app/domain/division.py`), jamais
+        un jugement sur la mesure (§4.3). La fenêtre est comptée depuis le
+        dernier scrutin en base pour que la rangée survive à l'intersession.
+        """
+        dernier = (
+            await session.execute(
+                select(func.max(ScrutinRow.date)).where(
+                    ScrutinRow.indice_division.is_not(None)
+                )
+            )
+        ).scalar()
+        if not dernier:
+            return []
+        try:
+            depuis = (
+                date.fromisoformat(dernier[:10])
+                - timedelta(days=FENETRE_DISPUTES_JOURS)
+            ).isoformat()
+        except ValueError:
+            return []
+
+        lignes = (
+            await session.execute(
+                select(ScrutinRow, DossierRow.titre_clair)
+                .join(DossierRow, DossierRow.id == ScrutinRow.dossier_id)
+                .where(
+                    ScrutinRow.indice_division.is_not(None),
+                    ScrutinRow.date >= depuis,
+                )
+                .order_by(ScrutinRow.indice_division.desc(), ScrutinRow.id.desc())
+                # Large : le plafond par dossier écarte ensuite les doublons de
+                # texte, il faut donc de quoi remplir la rangée après coupe.
+                .limit(_MAX_DISPUTES * 5)
+            )
+        ).all()
+
+        items: list[VoteDisputeItem] = []
+        for row, titre_dossier in lignes:
+            scrutin = Scrutin.model_validate(row.payload)
+            # Recalculé plutôt que stocké : la colonne ne porte que l'indice de
+            # tri, les chiffres affichés viennent toujours du scrutin lui-même.
+            mesure = division(
+                scrutin.resultat,
+                scrutin.positions_groupes,
+                scrutin.chambre,
+                objet=scrutin.objet,
+                scrutin_public=scrutin.scrutin_public,
+            )
+            if mesure is None:
+                continue
+            items.append(
+                VoteDisputeItem(
+                    scrutin_id=scrutin.id,
+                    dossier_id=scrutin.dossier_id,
+                    dossier_titre=titre_dossier,
+                    objet=scrutin.objet,
+                    date=scrutin.date,
+                    chambre=scrutin.chambre,
+                    statut=scrutin.statut,
+                    resultat=scrutin.resultat,
+                    ecart=mesure.ecart,
+                    camps=mesure.camps,
+                    groupes_disperses=mesure.groupes_disperses,
+                )
+            )
+        return limiter_par_dossier(items, MAX_DISPUTES_PAR_DOSSIER)[:_MAX_DISPUTES]
 
     async def recap_mensuel(self) -> RecapMensuel | None:
         # Clé « AAAA-MM » sur la date ISO du scrutin ; comptes SQL (exacts,
@@ -268,10 +356,14 @@ class PostgresDossierRepository(DossierRepository):
             textes=textes,
         )
 
-    # --- Députés (§5.2) ---------------------------------------------------
+    # --- Parlementaires (§5.2) --------------------------------------------
 
     async def list_deputes(
-        self, q: str = "", groupe_id: str | None = None, limit: int = 600
+        self,
+        q: str = "",
+        groupe_id: str | None = None,
+        limit: int = 600,
+        chambre: str | None = None,
     ) -> list[DeputeListItem]:
         stmt = select(DeputeRow).order_by(DeputeRow.nom, DeputeRow.id)
         folded = fold(q.strip())
@@ -279,6 +371,8 @@ class PostgresDossierRepository(DossierRepository):
             stmt = stmt.where(DeputeRow.search_index.like(f"%{folded}%"))
         if groupe_id:
             stmt = stmt.where(DeputeRow.groupe_id == groupe_id)
+        if chambre:
+            stmt = stmt.where(DeputeRow.chambre == chambre)
         stmt = stmt.limit(limit)
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
@@ -296,6 +390,7 @@ class PostgresDossierRepository(DossierRepository):
         return DeputeDetail(
             id=row.id,
             nom=row.nom,
+            chambre=row.chambre,  # type: ignore[arg-type]  (str -> enum coercé)
             groupe_id=row.groupe_id,
             groupe_nom=row.groupe_nom,
             groupe_couleur=row.groupe_couleur,
@@ -312,12 +407,20 @@ class PostgresDossierRepository(DossierRepository):
         async with self._sf() as session:
             return await self._votes(session, depute_id, limit, offset)
 
-    async def list_groupes(self) -> list[GroupeListItem]:
-        stmt = select(GroupeRow).order_by(GroupeRow.nom)
+    async def list_groupes(self, chambre: str | None = None) -> list[GroupeListItem]:
+        stmt = select(GroupeRow).order_by(GroupeRow.chambre, GroupeRow.nom)
+        if chambre:
+            stmt = stmt.where(GroupeRow.chambre == chambre)
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         return [
-            GroupeListItem(id=r.id, nom=r.nom, abrev=r.abrev, couleur=r.couleur)
+            GroupeListItem(
+                id=r.id,
+                nom=r.nom,
+                abrev=r.abrev,
+                couleur=r.couleur,
+                chambre=r.chambre,  # type: ignore[arg-type]  (str -> enum coercé)
+            )
             for r in rows
         ]
 

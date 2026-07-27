@@ -11,7 +11,7 @@ interface Props {
 
 /**
  * Une ligne de l'annuaire : portrait, nom, puis groupe et circonscription en
- * repère mono. Même gabarit pour tous les députés, quel que soit leur groupe
+ * repère mono. Même gabarit pour tous les parlementaires, quel que soit leur groupe
  * (§7.4 : symétrie de traitement).
  */
 export function DeputeRow({ depute, onPress }: Props) {

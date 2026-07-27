@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { cache, fetchDeputes, fetchGroupes } from '@/api';
-import { DeputeListItem, GroupeListItem } from '@/types';
+import { Chambre, DeputeListItem, GroupeListItem } from '@/types';
 
 interface State {
   deputes: DeputeListItem[];
@@ -14,11 +14,16 @@ interface State {
 const DEBOUNCE_MS = 300;
 
 /**
- * Annuaire des députés : recherche par nom (avec debounce) et filtre par
- * groupe, servis par l'API. Repli sur le cache hors-ligne pour la liste
- * complète (§8) — une recherche sans réseau n'invente rien, elle échoue.
+ * Annuaire des parlementaires : recherche par nom (avec debounce) et filtres
+ * par chambre et par groupe, servis par l'API. Repli sur le cache hors-ligne
+ * pour la liste complète (§8) — une recherche sans réseau n'invente rien, elle
+ * échoue.
  */
-export function useDeputes(query: string, groupeId?: string) {
+export function useDeputes(
+  query: string,
+  groupeId?: string,
+  chambre?: Chambre,
+) {
   const [state, setState] = useState<State>({
     deputes: [],
     groupes: [],
@@ -55,14 +60,15 @@ export function useDeputes(query: string, groupeId?: string) {
       controllerRef.current = controller;
 
       setState((s) => ({ ...s, loading: true, error: false }));
+      const complet = !filtre && !groupeId && !chambre;
       try {
         const deputes = await fetchDeputes(
-          { q: filtre, groupeId },
+          { q: filtre, groupeId, chambre },
           controller.signal,
         );
         // Seule la liste complète alimente le cache : c'est elle qui sert de
         // repli hors-ligne, pas un résultat de recherche partiel.
-        if (!filtre && !groupeId) void cache.setDeputes(deputes);
+        if (complet) void cache.setDeputes(deputes);
         if (!controller.signal.aborted) {
           setState((s) => ({
             ...s,
@@ -74,7 +80,7 @@ export function useDeputes(query: string, groupeId?: string) {
         }
       } catch {
         if (controller.signal.aborted) return;
-        const cached = !filtre && !groupeId ? await cache.getDeputes() : null;
+        const cached = complet ? await cache.getDeputes() : null;
         setState((s) => ({
           ...s,
           deputes: cached ?? [],
@@ -86,7 +92,7 @@ export function useDeputes(query: string, groupeId?: string) {
     }, DEBOUNCE_MS);
 
     return () => clearTimeout(handle);
-  }, [filtre, groupeId]);
+  }, [filtre, groupeId, chambre]);
 
   return state;
 }

@@ -5,6 +5,7 @@ passer de l'in-memory (seed) à PostgreSQL (données ingérées) sans toucher au
 """
 from __future__ import annotations
 
+from collections import Counter
 from typing import Protocol
 
 from app.schemas import (
@@ -20,6 +21,7 @@ from app.schemas import (
     SectionTheme,
     ThemeListItem,
     VoteDepute,
+    VoteDisputeItem,
 )
 
 
@@ -39,6 +41,11 @@ def construire_portrait(
     `alignes` / `avec_majorite` : votes exprimés dont le groupe avait une
     position majoritaire documentée, et parmi eux ceux qui la suivaient. Aucun
     taux de participation n'est produit ici — cf. `PortraitVote`.
+
+    Pour un **sénateur**, `avec_majorite` vaut toujours 0 : l'ingestion ne pose
+    jamais « contre son groupe » au Sénat (délégation de vote par groupe, cf.
+    `app.ingestion.senateurs`). La cohésion sort donc `None` par le même chemin
+    que pour un député sans référence exploitable — aucun cas particulier ici.
     """
     exprimes = pour + contre + abstention
     return PortraitVote(
@@ -57,6 +64,30 @@ def ordonner_sections(sections: list[SectionTheme]) -> list[SectionTheme]:
         sections,
         key=lambda s: (s.theme == "Autre", -len(s.dossiers), s.theme),
     )
+
+
+# Votes d'un même texte admis dans la rangée « Les votes les plus disputés ».
+# Un texte très clivant (l'aide à mourir, le budget) monopoliserait sinon la
+# rangée avec ses lectures successives, et l'écran ne montrerait plus qu'un seul
+# sujet — alors que la rangée existe pour donner à voir où le Parlement s'est
+# divisé, au pluriel.
+MAX_DISPUTES_PAR_DOSSIER = 2
+
+
+def limiter_par_dossier(
+    votes: list[VoteDisputeItem], maximum: int
+) -> list[VoteDisputeItem]:
+    """Plafonne le nombre de votes d'un même dossier, en gardant l'ordre reçu
+    (donc les plus disputés de chaque texte). Règle partagée par toutes les
+    implémentations, pour que l'écran soit le même quel que soit le backend."""
+    retenus: list[VoteDisputeItem] = []
+    comptes: Counter[str] = Counter()
+    for vote in votes:
+        if comptes[vote.dossier_id] >= maximum:
+            continue
+        comptes[vote.dossier_id] += 1
+        retenus.append(vote)
+    return retenus
 
 
 class DossierRepository(Protocol):
@@ -100,15 +131,20 @@ class DossierRepository(Protocol):
         """
         ...
 
-    # --- Députés (§5.2) ---------------------------------------------------
+    # --- Parlementaires (§5.2) --------------------------------------------
 
     async def list_deputes(
-        self, q: str = "", groupe_id: str | None = None, limit: int = 600
+        self,
+        q: str = "",
+        groupe_id: str | None = None,
+        limit: int = 600,
+        chambre: str | None = None,
     ) -> list[DeputeListItem]:
-        """Annuaire des députés, par ordre alphabétique.
+        """Annuaire des parlementaires, par ordre alphabétique.
 
         `q` filtre sur nom / groupe / circonscription ; `groupe_id` restreint à
-        un groupe politique.
+        un groupe politique ; `chambre` à une assemblée (« assemblee » ou
+        « senat »). Sans `chambre`, les deux sont servies.
         """
         ...
 
@@ -125,6 +161,6 @@ class DossierRepository(Protocol):
         """Historique de vote paginé, du plus récent au plus ancien."""
         ...
 
-    async def list_groupes(self) -> list[GroupeListItem]:
-        """Groupes politiques (filtres de l'annuaire)."""
+    async def list_groupes(self, chambre: str | None = None) -> list[GroupeListItem]:
+        """Groupes politiques (filtres de l'annuaire), toutes chambres ou une seule."""
         ...

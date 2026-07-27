@@ -17,6 +17,19 @@ class PositionVote(str, Enum):
     non_votant = "non_votant"
 
 
+class Chambre(str, Enum):
+    """Chambre du Parlement d'où vient un vote, un parlementaire ou une étape.
+
+    Discriminant introduit avec l'ingestion du Sénat : un dossier agrège
+    désormais les votes des DEUX chambres, et rien à l'écran ne doit laisser
+    croire qu'un vote sénatorial est un vote de l'Assemblée (§2.5). Les données
+    antérieures sont toutes `assemblee` (défaut des colonnes).
+    """
+
+    assemblee = "assemblee"
+    senat = "senat"
+
+
 class ObjetVote(str, Enum):
     """Nature de ce sur quoi portait un vote, pour situer une entrée
     d'historique de député (§5.2)."""

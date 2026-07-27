@@ -11,6 +11,13 @@ export type StatutScrutin = 'adopte' | 'rejete' | 'en_cours';
 
 export type PositionVote = 'pour' | 'contre' | 'abstention' | 'non_votant';
 
+/**
+ * Chambre du Parlement d'où vient un vote, un parlementaire ou une étape de la
+ * navette. Un dossier agrège les votes des DEUX assemblées : rien à l'écran ne
+ * doit laisser croire qu'un vote sénatorial est un vote de l'Assemblée (§2.5).
+ */
+export type Chambre = 'assemblee' | 'senat';
+
 export type NiveauConfiance = 'haute' | 'moyenne' | 'faible';
 
 // Miroir de `THEMES` dans backend/app/ingestion/normalize.py — à garder synchronisé.
@@ -71,12 +78,14 @@ export interface PositionGroupe {
 }
 
 /**
- * Un député nommé dans la ventilation nominative d'un scrutin (§5.2).
+ * Un parlementaire nommé dans la ventilation nominative d'un scrutin (§5.2).
  *
- * `deputeId` n'est présent que si le député figure au référentiel servi par
- * l'API : c'est lui, et lui seul, qui autorise à ouvrir la fiche du député
- * depuis son vote — un lien ne doit jamais mener à un 404. Un ancien député
- * garde donc son nom, sans lien.
+ * `deputeId` n'est présent que si la personne figure au référentiel servi par
+ * l'API : c'est lui, et lui seul, qui autorise à ouvrir sa fiche depuis son
+ * vote — un lien ne doit jamais mener à un 404. Un ancien député garde donc son
+ * nom, sans lien. Le champ garde son nom historique alors qu'il porte aussi des
+ * sénateurs (`SEN-…`) : c'est la clé du référentiel commun, pas une assertion
+ * sur la chambre — celle-ci est portée par `Scrutin.chambre`.
  */
 export interface Votant {
   nom: string;
@@ -238,13 +247,26 @@ export interface DispositifTexte {
 }
 
 /**
- * Étape précise de la navette affichée sur la fiche
- * (ex. « Adopté en 1re lecture » alors que le fil affiche « En discussion »).
+ * Une étape de la trajectoire du texte au Parlement (frise de la fiche).
+ *
+ * Documentée par les **actes législatifs officiels** du dossier (Assemblée,
+ * Sénat, CMP, Conseil constitutionnel) quand l'archive les fournit, sinon par
+ * les mentions de navette portées par les objets de vote. Calculée côté
+ * backend : l'app ne la déduit plus des scrutins, qui ne voient qu'une chambre.
+ *
+ * `statut` reste optionnel — il n'est posé que si un vote sur l'ensemble de
+ * CETTE étape le documente. Une étape connue mais pas encore conclue s'affiche
+ * donc avec sa seule date, plutôt qu'avec un statut deviné (§2.5). `chambre`
+ * est absente pour les étapes communes aux deux assemblées (CMP) ou extérieures
+ * au Parlement (Conseil constitutionnel).
  */
 export interface PhaseScrutin {
   label: string;
-  /** Statut utilisé pour le style du badge. */
-  statut: StatutScrutin;
+  chambre?: Chambre;
+  /** Statut utilisé pour le style du badge (absent = non documenté). */
+  statut?: StatutScrutin;
+  /** Date de l'étape (ISO). */
+  date?: string;
 }
 
 /**
@@ -260,9 +282,14 @@ export interface Scrutin {
   /** Dossier (texte de loi) auquel ce vote se rattache. */
   dossierId: string;
   date: string; // ISO
-  /** Ce sur quoi les députés ont voté (objet du scrutin). */
+  /** Ce sur quoi les parlementaires ont voté (objet du scrutin). */
   objet: string;
   statut: StatutScrutin;
+  /**
+   * Chambre où le vote a eu lieu. À afficher : un dossier agrège les votes des
+   * deux assemblées, et « 214 pour » n'a pas le même sens selon l'hémicycle.
+   */
+  chambre: Chambre;
   /** true = scrutin public (vote nominatif dispo), false = à main levée (§5.2). */
   scrutinPublic: boolean;
   resultat: ResultatGlobal;
@@ -299,6 +326,7 @@ export interface ScrutinResume {
   date: string;
   objet: string;
   statut: StatutScrutin;
+  chambre: Chambre;
   scrutinPublic: boolean;
   resultat: ResultatGlobal;
 }
@@ -331,6 +359,13 @@ export interface Dossier {
   accroche?: string;
   statut: StatutScrutin;
   phase?: PhaseScrutin;
+  /**
+   * Trajectoire du texte au Parlement, dans l'ordre chronologique (frise de la
+   * fiche). Calculée côté backend depuis les actes législatifs officiels : elle
+   * couvre les deux chambres, ce que les seuls scrutins ne permettaient pas.
+   * Vide quand aucune étape n'est documentée → frise masquée (§2.5).
+   */
+  trajectoire: PhaseScrutin[];
   theme: ThemeScrutin;
   tempsLectureSec: number;
   /** Date du scrutin le plus récent du dossier (ISO). */
@@ -378,6 +413,12 @@ export interface DossierListItem {
   nombreScrutins: number;
   miseAJour?: MiseAJourDossier;
   /**
+   * Chambres qui ont voté ce texte, dans l'ordre chronologique. Une carte du
+   * fil doit dire d'où vient le vote qu'elle résume : sans ça, un texte encore
+   * au Sénat se lirait comme un vote de l'Assemblée (§2.5).
+   */
+  chambres: Chambre[];
+  /**
    * Résultat du dernier scrutin **public** du dossier (voix pour/contre) —
    * alimente la barre de résultat de la carte. Absent si le dernier vote n'est
    * pas nominatif (à main levée) : on n'affiche alors pas de barre (§2.5, §5.2).
@@ -408,10 +449,41 @@ export interface ThemeListItem {
  * progressif des rangées. « Aujourd'hui » / « Hier » vides hors jours de
  * séance (rangée masquée, §2.5).
  */
+/**
+ * Un vote de la rangée « Les votes les plus disputés » (accueil).
+ * Miroir de `VoteDisputeItem` côté backend.
+ *
+ * ⚠️ « Disputé » qualifie **l'arithmétique du scrutin** — écart de voix,
+ * abstention, groupes divisés —, jamais la mesure votée (§4.3). C'est pourquoi
+ * la carte affiche toujours les décomptes officiels à côté du rang : le lecteur
+ * voit le fait, pas seulement le classement.
+ *
+ * `groupesDisperses` est **absent au Sénat** (délégation de vote par groupe,
+ * même doctrine que « contre son groupe ») : la mention est alors masquée (§2.5).
+ */
+export interface VoteDisputeItem {
+  scrutinId: string;
+  dossierId: string;
+  /** Titre d'affichage du texte : un vote seul ne se situe pas. */
+  dossierTitre: string;
+  objet: string;
+  date: string;
+  chambre: Chambre;
+  statut: StatutScrutin;
+  resultat: ResultatGlobal;
+  /** Écart de voix entre le pour et le contre. */
+  ecart: number;
+  /** Positions majoritaires distinctes parmi les groupes (1 = unanimité). */
+  camps: number;
+  groupesDisperses?: number | null;
+}
+
 export interface Accueil {
   aLaUne: DossierListItem | null;
   aujourdhui: DossierListItem[];
   hier: DossierListItem[];
+  /** Vide = aucun vote récent classable → la rangée est masquée (§2.5). */
+  votesDisputes?: VoteDisputeItem[];
   sections: SectionTheme[];
 }
 
@@ -432,20 +504,29 @@ export interface RecapMensuel {
 }
 
 // ---------------------------------------------------------------------------
-// Députés (annuaire, fiche, historique de votes)
+// Parlementaires (annuaire, fiche, historique de votes)
 //
-// Le sens de vote d'un député n'existe que pour les scrutins PUBLICS
-// (nominatifs, §5.2) : c'est la seule source de l'historique. « Contre son
-// groupe » est un fait déduit (position du député ≠ `positionMajoritaire` de
-// son groupe sur le même scrutin), jamais une interprétation (§7.4).
+// Le sens de vote n'existe que pour les scrutins PUBLICS (nominatifs, §5.2) :
+// c'est la seule source de l'historique. « Contre son groupe » est un fait
+// déduit (position ≠ `positionMajoritaire` de son groupe sur le même scrutin),
+// jamais une interprétation (§7.4).
+//
+// ⚠️ Le référentiel est COMMUN aux deux chambres (les noms `Depute`/`deputeId`
+// sont historiques, `chambre` est le discriminant). Mais au Sénat, les
+// bulletins d'un scrutin public ordinaire sont déposés par un délégué de groupe
+// pour l'ensemble de ses membres : le nominatif y reflète la position du
+// GROUPE, pas l'acte individuel — et la source ne permet pas de distinguer ces
+// scrutins de ceux à la tribune. `contreSonGroupe` et `cohesionGroupe` sont
+// donc TOUJOURS absents pour un sénateur (§7.4).
 // Miroir de `backend/app/schemas/depute.py`.
 // ---------------------------------------------------------------------------
 
-/** Un député (organe « acteur » de l'open data AN). */
+/** Un parlementaire (« acteur » de l'open data AN, ou sénateur senat.fr). */
 export interface Depute {
-  /** Référence acteur AMO (« PA841605 »). */
+  /** Référence acteur AMO (« PA841605 ») ou matricule Sénat (« SEN-08061X »). */
   id: string;
   nom: string;
+  chambre: Chambre;
   groupeId: string;
   groupeNom: string;
   /** Couleur du groupe (même source que `PositionGroupe.couleur`). */
@@ -464,6 +545,7 @@ export interface Depute {
 export interface DeputeListItem {
   id: string;
   nom: string;
+  chambre: Chambre;
   groupeNom: string;
   groupeCouleur: string;
   circonscription: string;
@@ -479,7 +561,10 @@ export interface DeputeListItem {
  * comme un score d'absentéisme que la source ne soutient pas (§7.4).
  */
 export interface PortraitVote {
-  /** Part de ses votes alignés sur la majorité de son groupe (0..1). */
+  /**
+   * Part de ses votes alignés sur la majorité de son groupe (0..1). Toujours
+   * absent pour un sénateur (délégation de vote par groupe, cf. ci-dessus).
+   */
   cohesionGroupe?: number;
   /** Nombre de scrutins publics où il a exprimé un vote. */
   votes: number;
@@ -503,7 +588,8 @@ export interface VoteDepute {
   position: PositionVote;
   /**
    * True si la position diffère de la majorité de son groupe sur ce scrutin.
-   * Absent quand le groupe n'a pas de position majoritaire documentée (§2.5).
+   * Absent quand le groupe n'a pas de position majoritaire documentée (§2.5),
+   * et TOUJOURS absent au Sénat (délégation de vote, cf. ci-dessus).
    */
   contreSonGroupe?: boolean;
 }
@@ -524,4 +610,5 @@ export interface GroupeListItem {
   nom: string;
   abrev: string;
   couleur: string;
+  chambre: Chambre;
 }

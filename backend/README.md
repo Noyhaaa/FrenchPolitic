@@ -40,8 +40,21 @@ createdb frenchpolitics
 #   DATABASE_URL=postgresql+asyncpg://localhost:5432/frenchpolitics
 #   REPOSITORY_BACKEND=postgres
 
-# Ingère les scrutins publics de la 17e législature (open data AN).
+# Applique les colonnes ajoutées au modèle depuis la création de la base
+# (`create_all` ne touche jamais une table existante). Additif et idempotent :
+# à jouer après un `git pull` qui change `db/models.py`.
+python -m app.db.migrations                 # --dry-run pour voir sans écrire
+
+# Ingère les scrutins publics de la 17e législature (open data AN) ET les
+# scrutins publics du Sénat de la session en cours.
 python -m app.ingestion.run --limit 300     # 300 récents (~4 s) ; sans --limit = tout
+python -m app.ingestion.run --sans-senat    # Assemblée seule
+
+# Sénateurs + scrutins du Sénat UNIQUEMENT (annuaire senat.fr + pages de
+# scrutins) : ni LLM, ni dossiers, ni amendements, ni débats. ~10 s pour
+# 40 scrutins. La jointure vers les dossiers de l'Assemblée est faite, mais
+# les dossiers ne sont pas reconstruits — c'est le rôle de `run`.
+python -m app.ingestion.senat --limit 40    # --session 2025 pour forcer la session
 
 # Députés + votes nominatifs UNIQUEMENT (référentiel AMO + ventilations des
 # scrutins) : ni LLM, ni dossiers, ni amendements, ni débats. ~7 min sur toute
@@ -52,6 +65,18 @@ python -m app.ingestion.deputes             # --limit 300 pour les plus récents
 # validée) des dossiers DÉJÀ en base : ni réseau ni LLM, quelques secondes.
 # Évite d'attendre une ingestion complète après un changement de formatage.
 python -m app.ingestion.reformater          # --dry-run pour voir le bilan sans écrire
+
+# Repasse les garde-fous COURANTS sur les réponses citoyennes déjà en base et
+# efface celles qui ne passent plus (le run suivant les régénère). À lancer
+# après tout ajout de contrôle à `valider_reponse` : les réponses validées sont
+# réutilisées d'un run à l'autre, donc une réponse écrite avant un nouveau
+# garde-fou y resterait sinon indéfiniment. Ni réseau ni LLM.
+python -m app.ingestion.revalider           # --dry-run pour voir le bilan sans écrire
+
+# Recalcule l'indice de division des scrutins déjà en base (rangée « Les votes
+# les plus disputés » de l'accueil). Nécessaire une fois après l'ajout de la
+# colonne, puis à chaque changement des poids du calcul. Ni réseau ni LLM.
+python -m app.ingestion.divisions           # --dry-run pour voir le classement
 
 # L'API sert alors la base ingérée (REPOSITORY_BACKEND=postgres via .env).
 uvicorn app.main:app --reload
@@ -84,6 +109,99 @@ singleton (motion de censure, déclaration…). Le fil n'expose ainsi que des
 textes — jamais un vote d'amendement isolé — et ~60 % ont leur page officielle.
 L'archive sert **uniquement** à retrouver le `dossierRef` : ses titres (en
 minuscules, fragmentés) ne sont pas importés.
+
+### Le Sénat (`app/ingestion/senat.py`, `senateurs.py`)
+
+Le Sénat ne publie pas d'archive de scrutins comparable à celle de l'Assemblée.
+Il expose en revanche, **par scrutin**, deux ressources jointes :
+
+- `senat.fr/scrutin-public/{session}/scr{session}-{n}.html` — objet du vote, date
+  de séance, sort, résultat global, **analyse par groupe** et lien vers le
+  dossier législatif ;
+- `…/scr{session}-{n}.json` — le **vote nominatif**, une ligne par matricule
+  (codes `p` / `c` / `a` / `n`).
+
+L'annuaire des sénateurs vient de `senat.fr/api-senat/senateurs.json` (matricule,
+nom, groupe, circonscription, **photo officielle donnée par la source** — pas
+dérivée, donc pas à vérifier comme côté AN). Endpoint non documenté par
+data.senat.fr : traité en best-effort.
+
+> ⚠️ **`{session}` est l'année de DÉBUT de session** (octobre → septembre), pas
+> l'année civile : le scrutin n° 340 de la session « 2025 » a eu lieu le
+> **21 juillet 2026**, et `scr2026.html` répond 404. Même famille de piège que
+> les zéros de tête des URLs de l'AN.
+
+**Un texte, un dossier.** Le rattachement suit la même cascade que côté AN, pour
+qu'un texte examiné dans les deux chambres ne se dédouble pas dans le fil :
+
+1. la **jointure officielle** `titreDossier.senatChemin` des
+   `dossierParlementaire` de l'archive AN (`construire_jointure_senat`) — l'AN
+   publie elle-même l'URL du dossier Sénat correspondant : **873 dossiers
+   appariés**, zéro requête réseau ;
+2. le **lien inverse** : la page du dossier Sénat cite l'URL du dossier AN, dont
+   le slug se résout via `titreDossier.titreChemin` (casse repliée : le Sénat
+   écrit `PJL_relance_…`, l'archive `pjl_relance_…`) ;
+3. la **réconciliation par titre** déjà en place — les objets de vote du Sénat
+   citent leur texte exactement comme ceux de l'AN ;
+4. sinon un **dossier d'origine sénatoriale** `SEN-{slug}` (le slug du Sénat est
+   stable, contrairement au titre : pas besoin de le hacher) ;
+5. sinon le scrutin est son propre dossier (motion, débat).
+
+Mesuré sur les 12 derniers scrutins de la session : **12/12 rattachés** à un
+dossier de l'Assemblée.
+
+Les objets de vote du Sénat sont **structurellement identiques** à ceux de l'AN
+au préfixe « sur » près (« sur l'ensemble du projet de loi… ») : on le retire à
+l'entrée, et tout l'aval (classement texte/amendement, vote décisif,
+rattachement par titre) s'applique sans adaptation. Deux différences traitées à
+part : l'auteur s'écrit « présenté par M. Prénom Nom » (l'AN écrit « de M. Nom »),
+et l'**article visé** est cité par l'objet lui-même (côté AN il vient de
+l'archive des amendements). Nouveau cas, absent de l'AN : les **amendements
+identiques** (« les amendements identiques n° 154…, n° 207… et n° 410 ») portent
+plusieurs numéros — on n'en retient **aucun** plutôt que de laisser croire que le
+vote ne portait que sur le premier (§2.5).
+
+> ⚠️ **Pas de « contre son groupe » ni de cohésion au Sénat.** Dans un scrutin
+> public **ordinaire**, les bulletins sont déposés par un délégué de groupe pour
+> l'ensemble de ses membres : le nominatif y reflète la position du **groupe**,
+> pas l'acte individuel. La source ne permet pas non plus de distinguer ces
+> scrutins de ceux **à la tribune** (art. 59), qui seuls sont individuels. Une
+> divergence calculée là-dessus serait un artefact de procédure présenté comme un
+> fait politique : `contre_son_groupe` et `cohesion` restent **toujours `None`**
+> (§7.4), et la fiche vote porte une mention factuelle expliquant la lecture.
+
+Les sénateurs vivent dans **les mêmes tables** que les députés (`depute`,
+`vote_depute`, `groupe`), discriminés par `chambre` ; leurs identifiants sont
+préfixés (`SEN-…`) pour ne jamais heurter les `acteurRef` (PA…) et `organeRef`
+(PO…) de l'Assemblée. L'annuaire du Sénat ne publiant pas de couleur de groupe,
+`COULEURS_GROUPES_SENAT` en fixe une par code — choix de présentation assumé et
+symétrique (§7.4), comme `GROUP_COLORS` côté AN, pas une donnée de la source.
+
+### Trajectoire au Parlement (`app/ingestion/navette.py`)
+
+La frise de la fiche dossier était dérivée côté app des **objets des votes AN**,
+ce qui la condamnait à une seule chambre. Elle est désormais calculée à
+l'ingestion depuis les **`actesLegislatifs`** des `dossierParlementaire` — que
+l'archive *dossiers législatifs*, déjà téléchargée à chaque run, contenait sans
+qu'on les lise. Ils décrivent l'enchaînement officiel complet, avec dates et
+`statutConclusion` :
+
+```
+AN1  1ère lecture (1ère assemblée saisie)   2026-06-02  adopté
+SN1  1ère lecture (2ème assemblée saisie)   2026-07-02  modifié
+CMP  Commission Mixte Paritaire             2026-07-17  Accord
+CC   Conseil constitutionnel                2026-07-24  (sans statut)
+```
+
+Liste fermée de 11 codes d'étape retenus (les 16 existants moins « Travaux »,
+« Débat » et « Mise en application de la loi », qui ne décrivent pas le parcours
+du texte). Le vocabulaire de conclusion est riche et circonstancié (« adoptée,
+dans les conditions prévues à l'article 45, alinéa 3… », « considéré comme
+rejeté… ») : seul ce qui est sans ambiguïté donne un statut, le reste — dont les
+avis du Conseil constitutionnel, qui ne sont ni adoption ni rejet — laisse
+l'étape **sans statut** (§2.5). Repli pour les dossiers sans actes (`TXT-…`,
+`SEN-…`) : les mentions de navette des objets de vote, **distinguées par
+chambre** (« Première lecture » à l'Assemblée et au Sénat sont deux étapes).
 
 **Législature courante ET précédente.** `construire_reconciliation` /
 `construire_index_textes` / `construire_index_numeros` prennent désormais un
@@ -177,18 +295,47 @@ finissait par préserver le bon thème, mais après un appel gaspillé).
 
 | Méthode | Route              | Écran            | Description                                   |
 |---------|--------------------|------------------|-----------------------------------------------|
-| GET     | `/accueil`         | Accueil (1)      | Écran complet en une réponse : à la une, aujourd'hui/hier, rangées par thème |
+| GET     | `/accueil`         | Accueil (1)      | Écran complet en une réponse : à la une, aujourd'hui/hier, **votes les plus disputés**, rangées par thème |
 | GET     | `/recap`           | Accueil (1)      | Activité du dernier mois actif (votes, adoptés/rejetés, textes) |
 | GET     | `/dossiers`        | Fil paginé       | Derniers dossiers, du plus récent au plus ancien |
 | GET     | `/dossiers/{id}`   | Fiche dossier (2)| Résumé sourcé + votes sur le texte + amendements |
 | GET     | `/scrutins/{id}`   | Fiche vote (3)   | Détail d'un vote (texte ou amendement) : groupes + nominatif |
 | GET     | `/recherche?q=&theme=` | Recherche (4) | Multi-termes (tous exigés) classée par pertinence ; `theme` seul parcourt le thème |
 | GET     | `/themes`          | Recherche (4)    | Thèmes réellement présents + nombre de dossiers — les filtres |
-| GET     | `/deputes?q=&groupe=` | Annuaire       | Députés (ordre alphabétique), filtrables par groupe et recherche libre |
-| GET     | `/deputes/{id}`    | Fiche député     | Identité + portrait de vote (12 mois) + 1re page d'historique |
-| GET     | `/deputes/{id}/votes` | Fiche député  | Historique paginé (« charger les votes plus anciens ») |
-| GET     | `/groupes`         | Annuaire         | Groupes politiques (nom, abréviation, couleur) — filtres |
+| GET     | `/deputes?q=&groupe=&chambre=` | Annuaire | Parlementaires (ordre alphabétique), filtrables par chambre, groupe et recherche libre |
+| GET     | `/deputes/{id}`    | Fiche parlementaire | Identité + portrait de vote (12 mois) + 1re page d'historique |
+| GET     | `/deputes/{id}/votes` | Fiche parlementaire | Historique paginé (« charger les votes plus anciens ») |
+| GET     | `/groupes?chambre=` | Annuaire        | Groupes politiques (nom, abréviation, couleur, chambre) — filtres |
 | GET     | `/health`          | —                | Statut du service                             |
+
+**Les votes les plus disputés (rangée d'accueil)** — `app/domain/division.py`,
+fonction pure partagée par les deux repositories. « Disputé » qualifie
+**l'arithmétique du scrutin**, jamais la mesure votée (§4.3) : l'ordre vient de
+trois composantes lues sur les décomptes officiels — l'**écart** de voix (0,6),
+la part d'**abstention** (0,2), la **fracture entre groupes** (0,2, soit le
+nombre de positions majoritaires distinctes) —, le tout pondéré par l'**ampleur**
+(à division égale, un vote à 371 votants pèse plus qu'un à 60 : sans ce facteur
+le classement remonte des amendements votés dans un hémicycle vide).
+
+Trois exclusions, toutes §2.5 : vote **à main levée** (rien à mesurer), vote de
+**moins de 50 votants** (« serré » n'y veut rien dire), et vote de **conduite de
+séance** — suspension, prolongation au-delà de minuit, seconde délibération
+(`est_vote_de_conduite_de_seance`, liste fermée relevée sur les objets réels) :
+souvent très serrés, mais ils ne décident de rien. Un même dossier n'occupe pas
+plus de **2** places (`limiter_par_dossier`), sinon un texte clivant monopolise
+la rangée avec ses lectures successives.
+
+⚠️ La **dispersion interne** (groupes dont plus d'un cinquième des voix s'écarte
+de leur majorité) est calculée et **affichée**, mais **pas classante** : elle est
+incalculable au Sénat (délégation de vote par groupe), et la pondérer reviendrait
+à classer les deux chambres sur des critères différents — l'une pénalisée par une
+composante manquante, l'autre avantagée par sa renormalisation. Le classement ne
+retient donc que ce qui est observable des deux côtés.
+
+L'indice vit dans la colonne indexée `scrutin.indice_division` (le tri porte sur
+toute la table), posée à l'ingestion et rattrapable par
+`python -m app.ingestion.divisions`. Les **chiffres affichés**, eux, sont toujours
+recalculés depuis le scrutin servi : la colonne ne sert qu'à ordonner.
 
 **Recherche (§3.3)** — `app/domain/recherche.py`, trois fonctions **pures**
 partagées par les deux repositories (les tests tournent sur `memory`, ils doivent
@@ -233,6 +380,7 @@ app/
   domain/enums.py    Statuts, positions, niveaux de confiance…
   domain/recherche.py  Index, découpage en termes et pertinence (pur, partagé par les 2 repos)
   db/                models.py (dossier, scrutin, groupe, depute, vote_depute, sync_run) · session.py (moteur async)
+                     migrations.py  DDL additives idempotentes (pas d'Alembic : `create_all` ne modifie pas l'existant)
   repositories/      Protocole + in-memory (seed) + postgres (ingéré) — choix via config
   data/seed.py       Dossiers + députés FICTIFS de démonstration (backend « memory »)
   ai/                Pipeline de résumé (§4)
@@ -246,6 +394,9 @@ app/
     review_queue.py  File de revue humaine (§4.6)
   ingestion/         Alimentation depuis les sources officielles (§5)
     assemblee.py     Open data AN : download + parse_scrutin (pur, nominatif inclus) → ScrutinParse
+    senat.py         Scrutins publics du Sénat (senat.fr) : parse_page_scrutin + parse_scrutin_senat (purs) + CLI autonome
+    senateurs.py     Référentiel des sénateurs + votes nominatifs (purs) — jamais de « contre son groupe »
+    navette.py       Trajectoire au Parlement : actes législatifs officiels (2 chambres), repli sur les objets de vote
     debats.py        Comptes rendus (SyceronBrut) : explications de vote par groupe + liaison au vote
     amendements.py   Contenu des amendements (dispositif + exposé sommaire + article visé) : archive AN → index (dossierRef, numéro)
     textes_an.py     Exposé des motifs ET dispositif : uid → URL du PDF officiel → extraction (pypdf)
@@ -256,6 +407,8 @@ app/
     sync.py          Job download → parse → regroupement par dossier → upsert (idempotent)
     run.py           CLI : python -m app.ingestion.run
     reformater.py    CLI : recalcule titre court + accroche des dossiers en base (sans réseau ni LLM)
+    revalider.py     CLI : repasse les garde-fous sur les réponses en base, efface celles qui échouent
+    divisions.py     CLI : recalcule l'indice de division des scrutins en base (rangée « votes disputés »)
     legifrance.py    API Légifrance via PISTE (OAuth2) — stub Phase 2
 tests/               Tests API + garde-fous + génération + ingestion (+ repo pg opt-in)
 ```
@@ -436,7 +589,30 @@ tests/               Tests API + garde-fous + génération + ingestion (+ repo p
   contenus dangereux », écrit dans l'article unique d'une résolution, faisait
   rejeter une réponse pourtant fidèle). Rejet → réponse absente (§2.5), jamais
   publiée. Les réponses validées sont **persistées et réutilisées** entre runs
-  (pas de rappel du modèle sur une source stable).
+  (pas de rappel du modèle sur une source stable) — d'où
+  `python -m app.ingestion.revalider`, à lancer quand un garde-fou est ajouté.
+
+  Deux contrôles complètent la règle « le modèle reformule, il n'ajoute rien » :
+  - **glose entre parenthèses** absente de la source → rejet. Un sigle ne se
+    développe pas tout seul : sur l'amendement n° 7 du projet de loi agricole,
+    le modèle écrivait « l'Anses (Agence nationale de sécurité du médicament et
+    des produits de santé) » — développement absent de l'exposé, et qui est
+    celui de l'**ANSM**, une autre agence. Comparaison mot à mot, accents et
+    ponctuation neutralisés : « (à l'article 8) » passe si la source l'écrit.
+  - **déposant requalifié** → rejet. `deposant()` (`normalize.py`) lit dans
+    l'objet officiel qui a déposé — mention explicite (« du Gouvernement »,
+    « présenté par le Gouvernement », « de M. X », « de la commission des
+    lois ») et, **pour un vote sur le texte seulement**, la nature du texte
+    (art. 39 : un *projet* émane du Gouvernement, une *proposition* d'un
+    parlementaire). Sur un vote d'**amendement**, la nature du texte est
+    ignorée : un député amende couramment un projet de loi. Deux indices
+    contradictoires → `None`, aucun contrôle (§2.5). Le contrôle est
+    **asymétrique** et ne s'applique qu'aux réponses **attribuées** (avec
+    préfixe) : « le député » est rejeté quand la source dit « du
+    Gouvernement », mais l'inverse est admis (l'exposé d'un amendement
+    parlementaire mentionne légitimement le Gouvernement), et la Q1 non
+    attribuée garde son amorce « Les députés ont examiné ce texte… ».
+    Mesuré sur la base de dev : **175 réponses fautives** trouvées.
 - **Questions d'un vote d'amendement** (fiche vote) : mêmes principes,
   adaptés — `generer_questions_amendement` remplit `questions` sur le **scrutin**
   de chaque vote d'amendement (servi par `GET /scrutins/{id}`). **Pourquoi** :

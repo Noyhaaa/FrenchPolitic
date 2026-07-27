@@ -102,7 +102,7 @@ interface Props {
 }
 
 /**
- * Historique de vote d'un député, en fil chronologique groupé par mois. Chaque
+ * Historique de vote d'un parlementaire, en fil chronologique groupé par mois. Chaque
  * entrée porte le sens du vote (pastille couleur **et** libellé, §8), la nature
  * de ce qui était voté, la date et le titre officiel. Rien n'est agrégé ni
  * commenté : ce sont les scrutins publics tels quels (§5.2, §2.5).

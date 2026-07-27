@@ -34,9 +34,29 @@ from app.ingestion.deputes import (
     upsert_deputes,
     votes_du_scrutin,
 )
+from app.domain.division import division
+from app.domain.enums import Chambre
 from app.domain.recherche import index_recherche
 from app.ingestion.debats import IndexDebats, url_compte_rendu
-from app.ingestion.dossiers_legislatifs import construire_reconciliation
+from app.ingestion.dossiers_legislatifs import (
+    JointureSenat,
+    construire_jointure_senat,
+    construire_reconciliation,
+    legislature_du_ref,
+)
+from app.ingestion.navette import trajectoire
+from app.ingestion.senat import (
+    URL_TEXTE_PDF as SENAT_URL_TEXTE_PDF,
+    SenatOpenDataClient,
+    parse_scrutin_senat,
+    session_pour,
+)
+from app.ingestion.senateurs import (
+    build_senateurs,
+    construire_annuaire,
+    groupes_senat,
+    votes_du_scrutin_senat,
+)
 from app.ingestion.textes_an import (
     construire_dispositif,
     construire_expose,
@@ -131,6 +151,19 @@ class SyncReport:
     deputes: int = 0
     portraits: int = 0
     votes_deputes: int = 0
+    # Sénat : scrutins publics lus sur senat.fr et référentiel des sénateurs.
+    scrutins_senat: int = 0
+    # Dossiers tombés au dernier niveau de la cascade : AUCUN dossier de
+    # l'Assemblée n'a pu être retrouvé, on a donc ouvert un dossier « SEN-… ».
+    # ⚠️ Ce n'est PAS le nombre de textes examinés au seul Sénat : l'Assemblée
+    # enregistre un dossier dès le dépôt/la transmission, si bien qu'un texte
+    # encore au Sénat a le plus souvent déjà son `dossierRef` (et sa page
+    # officielle). Compteur de repli, pas de couverture.
+    dossiers_sans_ref_an: int = 0
+    senateurs: int = 0
+    # Scrutins du Sénat rattachés à un dossier de l'Assemblée déjà connu : la
+    # mesure de la jointure bicamérale (un texte, un dossier).
+    scrutins_senat_joints: int = 0
     # LLM configuré mais injoignable au démarrage → run sans LLM (visible).
     llm_indisponible: bool = False
     # Appels LLM en échec définitif malgré les retries (sinon un échec réseau
@@ -338,7 +371,15 @@ def build_dossier(
     complet de chaque vote (groupes, nominatif) vit dans la table `scrutin`.
     """
     tous = sorted((p.scrutin for p in parses), key=lambda s: s.date, reverse=True)
-    ref = parses[0]  # métadonnées de dossier partagées
+    # Métadonnées de dossier partagées. On privilégie un vote de l'ASSEMBLÉE :
+    # le titre y est mieux casé, et surtout la « législature » d'un vote
+    # sénatorial est en réalité une **session** (le Sénat ne numérote pas par
+    # législature) — la prendre pour une législature fabriquerait une URL de
+    # dossier fausse. Un dossier purement sénatorial n'a pas de `dossier_ref`
+    # AN, donc pas d'URL AN à bâtir.
+    ref = next(
+        (p for p in parses if p.scrutin.chambre is Chambre.assemblee), parses[0]
+    )
     # Titre d'affichage : sans la nature (rendue en label à part), sans troncature
     # en plein mot — l'app clampe elle-même sur 2 lignes (§8).
     titre_clair = titre_court(ref.dossier_titre)
@@ -349,10 +390,18 @@ def build_dossier(
     # Sources de NIVEAU DOSSIER uniquement : la page du dossier législatif.
     # Chaque vote (texte, amendement, sous-amendement) garde sa source sur sa
     # propre fiche (§7.5 s'applique écran par écran) — les répéter ici ne
-    # ferait que dupliquer. Sans référence de dossier, repli factuel sur les
-    # sources des votes.
+    # ferait que dupliquer. Priorité à la page de l'Assemblée ; à défaut, celle
+    # du Sénat (dossier d'origine sénatoriale) ; à défaut de tout, repli factuel
+    # sur les sources des votes.
+    source_senat = next((p.source_dossier for p in parses if p.source_dossier), None)
     if ref.dossier_ref:
-        sources = [dossier_source(ref.legislature, ref.dossier_ref)]
+        # La législature vient du `dossierRef` lui-même (« DLR5L17N… » → 17),
+        # pas du vote : elle reste juste même si ce run n'a vu que des votes
+        # du Sénat, dont la « législature » est en fait une session.
+        legislature = legislature_du_ref(ref.dossier_ref) or ref.legislature
+        sources = [dossier_source(legislature, ref.dossier_ref)]
+    elif source_senat is not None:
+        sources = [source_senat]
     else:
         sources = [src for s in (votes_texte or tous) for src in s.sources]
 
@@ -540,10 +589,21 @@ async def _upsert_dossier(session: AsyncSession, dossier: Dossier) -> Dossier:
 
 async def _upsert_scrutin(session: AsyncSession, scrutin: Scrutin) -> None:
     """Détail complet d'un vote (dont nominatif) — servi par GET /scrutins/{id}."""
+    # Division du vote : recalculée à chaque upsert depuis les décomptes du
+    # scrutin (pure arithmétique, aucun coût). None = non classable (§2.5).
+    mesure = division(
+        scrutin.resultat,
+        scrutin.positions_groupes,
+        scrutin.chambre,
+        objet=scrutin.objet,
+        scrutin_public=scrutin.scrutin_public,
+    )
     values = {
         "id": scrutin.id,
         "dossier_id": scrutin.dossier_id,
         "date": scrutin.date,
+        "chambre": scrutin.chambre.value,
+        "indice_division": mesure.indice if mesure else None,
         "payload": scrutin.model_dump(mode="json", by_alias=True),
     }
     stmt = insert(ScrutinRow).values(**values)
@@ -553,10 +613,22 @@ async def _upsert_scrutin(session: AsyncSession, scrutin: Scrutin) -> None:
     )
 
 
-async def _upsert_groupes(session: AsyncSession, resolver: GroupResolver) -> int:
+async def _upsert_groupes(
+    session: AsyncSession,
+    groupes: GroupResolver | list[GroupInfo],
+    chambre: Chambre = Chambre.assemblee,
+) -> int:
+    """Upsert du référentiel des groupes d'une chambre (idempotent)."""
+    liste = groupes.all() if isinstance(groupes, GroupResolver) else groupes
     count = 0
-    for g in resolver.all():
-        values = {"id": g.id, "nom": g.nom, "abrev": g.abrev, "couleur": g.couleur}
+    for g in liste:
+        values = {
+            "id": g.id,
+            "nom": g.nom,
+            "abrev": g.abrev,
+            "couleur": g.couleur,
+            "chambre": chambre.value,
+        }
         stmt = insert(GroupeRow).values(**values)
         update = {k: v for k, v in values.items() if k != "id"}
         await session.execute(
@@ -573,6 +645,7 @@ class SyncJob:
         client: AssembleeOpenDataClient | None = None,
         llm: LLMClient | None = None,
         on_progress: Callable[[int, int, str], None] | None = None,
+        client_senat: SenatOpenDataClient | None = None,
     ) -> None:
         self._sf = session_factory
         self._client = client or AssembleeOpenDataClient()
@@ -599,6 +672,12 @@ class SyncJob:
         # AMO : résout l'orateur d'une intervention en discussion générale vers son
         # groupe (le CR n'y écrit pas l'abréviation, cf. debats.py).
         self._groupe_par_acteur: dict[str, tuple[str, str]] = {}
+        # Sénat : client (ou None si l'ingestion sénatoriale est désactivée),
+        # slug du dossier Sénat par dossier construit (pour aller y chercher
+        # l'exposé des motifs), et actes législatifs par dossierRef (trajectoire).
+        self._client_senat = client_senat
+        self._slug_senat_par_dossier: dict[str, str] = {}
+        self._actes_par_ref: dict[str, object] = {}
 
     # Abréviations de groupe divergentes entre le compte rendu et l'annuaire AMO
     # (fold appliqué de part et d'autre). À compléter si de nouveaux cas surgissent.
@@ -718,6 +797,116 @@ class SyncJob:
                 report.exposes_senat += 1
                 return True
         return False
+
+    async def _enrichir_texte_senat(
+        self, session: AsyncSession, dossier: Dossier, report: SyncReport
+    ) -> None:
+        """Exposé des motifs et dispositif d'un dossier d'origine sénatoriale.
+
+        Le slug du dossier au Sénat EST la référence de son texte déposé
+        (« pjl25-689 » → `senat.fr/leg/pjl25-689.pdf`) : contrairement au cas
+        d'une transmission (`_enrichir_senat`), aucun numéro n'est à retrouver
+        dans un PDF. Le découpage est le même que pour l'Assemblée. Best-effort
+        et silencieux en cas d'échec (§2.5), et sans réseau si les deux blocs
+        sont déjà en base — un texte déposé ne change pas.
+        """
+        if self._client_senat is None:
+            return
+        slug = self._slug_senat_par_dossier.get(dossier.id)
+        if not slug:
+            return
+        prev_expose, prev_dispositif = await self._texte_en_base(session, dossier.id)
+        dossier.expose_motifs = prev_expose
+        dossier.dispositif = prev_dispositif
+        if prev_expose is not None and prev_dispositif is not None:
+            return
+        pdf = await self._client_senat.telecharger_texte_pdf(slug)
+        if not pdf:
+            return
+        url = SENAT_URL_TEXTE_PDF.format(slug=slug)
+        if dossier.dispositif is None:
+            dispositif = construire_dispositif_senat(url, pdf)
+            if dispositif is not None:
+                dossier.dispositif = dispositif
+                report.dispositifs_recuperes += 1
+        if dossier.expose_motifs is None:
+            expose = construire_expose_senat(url, pdf)
+            if expose is not None:
+                dossier.expose_motifs = expose
+                report.exposes_recuperes += 1
+                report.exposes_senat += 1
+
+    async def _ingerer_scrutins_senat(
+        self,
+        jointure: JointureSenat,
+        reconciliation: Reconciliation,
+        senateurs_connus: frozenset[str],
+        annuaire: dict,
+        limit: int | None,
+        report: SyncReport,
+    ) -> tuple[list[ScrutinParse], dict[str, object]]:
+        """Scrutins publics du Sénat → `ScrutinParse`, prêts à rejoindre le fil.
+
+        Renvoie aussi les votes nominatifs bruts par identifiant de scrutin :
+        comme côté Assemblée, `ScrutinParse` ne les transporte pas, mais ils
+        alimentent la table `vote_depute` dans le même commit que leur scrutin.
+
+        Best-effort (§2.5) : un échec réseau laisse simplement le fil sans les
+        votes du Sénat ce run-ci, il ne fait pas échouer l'ingestion.
+        """
+        client = self._client_senat
+        if client is None:
+            return [], {}
+
+        numeros = await client.numeros()
+        if not numeros:
+            report.anomalies.append(
+                f"scrutins du Sénat non listés (session {client.session}) : "
+                "aucun vote sénatorial ce run"
+            )
+            return [], {}
+        if limit is not None:
+            numeros = numeros[:limit]  # l'index est déjà du plus récent au plus ancien
+
+        pages = await client.telecharger_scrutins(numeros)
+        report.scrutins_senat = len(pages)
+
+        # Niveau 2 de la cascade : quand l'archive AN ne connaît pas le dossier
+        # Sénat, c'est la page du dossier Sénat qui cite l'Assemblée. Une seule
+        # requête par slug, mise en cache — plusieurs scrutins partagent un dossier.
+        refs_par_slug: dict[str, str | None] = {}
+        parses: list[ScrutinParse] = []
+        votes_par_id: dict[str, object] = {}
+        for page, votes in pages:
+            slug = page.slug_dossier
+            dossier_ref: str | None = None
+            if slug:
+                if slug not in refs_par_slug:
+                    ref = jointure.ref_pour_slug_senat(slug)
+                    if ref is None:
+                        ref = await client.ref_an_du_dossier(slug, jointure)
+                    refs_par_slug[slug] = ref
+                dossier_ref = refs_par_slug[slug]
+            parse = parse_scrutin_senat(
+                page,
+                votes,
+                annuaire,
+                dossier_ref=dossier_ref,
+                reconciliation=reconciliation,
+                senateurs_connus=senateurs_connus,
+            )
+            if parse.dossier_ref:
+                report.scrutins_senat_joints += 1
+            elif parse.dossier_id.startswith("SEN-"):
+                self._slug_senat_par_dossier.setdefault(parse.dossier_id, slug or "")
+            # Le slug sert aussi à l'exposé des motifs des dossiers rattachés à
+            # l'AN mais dont le texte n'existe qu'au Sénat.
+            if slug:
+                self._slug_senat_par_dossier.setdefault(parse.dossier_id, slug)
+            parses.append(parse)
+            if votes is not None:
+                votes_par_id[parse.scrutin.id] = votes
+        return parses, votes_par_id
 
     async def _reclasser_theme(
         self, session: AsyncSession, dossier: Dossier, report: SyncReport
@@ -1027,6 +1216,29 @@ class SyncJob:
             d.id: (d.groupe_id, d.groupe_nom) for d in deputes
         }
 
+        # 1bis) Référentiel du Sénat : sénateurs + groupes. Même tables que les
+        #       députés, discriminées par `chambre`. Best-effort : l'annuaire est
+        #       un endpoint non documenté de senat.fr — injoignable, on continue
+        #       sans (les votes sénatoriaux perdront leur nominatif, pas plus).
+        annuaire_senat: dict = {}
+        senateurs_connus: frozenset[str] = frozenset()
+        if self._client_senat is not None:
+            annuaire_senat = construire_annuaire(await self._client_senat.senateurs())
+            if annuaire_senat:
+                senateurs = build_senateurs(annuaire_senat)
+                async with self._sf() as session:
+                    report.groupes += await _upsert_groupes(
+                        session, groupes_senat(annuaire_senat), Chambre.senat
+                    )
+                    report.senateurs = await upsert_deputes(session, senateurs)
+                    await session.commit()
+                senateurs_connus = frozenset(s.id for s in senateurs)
+            else:
+                report.anomalies.append(
+                    "annuaire des sénateurs injoignable : votes du Sénat sans "
+                    "détail nominatif ce run"
+                )
+
         # 1ter) LLM : health-check AVANT le long run. Un serveur configuré mais
         #       injoignable (PC distant éteint…) rendrait chaque appel muet :
         #       autant courir sans LLM et le dire, que semer des trous invisibles.
@@ -1077,13 +1289,19 @@ class SyncJob:
         #       n'est jamais retrouvé par titre et se fragmente en `TXT-…`.
         #       Best-effort (§2.5) : un échec de téléchargement de l'archive
         #       précédente ne tue pas le run, on reste sur la seule courante.
-        documents = await self._client.download_dossiers()
+        documents, dossiers_parlementaires = (
+            await self._client.download_dossiers_complet()
+        )
         legislatures = (self._client.legislature,)
         if self._client.legislature > 1:
             try:
-                documents += await self._client.download_dossiers(
-                    self._client.legislature - 1
+                precedents, dossiers_precedents = (
+                    await self._client.download_dossiers_complet(
+                        self._client.legislature - 1
+                    )
                 )
+                documents += precedents
+                dossiers_parlementaires += dossiers_precedents
                 legislatures = (self._client.legislature, self._client.legislature - 1)
             except (httpx.HTTPError, zipfile.BadZipFile) as exc:
                 report.anomalies.append(
@@ -1092,6 +1310,19 @@ class SyncJob:
                     "législature courante ce run"
                 )
         reconciliation = construire_reconciliation(documents, legislatures)
+        # Jointure Assemblée ↔ Sénat (`senatChemin` / `titreChemin`) : c'est elle
+        # qui range un vote sénatorial dans le dossier où vivent déjà les votes
+        # de l'Assemblée, plutôt que d'ouvrir un second dossier pour le même texte.
+        jointure_senat = construire_jointure_senat(dossiers_parlementaires)
+        # Actes législatifs par dossier : la trajectoire officielle du texte au
+        # Parlement (lectures AN ET Sénat, CMP, Conseil constitutionnel).
+        self._actes_par_ref = {
+            (d.get("dossierParlementaire") or d).get("uid"): (
+                d.get("dossierParlementaire") or d
+            ).get("actesLegislatifs")
+            for d in dossiers_parlementaires
+            if (d.get("dossierParlementaire") or d).get("uid")
+        }
         # Index dossierRef → texte AN déposé, pour récupérer l'exposé des motifs
         # (PDF officiel) au niveau du dossier — bloc attribué, option (a).
         index_textes = construire_index_textes(documents, legislatures)
@@ -1127,6 +1358,26 @@ class SyncJob:
             report.anomalies.extend(controles_coherence(parse.scrutin))
             par_dossier.setdefault(parse.dossier_id, []).append(parse)
 
+        # 2bis) Scrutins du Sénat, versés dans le MÊME regroupement par dossier.
+        #       C'est ce qui fait qu'un texte examiné dans les deux chambres est
+        #       construit, résumé et committé en une fois — et que le badge
+        #       « mis à jour » (§7.7) se pose sur un vote sénatorial comme sur
+        #       un vote de l'Assemblée.
+        parses_senat, votes_senat_par_id = await self._ingerer_scrutins_senat(
+            jointure_senat,
+            reconciliation,
+            senateurs_connus,
+            annuaire_senat,
+            limit,
+            report,
+        )
+        for parse in parses_senat:
+            report.anomalies.extend(controles_coherence(parse.scrutin))
+            par_dossier.setdefault(parse.dossier_id, []).append(parse)
+        report.dossiers_sans_ref_an = sum(
+            1 for cle in par_dossier if cle.startswith("SEN-")
+        )
+
         # 3) Upsert des dossiers (fusion avec l'existant → badge « mis à jour »)
         #    et du détail de chaque vote (table scrutin). Un COMMIT PAR DOSSIER
         #    (pas un commit unique en fin de run) : un run de plusieurs heures
@@ -1142,9 +1393,20 @@ class SyncJob:
                 votes_texte = [
                     p.scrutin for p in parses if not est_amendement(p.scrutin.objet)
                 ]
+                # Trajectoire au Parlement (frise) : les actes officiels du
+                # dossier quand l'archive les porte, sinon les mentions de
+                # navette des objets de vote — les deux chambres comprises.
+                dossier.trajectoire = trajectoire(
+                    self._actes_par_ref.get(parses[0].dossier_ref or ""),
+                    [p.scrutin for p in parses],
+                )
                 await self._enrichir_texte_depose(
                     session, dossier, parses[0].dossier_ref, index_textes, report
                 )
+                # Texte d'origine sénatoriale : son PDF vit sur senat.fr (le PDF
+                # AN n'existe pas, ou n'est qu'une transmission sans exposé).
+                if dossier.expose_motifs is None or dossier.dispositif is None:
+                    await self._enrichir_texte_senat(session, dossier, report)
                 await self._reclasser_theme(session, dossier, report)
                 await self._classifier_publics(session, dossier, report)
                 await self._generer_questions(
@@ -1193,9 +1455,20 @@ class SyncJob:
                             session, p.scrutin, report
                         )
                     await _upsert_scrutin(session, p.scrutin)
-                    # Votes nominatifs du scrutin (fiche député, §5.2) :
-                    # réécrits depuis le JSON brut, dans le même commit que le
-                    # scrutin auquel ils se rapportent.
+                    # Votes nominatifs du scrutin (fiche parlementaire, §5.2) :
+                    # réécrits depuis la source brute, dans le même commit que le
+                    # scrutin auquel ils se rapportent. Les deux chambres
+                    # alimentent la même table, chacune avec son parseur.
+                    if p.scrutin.chambre is Chambre.senat:
+                        votes_senat = votes_senat_par_id.get(p.scrutin.id)
+                        if votes_senat is not None:
+                            report.votes_deputes += await remplacer_votes_du_scrutin(
+                                session,
+                                p.scrutin.id,
+                                p.scrutin.date,
+                                votes_du_scrutin_senat(votes_senat, annuaire_senat),
+                            )
+                        continue
                     brut = bruts_par_uid.get(p.scrutin.id)
                     if brut is not None:
                         report.votes_deputes += await remplacer_votes_du_scrutin(

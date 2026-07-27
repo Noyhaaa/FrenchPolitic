@@ -38,7 +38,7 @@ const FILTRES: ReadonlyArray<{ cle: ObjetVote | 'tous'; label: string }> = [
 ];
 
 /**
- * Fiche d'un député : identité, portrait de vote chiffré et historique de ses
+ * Fiche d'un parlementaire : identité, portrait de vote chiffré et historique
  * votes en fil. Tout provient des scrutins publics (§5.2) ; rien n'est agrégé
  * en jugement (§7.4) et une donnée absente est masquée, pas comblée (§2.5).
  */
@@ -106,7 +106,7 @@ export function DeputeDetailScreen() {
           title={notFound ? 'Introuvable' : 'Oups'}
           message={
             notFound
-              ? "Ce député n'a pas été trouvé."
+              ? "Ce parlementaire n'a pas été trouvé."
               : error === 'network'
                 ? 'Impossible de joindre le serveur. Vérifiez votre connexion.'
                 : 'Une erreur est survenue. Réessayez dans un instant.'

@@ -104,7 +104,7 @@ export function QuestionsAmendementCard({
         ) : (
           <Text style={styles.reponse}>
             Ce vote s'est fait à main levée : il n'existe pas de ventilation par
-            groupe ni par député.
+            groupe ni par parlementaire.
           </Text>
         )}
       </QARow>
