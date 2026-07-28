@@ -10,6 +10,7 @@ from app.ai.questions import (
     generer_questions_amendement,
     phrase_resultat,
     phrase_resultat_amendement,
+    valider_argument,
     valider_reponse,
 )
 from app.schemas import (
@@ -469,6 +470,53 @@ async def test_desaccord_argument_distordu_est_omis():
 
 async def test_desaccord_sans_llm_est_vide():
     assert await generer_desaccord(_INTERVENTIONS, None) == []
+
+
+async def test_desaccord_argument_fabrique_est_omis():
+    """Une phrase plausible mais sans rapport avec ce que le groupe a dit est
+    rejetée par l'ancrage lexical.
+
+    Cas réel mesuré en base : « …le texte ne répond pas aux attentes des Français
+    en matière de sécurité et d'immigration », servi tel quel sur des dossiers
+    sans rapport (dont un texte sur les honoraires d'expert-comptable) et attribué
+    à un groupe qui avait voté POUR. Aucun contrôle de forme ne l'attrapait : pas
+    de chiffre, pas de lexique évaluatif, pas de parenthèse. §7.4 interdit
+    précisément de mettre une opinion dans la bouche d'un groupe.
+    """
+    llm = _FakeLLM(
+        "Le groupe estime que le texte ne répond pas aux attentes des Français "
+        "en matière de sécurité et d'immigration.",
+        "Le dispositif proposé serait inapplicable.",
+    )
+    args = await generer_desaccord(_INTERVENTIONS, llm)
+    assert [a.groupe for a in args] == ["Rassemblement National"]
+
+
+async def test_desaccord_paraphrase_fidele_passe_l_ancrage():
+    """L'ancrage compare des racines : reformuler avec d'autres flexions passe."""
+    interventions = [
+        (
+            "Groupe Un",
+            "pour",
+            "Cette proposition de loi rétablit le remboursement par l'État des "
+            "frais d'expertise comptable engagés par les candidats pour la "
+            "certification de leur compte de campagne.",
+        )
+    ]
+    llm = _FakeLLM(
+        "Le groupe veut rembourser aux candidats les frais de certification "
+        "comptable de leur campagne."
+    )
+    args = await generer_desaccord(interventions, llm)
+    assert len(args) == 1 and args[0].groupe == "Groupe Un"
+
+
+def test_valider_argument_est_la_regle_unique():
+    """Génération et revalidation hors ligne doivent juger à l'identique, sinon
+    un run réintroduit ce que `revalider` vient d'effacer."""
+    prononce = "Nous voterons contre car le dispositif est inapplicable."
+    assert valider_argument("Le dispositif serait inapplicable.", prononce)
+    assert valider_argument("Le texte trahit les attentes du monde agricole.", prononce) is None
 
 
 def test_accroche_retire_l_amorce_de_la_q1():

@@ -70,7 +70,9 @@ python -m app.ingestion.reformater          # --dry-run pour voir le bilan sans 
 # efface celles qui ne passent plus (le run suivant les régénère). À lancer
 # après tout ajout de contrôle à `valider_reponse` : les réponses validées sont
 # réutilisées d'un run à l'autre, donc une réponse écrite avant un nouveau
-# garde-fou y resterait sinon indéfiniment. Ni réseau ni LLM.
+# garde-fou y resterait sinon indéfiniment. Couvre aussi les arguments de la Q2,
+# jugés contre l'extrait de compte rendu stocké (`dossier.desaccord_sources`) —
+# un argument sans source est invérifiable, donc effacé. Ni réseau ni LLM.
 python -m app.ingestion.revalider           # --dry-run pour voir le bilan sans écrire
 
 # Recalcule l'indice de division des scrutins déjà en base (rangée « Les votes
@@ -561,10 +563,30 @@ tests/               Tests API + garde-fous + génération + ingestion (+ repo p
   quasi identiques et la liaison était refusée pour ambiguïté — 31 faux positifs
   mesurés, zéro vraie collision. Chaque
   explication est **paraphrasée en une phrase par le LLM et validée**
-  (`generer_desaccord` → `valider_reponse`), **attribuée à son groupe** (§7.4,
+  (`generer_desaccord` → `valider_argument`), **attribuée à son groupe** (§7.4,
   même gabarit pour tous) ; le **sens pour/contre vient du scrutin**, jamais du
   LLM. Aucune synthèse éditoriale (« qui a raison ») : on juxtapose les positions
   que les groupes formulent eux-mêmes. Source = le compte rendu officiel (§7.5).
+
+  La validation d'un argument ajoute l'**ancrage lexical** aux contrôles communs
+  (cf. plus bas) : mettre dans la bouche d'un groupe une opinion qu'il n'a pas
+  exprimée est précisément ce que §7.4 interdit, et aucun contrôle de forme ne
+  l'attrape. Pour que ce garde-fou — et les suivants — s'applique aussi au
+  passé, l'**extrait de compte rendu** qui a produit chaque argument est
+  conservé dans `dossier.desaccord_sources` (**colonne, hors `payload`** : le
+  payload est le contrat d'API et serait servi tel quel). La Q2 se revalide donc
+  hors ligne comme la Q1/Q4 depuis l'exposé ; un argument **sans source
+  stockée est invérifiable**, donc effacé par `revalider` — 1 476 arguments
+  (219 dossiers) l'ont été à l'introduction de l'ancrage, le run suivant les
+  régénère.
+
+  ⚠️ Seuls les groupes qui ont **pris la parole** ont un argument : mesuré sur
+  la base de dev, la carte affichait en moyenne **6,4 groupes de moins** que le
+  vote d'ancrage n'en documentait, et 26 dossiers montraient un sens unique
+  alors que le vote était divisé. L'app le dit désormais explicitement
+  (`QuestionsCard`) au lieu de laisser lire la liste comme le panorama de
+  l'hémicycle, et le titre de la question ne parle de « désaccord » que s'il y a
+  plusieurs sens de vote.
   L'**objet du vote d'ancrage** est conservé (`desaccord_objet`) et affiché
   au-dessus des positions : « pour » sur une motion de rejet préalable veut dire
   « pour le rejet du texte », l'inverse de ce que le seul mot laisserait croire
@@ -613,6 +635,21 @@ tests/               Tests API + garde-fous + génération + ingestion (+ repo p
     parlementaire mentionne légitimement le Gouvernement), et la Q1 non
     attribuée garde son amorce « Les députés ont examiné ce texte… ».
     Mesuré sur la base de dev : **175 réponses fautives** trouvées.
+  - **ancrage lexical** (`ancrage_minimal`, **opt-in**) → rejet. Une part
+    minimale des mots de contenu de la réponse doit se retrouver dans la source
+    (comparaison sur racines tronquées, pour que « remboursement » retrouve
+    « rembourser »). C'est le seul contrôle qui attrape une phrase **plausible
+    et fabriquée** — sans chiffre inventé, sans mot évaluatif, sans parenthèse.
+    Activé pour les seules **paraphrases d'explication de vote** (Q2, via
+    `valider_argument`) : la Q1/Q4 travaillent sur des exposés longs dont le
+    vocabulaire s'éloigne légitimement de la réponse, leur appliquer le même
+    seuil sans campagne de mesure les invaliderait en masse. Seuil de départ
+    **permissif** (`SEUIL_ANCRAGE_ARGUMENT`) : les sources étant désormais
+    conservées, le resserrer ne coûte plus aucun appel au modèle.
+    Mesuré sur la base de dev avant garde-fou : « le texte ne répond pas aux
+    attentes des Français en matière de sécurité et d'immigration » servi tel
+    quel sur trois dossiers sans rapport (dont un texte sur les honoraires
+    d'expert-comptable), attribué à un groupe qui avait voté **pour**.
 - **Questions d'un vote d'amendement** (fiche vote) : mêmes principes,
   adaptés — `generer_questions_amendement` remplit `questions` sur le **scrutin**
   de chaque vote d'amendement (servi par `GET /scrutins/{id}`). **Pourquoi** :

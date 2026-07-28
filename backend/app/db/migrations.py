@@ -76,6 +76,16 @@ MIGRATIONS: tuple[tuple[str, str], ...] = (
         "CREATE INDEX IF NOT EXISTS ix_scrutin_indice_division "
         "ON scrutin (indice_division)",
     ),
+    # `desaccord_sources` conserve les extraits de compte rendu qui ont produit la
+    # Q2, pour pouvoir revalider ces paraphrases hors ligne (comme l'exposé le
+    # permet déjà pour la Q1/Q4). NULLABLE sans défaut : NULL veut dire « source
+    # non conservée » — ce qui décrit exactement les lignes écrites avant, dont
+    # les arguments sont donc invérifiables et seront effacés par
+    # `python -m app.ingestion.revalider`.
+    (
+        "dossier.desaccord_sources",
+        "ALTER TABLE dossier ADD COLUMN IF NOT EXISTS desaccord_sources JSONB",
+    ),
 )
 
 

@@ -130,7 +130,8 @@ async def test_desaccord_ancre_sur_une_motion_de_rejet():
             seance_uid="CR", numeros=frozenset({1025}),
             interventions_generales=[
                 ExplicationVote(groupe="", orateur="M. X",
-                                texte="Nous demandons le rejet de ce texte.", acteur_ref="PA1"),
+                                texte="Nous demandons le rejet de ce texte, qui ne "
+                                      "répond pas au problème posé.", acteur_ref="PA1"),
             ],
         )
     ])
@@ -158,9 +159,13 @@ async def test_desaccord_ecarte_les_groupes_sans_vote_exprime():
             titre="Motion de censure", date="2025-05-15", seance_uid="CR",
             interventions_generales=[
                 ExplicationVote(groupe="", orateur="Mme A",
-                                texte="Nous censurons ce gouvernement.", acteur_ref="PA1"),
+                                texte="Nous censurons ce gouvernement dont le budget "
+                                      "prive les services publics de moyens.",
+                                acteur_ref="PA1"),
                 ExplicationVote(groupe="", orateur="M. B",
-                                texte="Nous refusons cette censure.", acteur_ref="PA2"),
+                                texte="Nous refusons cette censure, qui empêcherait "
+                                      "des mesures utiles d'être déployées.",
+                                acteur_ref="PA2"),
             ],
         )
     ])
@@ -246,3 +251,75 @@ async def test_desaccord_prefere_explications_et_mesure_la_fuite_alias():
     ok = await job._construire_desaccord(None, "REF", [ancre], q, report)
     assert ok and [a.groupe for a in q.desaccord] == ["Rassemblement National"]
     assert report.abrevs_non_resolues == {"ZZZ"}  # fuite mesurée, pas devinée
+
+
+# --- extraits de compte rendu conservés (revalidation hors ligne) ---
+
+
+async def test_desaccord_rend_les_extraits_des_seuls_groupes_retenus():
+    """Un argument met une opinion dans la bouche d'un groupe : il ne peut vivre
+    que si l'on garde la phrase prononcée dont il est la paraphrase (§7.4, §7.5).
+
+    Le second argument est fabriqué (aucun mot commun avec ce que le groupe a
+    dit) : il est omis, et son extrait ne doit pas être conservé pour autant.
+    """
+    job = _job(_FakeLLM(
+        "Le texte protège mieux les victimes de violences.",
+        "Le monde agricole attend autre chose de ce gouvernement.",
+    ))
+    job._index_debats = IndexDebats([
+        DebatTexte(
+            titre="Protection des victimes", date="2025-05-15", seance_uid="CR",
+            numeros=frozenset({900}),
+            explications=[
+                ExplicationVote("G1", "M. X",
+                                "Ce texte protège mieux les victimes de violences."),
+                ExplicationVote("G2", "Mme Y",
+                                "Le dispositif proposé restera inapplicable faute "
+                                "de moyens dans les tribunaux."),
+            ],
+        )
+    ])
+    job._numeros_par_ref = {"REF": {900}}
+    job._groupes_par_abbrev = {
+        "g1": GroupInfo(id="G1", nom="Groupe Un", abrev="G1", couleur="#111"),
+        "g2": GroupInfo(id="G2", nom="Groupe Deux", abrev="G2", couleur="#222"),
+    }
+    ancre = _vote(
+        "l'ensemble de la proposition de loi sur la protection des victimes",
+        [
+            _pos("G1", "Groupe Un", PositionVote.pour),
+            _pos("G2", "Groupe Deux", PositionVote.contre),
+        ],
+    )
+    q = QuestionsCitoyennes(resultat="…")
+    sources = await job._construire_desaccord(None, "REF", [ancre], q, _report())
+    assert [a.groupe for a in q.desaccord] == ["Groupe Un"]
+    assert sources is not None and set(sources) == {"Groupe Un"}
+    # L'extrait conservé est le texte réellement prononcé, pas la paraphrase.
+    assert sources["Groupe Un"].startswith("Ce texte protège")
+
+
+async def test_desaccord_sans_argument_ne_rend_aucune_source():
+    job = _job(_FakeLLM("Le monde agricole attend autre chose."))
+    job._index_debats = IndexDebats([
+        DebatTexte(
+            titre="Protection des victimes", date="2025-05-15", seance_uid="CR",
+            numeros=frozenset({900}),
+            explications=[
+                ExplicationVote("G1", "M. X",
+                                "Ce texte protège mieux les victimes de violences."),
+            ],
+        )
+    ])
+    job._numeros_par_ref = {"REF": {900}}
+    job._groupes_par_abbrev = {
+        "g1": GroupInfo(id="G1", nom="Groupe Un", abrev="G1", couleur="#111"),
+    }
+    ancre = _vote(
+        "l'ensemble de la proposition de loi sur la protection des victimes",
+        [_pos("G1", "Groupe Un", PositionVote.pour)],
+    )
+    q = QuestionsCitoyennes(resultat="…")
+    assert await job._construire_desaccord(None, "REF", [ancre], q, _report()) is None
+    assert q.desaccord is None and q.desaccord_objet is None

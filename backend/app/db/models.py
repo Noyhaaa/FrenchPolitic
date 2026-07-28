@@ -47,6 +47,13 @@ class DossierRow(Base):
     # Indicateur « mis à jour » (MiseAJourDossier) — null si pas d'évolution.
     mise_a_jour: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     payload: Mapped[dict] = mapped_column(JSONB)  # Dossier complet (camelCase)
+    # Extraits de compte rendu qui ont produit la Q2 (« principal désaccord ») :
+    # {nom du groupe: texte prononcé}. HORS `payload` à dessein — le payload est
+    # le contrat d'API et serait servi tel quel ; ces extraits bruts ne servent
+    # qu'à revalider les paraphrases hors ligne (`ingestion.revalider`), comme
+    # l'exposé des motifs le permet déjà pour la Q1/Q4. NULL = source non
+    # conservée, donc argument invérifiable.
+    desaccord_sources: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # Texte plié (minuscule, sans accents) pour la recherche ILIKE.
     search_index: Mapped[str] = mapped_column(Text, index=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())

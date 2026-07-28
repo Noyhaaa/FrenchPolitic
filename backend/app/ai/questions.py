@@ -1,9 +1,12 @@
 """Les 4 questions citoyennes de la fiche dossier (§2.2 : comprendre en 30 s).
 
 1. Pourquoi les députés ont-ils débattu ?   → LLM, depuis titre + exposé des motifs.
-2. Quel était le principal désaccord ?       → JAMAIS généré ici : il faudrait les
-   comptes rendus des débats en séance (non ingérés). On ne déduit pas un
-   désaccord du titre ou de l'exposé (§2.5) — la réponse reste None.
+2. Quel était le principal désaccord ?       → `generer_desaccord`, depuis les
+   **comptes rendus des débats** : une paraphrase par groupe de sa propre
+   explication de vote, jamais une synthèse éditoriale. Le sens (pour/contre)
+   vient du scrutin, pas du modèle. Rien à quoi s'ancrer (pas de compte rendu
+   relié) → la réponse reste None : on ne déduit pas un désaccord du titre ou de
+   l'exposé (§2.5).
 3. Quel est le résultat du vote ?            → déterministe, depuis le vote décisif.
 4. Qu'est-ce que cela change concrètement ?  → LLM, depuis le **dispositif**
    officiel du texte quand il est disponible (fait : pas d'attribution, la
@@ -121,6 +124,13 @@ _SYS_CHANGEMENT_AMENDEMENT = (
 # Une explication de vote paraphrasée doit tenir en une phrase courte (§8).
 _MAX_ARGUMENT = 220
 
+# Part minimale des mots de contenu d'un argument qui doit se retrouver dans
+# l'explication de vote qu'il résume (cf. `_ancrage`). Volontairement PERMISSIF :
+# l'extrait de compte rendu est désormais conservé en base
+# (`dossier.desaccord_sources`), donc resserrer ce seuil plus tard ne coûte plus
+# aucun appel au modèle — `python -m app.ingestion.revalider` suffit.
+SEUIL_ANCRAGE_ARGUMENT = 0.30
+
 _SYS_ARGUMENT = (
     "Un groupe politique explique en séance pourquoi il vote sur un texte à "
     "l'Assemblée nationale. Résume EN UNE SEULE PHRASE courte la raison qu'il "
@@ -217,6 +227,58 @@ def _deposant_requalifie(reponse: str, sources: str, deposant: str | None) -> bo
     )
 
 
+# --- Ancrage lexical -------------------------------------------------------
+#
+# Même règle que pour les chiffres et la glose — *le modèle reformule une source,
+# il n'y ajoute rien* — étendue aux mots de contenu. Une paraphrase fidèle
+# reprend forcément une partie du vocabulaire de ce qu'elle résume ; une phrase
+# fabriquée n'en partage presque rien. Cas réel mesuré en base : « le texte ne
+# répond pas aux attentes des Français en matière de sécurité et d'immigration »,
+# servi tel quel sur trois dossiers sans rapport (dont un texte sur les honoraires
+# d'expert-comptable), attribué à un groupe qui avait voté POUR — aucun contrôle
+# de forme ne pouvait l'attraper.
+
+# Mots vides du français courant : présents partout, ils ne prouvent aucun
+# ancrage. Distincte de `_STOP` de `debats.py`, taillée pour les titres de textes
+# juridiques : ici on compare de la prose à de la prose.
+_MOTS_VIDES = frozenset(
+    "le la les un une des du de au aux et ou mais donc car ni or que qui quoi "
+    "dont ou est sont etre ete a ai as ont avoir eu il elle ils elles on nous "
+    "vous je tu se sa son ses leur leurs ce cet cette ces cela ceci celui celle "
+    "pour par sur sous dans avec sans vers chez entre pas ne plus moins tres "
+    "aussi meme tout tous toute toutes autre autres quand comme si alors ainsi "
+    "afin lors depuis apres avant encore deja bien fait faire dit dire peut "
+    "doit devoir sera serait avait etaient nos vos mes tes leurs y en".split()
+)
+
+# Longueur de racine comparée : une paraphrase dit « remboursement » là où
+# l'orateur a dit « rembourser ». Tronquer à 6 caractères rapproche les deux sans
+# rapprocher des mots réellement différents.
+_RACINE = 6
+
+
+def _racines(texte: str) -> set[str]:
+    """Racines des mots de contenu d'un texte (mots vides et mots courts exclus)."""
+    return {
+        mot[:_RACINE]
+        for mot in _mots(texte)
+        if len(mot) > 2 and mot not in _MOTS_VIDES
+    }
+
+
+def _ancrage(reponse: str, sources: str) -> float:
+    """Part des mots de contenu de la réponse qui figurent dans la source.
+
+    Normalisé sur la **réponse**, pas sur la source : ce qu'on mesure est ce que
+    la paraphrase a ajouté, pas ce qu'elle a laissé de côté (une phrase courte
+    résumant une longue intervention est légitime). Réponse sans aucun mot de
+    contenu → 0.0, donc rejetée dès qu'un seuil est demandé."""
+    mots = _racines(reponse)
+    if not mots:
+        return 0.0
+    return len(mots & _racines(sources)) / len(mots)
+
+
 def valider_reponse(
     reponse: str,
     sources: str,
@@ -225,6 +287,7 @@ def valider_reponse(
     max_chars: int = _MAX_CHARS,
     lexique_de_la_source_admis: bool = False,
     deposant: str | None = None,
+    ancrage_minimal: float | None = None,
 ) -> str | None:
     """Contrôles déterministes d'une réponse LLM ; None au moindre doute (§2.5).
 
@@ -237,10 +300,19 @@ def valider_reponse(
     - glose entre parenthèses absente des sources → rejet (sigle « développé »
       de son propre chef, donc de travers) ;
     - déposant requalifié en parlementaire alors que la source désigne le
-      Gouvernement ou une commission (`deposant`) → rejet.
+      Gouvernement ou une commission (`deposant`) → rejet ;
+    - `ancrage_minimal` demandé et part des mots de contenu retrouvés dans la
+      source inférieure au seuil → rejet (phrase fabriquée, sans rapport avec ce
+      qu'elle prétend résumer).
 
-    Les deux derniers contrôles relèvent de la même règle que les chiffres : le
+    Ces trois derniers contrôles relèvent de la même règle que les chiffres : le
     modèle **reformule** une source, il n'y **ajoute** rien.
+
+    `ancrage_minimal` est **opt-in** : il n'est activé que pour les paraphrases
+    d'explication de vote (Q2), où la source est une prose courte et où le modèle
+    a démontré qu'il savait broder du vraisemblable. La Q1/Q4 travaillent sur des
+    exposés longs et parfois très éloignés du vocabulaire de la réponse : leur
+    appliquer le même seuil sans campagne de mesure les invaliderait en masse.
 
     `lexique_de_la_source_admis` n'est activé que lorsque la source est un
     **texte officiel** (dispositif d'un texte ou d'un amendement) : un mot de la
@@ -274,6 +346,8 @@ def valider_reponse(
     # légitimement les députés comme ceux qui ont examiné le texte — c'est même
     # l'amorce imposée à la Q1 (« Les députés ont examiné ce texte pour… »).
     if prefixe is not None and _deposant_requalifie(reponse, sources, deposant):
+        return None
+    if ancrage_minimal is not None and _ancrage(reponse, sources) < ancrage_minimal:
         return None
     for nature, opposee in (
         ("proposition de loi", "projet de loi"),
@@ -552,6 +626,22 @@ async def generer_questions_amendement(
     return questions
 
 
+def valider_argument(argument: str, prononce: str) -> str | None:
+    """Contrôles d'une paraphrase d'explication de vote (Q2) ; None au moindre doute.
+
+    Point d'entrée **unique**, partagé par la génération (`generer_desaccord`) et
+    la revalidation hors ligne (`ingestion.revalider`) : les deux doivent juger
+    sur exactement les mêmes règles, sinon un run réintroduirait ce que la
+    revalidation vient d'effacer.
+    """
+    return valider_reponse(
+        argument,
+        prononce,
+        max_chars=_MAX_ARGUMENT,
+        ancrage_minimal=SEUIL_ANCRAGE_ARGUMENT,
+    )
+
+
 async def generer_desaccord(
     interventions: list[tuple[str, PositionVote, str]],
     llm: LLMClient | None,
@@ -564,6 +654,11 @@ async def generer_desaccord(
     donnée par le groupe), validé contre son propre texte (aucun fait ajouté).
     Le sens (pour/contre) n'est jamais touché par le LLM. Un groupe dont la
     paraphrase est rejetée est simplement omis (§2.5), sans bloquer les autres.
+
+    L'argument est validé contre le texte réellement prononcé, **ancrage lexical
+    compris** : mettre dans la bouche d'un groupe une opinion qu'il n'a pas
+    exprimée est précisément ce que §7.4 interdit, et aucun contrôle de forme ne
+    l'attrape.
     """
     if llm is None:
         return []
@@ -571,7 +666,7 @@ async def generer_desaccord(
     for groupe, sens, texte in interventions:
         user = f"GROUPE : {groupe}\nEXPLICATION DE VOTE :\n{texte}"
         reponse = await llm.generate_text(_SYS_ARGUMENT, user)
-        argument = valider_reponse(reponse, texte, max_chars=_MAX_ARGUMENT)
+        argument = valider_argument(reponse, texte)
         if argument:
             arguments.append(
                 ArgumentGroupe(groupe=groupe, sens=sens, argument=argument)

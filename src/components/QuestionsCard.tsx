@@ -71,6 +71,12 @@ function QARow({
  * « pour le rejet du texte », l'inverse de ce que le seul mot laisserait croire
  * (§7.4). Vote non reconnu par `libelleScrutin` → pas de ligne (§2.5), plutôt
  * que de recopier l'objet officiel entier.
+ *
+ * La Q2 dit exactement ce qu'elle montre, et rien de plus (§7.4) : son titre
+ * suit les positions affichées (« désaccord » seulement s'il y a plusieurs sens
+ * de vote), et une mention rappelle que la liste se limite aux groupes qui ont
+ * pris la parole — mesuré en base, ils sont en moyenne 6 de moins que les
+ * groupes ayant voté.
  */
 export function QuestionsCard({ questions }: Props) {
   const desaccord = questions.desaccord;
@@ -78,6 +84,18 @@ export function QuestionsCard({ questions }: Props) {
   const voteAncre = objet ? libelleScrutin(objet) : undefined;
   const libelleAncre =
     voteAncre && voteAncre.titre !== objet ? voteAncre.titre : undefined;
+  // Le titre décrit ce qui est RÉELLEMENT à l'écran. Quand tous les groupes
+  // affichés ont voté dans le même sens, parler de « désaccord » est faux — et
+  // on ne le remplace pas par « unanimité », que cette liste ne prouve pas :
+  // elle ne contient que les groupes qui ont pris la parole (§2.5). Sans
+  // réponse, la question reste posée telle quelle : c'est le gabarit des 4
+  // questions, et « information non disponible » y répond.
+  const positions = desaccord ?? [];
+  const unSeulSens =
+    positions.length > 0 && new Set(positions.map((a) => a.sens)).size < 2;
+  const questionDesaccord = unSeulSens
+    ? 'Ce que les groupes ont dit'
+    : 'Quel était le principal désaccord ?';
   return (
     <View style={styles.card}>
       <Text style={[typography.overline, styles.title]}>
@@ -88,7 +106,7 @@ export function QuestionsCard({ questions }: Props) {
 
       <View style={styles.sep} />
 
-      <QARow n={2} question="Quel était le principal désaccord ?">
+      <QARow n={2} question={questionDesaccord}>
         {desaccord && desaccord.length > 0 ? (
           <>
             {libelleAncre ? (
@@ -96,6 +114,14 @@ export function QuestionsCard({ questions }: Props) {
                 Positions exprimées lors du vote : {libelleAncre}
               </Text>
             ) : null}
+            {/* Périmètre de la liste : seuls les groupes qui ont pris la parole
+                ont un argument (explications de vote ou, à défaut, discussion
+                générale — cf. `_construire_desaccord` côté ingestion). Sans
+                cette mention, la carte se lit comme le panorama de l'hémicycle
+                alors qu'elle n'en montre qu'une partie (§7.4). */}
+            <Text style={styles.ancre}>
+              Seuls les groupes qui se sont exprimés en séance figurent ici.
+            </Text>
             <View style={styles.groupes}>
               {desaccord.map((a: ArgumentGroupe, i) => (
                 <View key={`${a.groupe}-${i}`} style={styles.groupe}>

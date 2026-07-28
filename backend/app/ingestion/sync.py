@@ -549,8 +549,15 @@ def _merge_avec_existant(prev: Dossier, incoming: Dossier) -> Dossier:
     return incoming
 
 
-def _dossier_row_values(dossier: Dossier) -> dict:
+def _dossier_row_values(
+    dossier: Dossier, desaccord_sources: dict[str, str] | None = None
+) -> dict:
     return {
+        # Extraits de compte rendu ayant produit la Q2 (hors payload, cf.
+        # `DossierRow.desaccord_sources`). None = ce run n'a pas (re)généré le
+        # désaccord : l'upsert laisse alors la valeur en place plutôt que de
+        # l'écraser — perdre la source rendrait l'argument invérifiable.
+        "desaccord_sources": desaccord_sources,
         "id": dossier.id,
         "date": dossier.date_dernier_scrutin,
         "statut": dossier.statut.value,
@@ -572,15 +579,24 @@ def _dossier_row_values(dossier: Dossier) -> dict:
     }
 
 
-async def _upsert_dossier(session: AsyncSession, dossier: Dossier) -> Dossier:
+async def _upsert_dossier(
+    session: AsyncSession,
+    dossier: Dossier,
+    desaccord_sources: dict[str, str] | None = None,
+) -> Dossier:
     """Upsert du dossier ; renvoie la version effectivement écrite (fusionnée)."""
     existing = await session.get(DossierRow, dossier.id)
     if existing is not None:
         prev = Dossier.model_validate(existing.payload)
         dossier = _merge_avec_existant(prev, dossier)
-    values = _dossier_row_values(dossier)
+    values = _dossier_row_values(dossier, desaccord_sources)
     stmt = insert(DossierRow).values(**values)
     update = {k: v for k, v in values.items() if k != "id"}
+    # Sans nouvelle source, on ne touche pas à celle déjà en base : un désaccord
+    # réutilisé d'un run à l'autre (cf. `_generer_questions`) doit garder l'extrait
+    # qui l'a produit, sinon il redevient invérifiable.
+    if desaccord_sources is None:
+        update.pop("desaccord_sources", None)
     await session.execute(
         stmt.on_conflict_do_update(index_elements=["id"], set_=update)
     )
@@ -1006,7 +1022,7 @@ class SyncJob:
         votes_texte: list[Scrutin],
         questions: QuestionsCitoyennes,
         report: SyncReport,
-    ) -> bool:
+    ) -> dict[str, str] | None:
         """Renseigne Q2 (« principal désaccord ») depuis les débats de la séance.
 
         Relie le **vote conclusif** du texte (`_vote_conclusif`) au compte rendu
@@ -1019,19 +1035,24 @@ class SyncJob:
         L'objet du vote d'ancrage est conservé (`desaccord_objet`) : les positions
         affichées sont celles exprimées SUR CE VOTE, et l'app doit pouvoir le dire
         — « pour » sur une motion de rejet préalable veut dire « pour le rejet du
-        texte ». Renvoie True si au moins un argument a été produit."""
+        texte ».
+
+        Renvoie les **extraits de compte rendu** qui ont produit les arguments
+        retenus ({nom du groupe: texte prononcé}), à persister hors payload pour
+        pouvoir les revalider hors ligne (`ingestion.revalider`) — ou None si rien
+        n'a été produit."""
         if self._llm is None or self._index_debats is None:
-            return False
+            return None
         ancre = _vote_conclusif(votes_texte)
         if ancre is None:
-            return False
+            return None
         debat = self._index_debats.pour_vote(
             ancre.date,
             ancre.objet,
             self._numeros_par_ref.get(dossier_ref or ""),
         )
         if debat is None:
-            return False
+            return None
         positions = {g.groupe_id: g for g in ancre.positions_groupes}
         # Repli : explications de vote formelles d'abord, discussion générale sinon.
         prises = debat.explications or debat.interventions_generales
@@ -1058,7 +1079,11 @@ class SyncJob:
             interventions.append((groupe_nom, pos.position_majoritaire, pdp.texte))
         arguments = await generer_desaccord(interventions, self._llm)
         if not arguments:
-            return False
+            return None
+        # La source suit sa réponse : on ne conserve l'extrait que des groupes
+        # dont l'argument a passé les contrôles (les autres sont omis, §2.5).
+        prononce = {nom: texte for nom, _, texte in interventions}
+        sources = {a.groupe: prononce[a.groupe] for a in arguments}
         questions.desaccord = arguments
         questions.desaccord_objet = ancre.objet
         questions.desaccord_source = SourceOfficielle(
@@ -1066,7 +1091,7 @@ class SyncJob:
             libelle="Compte rendu de la séance (Assemblée nationale)",
             url=url_compte_rendu(self._client.legislature, debat.seance_uid),
         )
-        return True
+        return sources
 
     async def _generer_questions(
         self,
@@ -1075,7 +1100,7 @@ class SyncJob:
         dossier_ref: str | None,
         votes_texte: list[Scrutin],
         report: SyncReport,
-    ) -> None:
+    ) -> dict[str, str] | None:
         """Renseigne les 4 questions citoyennes du résumé (§2.2).
 
         Q3 (résultat) est recomposée à chaque run — déterministe, elle suit les
@@ -1085,6 +1110,10 @@ class SyncJob:
         Exception : une Q4 tirée de l'**exposé** (donc attribuée à l'auteur, sans
         `changement_source`) est **regénérée** dès qu'un dispositif est
         disponible — le fait officiel prime sur la parole du déposant.
+
+        Renvoie les extraits de compte rendu ayant produit la Q2 quand ce run l'a
+        générée (à persister par l'appelant), sinon None — un désaccord repris de
+        la base garde la source déjà stockée.
         """
         prev = await self._questions_en_base(session, dossier.id)
         peut_mieux_faire = (
@@ -1115,6 +1144,7 @@ class SyncJob:
         # Les ARGUMENTS déjà validés sont réutilisés tels quels (pas de réappel au
         # modèle), mais leur SENS et leur ancre sont recomposés depuis le scrutin
         # à chaque run — ce sont des faits, pas des sorties de modèle.
+        desaccord_sources: dict[str, str] | None = None
         if prev is not None and prev.desaccord:
             ancre = _vote_conclusif(votes_texte)
             arguments = (
@@ -1126,10 +1156,12 @@ class SyncJob:
                 questions.desaccord = arguments
                 questions.desaccord_objet = ancre.objet
                 questions.desaccord_source = prev.desaccord_source
-        elif await self._construire_desaccord(
-            dossier, dossier_ref, votes_texte, questions, report
-        ):
-            report.desaccords_generes += 1
+        else:
+            desaccord_sources = await self._construire_desaccord(
+                dossier, dossier_ref, votes_texte, questions, report
+            )
+            if desaccord_sources:
+                report.desaccords_generes += 1
 
         if prev is not None:
             # Une réponse validée en base ne se perd pas sur un run sans LLM
@@ -1140,6 +1172,7 @@ class SyncJob:
                 questions.changement = prev.changement
                 questions.changement_source = prev.changement_source
         dossier.resume.questions = questions
+        return desaccord_sources
 
     def _composer_accroche(self, dossier: Dossier) -> None:
         """Pose l'accroche de carte à partir de la Q1 (§2.2, §8).
@@ -1409,12 +1442,12 @@ class SyncJob:
                     await self._enrichir_texte_senat(session, dossier, report)
                 await self._reclasser_theme(session, dossier, report)
                 await self._classifier_publics(session, dossier, report)
-                await self._generer_questions(
+                desaccord_sources = await self._generer_questions(
                     session, dossier, parses[0].dossier_ref, votes_texte, report
                 )
                 # Après les questions : l'accroche en est tirée.
                 self._composer_accroche(dossier)
-                dossier = await _upsert_dossier(session, dossier)
+                dossier = await _upsert_dossier(session, dossier, desaccord_sources)
                 report.amendements_enrichis += sum(
                     1
                     for a in dossier.amendements

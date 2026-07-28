@@ -15,6 +15,11 @@ stockées. Idempotent — relancer ne change plus rien.
 
 ⚠️ La Q1 d'un dossier porte l'accroche affichée dans le fil
 (`accroche_depuis_q1`) : effacer une Q1 efface l'accroche, recalculée ici même.
+
+⚠️ La Q2 (« principal désaccord ») ne se juge que si l'extrait de compte rendu
+qui l'a produite a été conservé (`dossier.desaccord_sources`). Les arguments
+écrits avant cette colonne n'ont pas de source : ils sont **invérifiables**, donc
+effacés — le run suivant les régénère avec l'ancrage lexical en place.
 """
 from __future__ import annotations
 
@@ -29,6 +34,7 @@ from app.ai.questions import (
     PREFIXE_AUTEUR,
     PREFIXE_AUTEUR_AMENDEMENT,
     accroche_depuis_q1,
+    valider_argument,
     valider_reponse,
 )
 from app.db.models import DossierRow, ScrutinRow
@@ -49,6 +55,10 @@ class Bilan:
     dossiers_pourquoi: int = 0
     dossiers_changement: int = 0
     accroches_retirees: int = 0
+    # Q2 : un argument = la paraphrase d'un groupe ; un désaccord vidé de tous
+    # ses arguments fait disparaître la section entière.
+    arguments_desaccord: int = 0
+    desaccords_vides: int = 0
     exemples: list[str] = field(default_factory=list)
 
     @property
@@ -58,6 +68,7 @@ class Bilan:
             + self.amendements_changement
             + self.dossiers_pourquoi
             + self.dossiers_changement
+            + self.arguments_desaccord
         )
 
     def noter(self, quoi: str, identifiant: str, reponse: str) -> None:
@@ -164,6 +175,66 @@ async def _revalider_dossiers(session, bilan: Bilan) -> None:
         row.search_index = index_recherche(Dossier.model_validate(payload))
 
 
+async def _revalider_desaccord(session, bilan: Bilan) -> None:
+    """Q2 d'un dossier, jugée contre l'extrait de compte rendu qui l'a produite.
+
+    Un argument met une opinion dans la bouche d'un groupe : il n'a le droit
+    d'exister que si l'on peut montrer la phrase prononcée dont il est la
+    paraphrase (§7.4, §7.5). Deux cas d'effacement :
+
+    - **source absente** (`dossier.desaccord_sources` NULL ou sans ce groupe) :
+      l'argument est invérifiable — c'est le cas de toutes les Q2 écrites avant
+      que la colonne existe ;
+    - **source présente mais contrôles en échec** : notamment l'ancrage lexical,
+      qui rejette une phrase sans rapport avec ce que le groupe a dit.
+
+    Le désaccord vidé de tous ses arguments est retiré en entier (objet et source
+    compris : la source suit sa réponse), et les extraits orphelins avec lui — le
+    run suivant régénère alors depuis les débats.
+    """
+    for row in (await session.execute(select(DossierRow))).scalars().all():
+        payload = dict(row.payload or {})
+        resume = dict(payload.get("resume") or {})
+        questions = dict(resume.get("questions") or {})
+        desaccord = questions.get("desaccord")
+        if not isinstance(desaccord, list) or not desaccord:
+            continue
+
+        sources: dict = row.desaccord_sources or {}
+        retenus = []
+        for argument in desaccord:
+            prononce = sources.get(argument.get("groupe", ""))
+            if prononce and valider_argument(argument.get("argument", ""), prononce):
+                retenus.append(argument)
+            else:
+                bilan.arguments_desaccord += 1
+                bilan.noter(
+                    "dossier/Q2", row.id, argument.get("argument", "") or "(vide)"
+                )
+        if len(retenus) == len(desaccord):
+            continue
+
+        if retenus:
+            questions["desaccord"] = retenus
+            gardes = {a.get("groupe") for a in retenus}
+            row.desaccord_sources = {
+                g: t for g, t in sources.items() if g in gardes
+            } or None
+        else:
+            questions["desaccord"] = None
+            questions["desaccordObjet"] = None
+            questions["desaccordSource"] = None
+            row.desaccord_sources = None
+            bilan.desaccords_vides += 1
+
+        resume["questions"] = questions
+        payload["resume"] = resume
+        row.payload = payload
+        flag_modified(row, "payload")
+        # L'index de recherche ne couvre PAS la Q2 (cf. `domain/recherche.py`) et
+        # l'accroche vient de la Q1 : rien d'autre à recalculer ici.
+
+
 async def _main(dry_run: bool) -> None:
     engine = make_engine()
     session_factory = make_session_factory(engine)
@@ -172,6 +243,7 @@ async def _main(dry_run: bool) -> None:
     async with session_factory() as session:
         await _revalider_scrutins(session, bilan)
         await _revalider_dossiers(session, bilan)
+        await _revalider_desaccord(session, bilan)
         if dry_run:
             await session.rollback()
         else:
@@ -186,7 +258,9 @@ async def _main(dry_run: bool) -> None:
         f"{bilan.amendements_changement} « ce que ça change » d'amendement, "
         f"{bilan.dossiers_pourquoi} Q1 de dossier "
         f"({bilan.accroches_retirees} accroche(s) retirée(s)), "
-        f"{bilan.dossiers_changement} Q4 de dossier."
+        f"{bilan.dossiers_changement} Q4 de dossier, "
+        f"{bilan.arguments_desaccord} argument(s) de Q2 "
+        f"({bilan.desaccords_vides} désaccord(s) retiré(s) en entier)."
     )
     if bilan.exemples:
         print("Exemples :")

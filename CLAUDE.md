@@ -270,7 +270,14 @@ même doctrine : liste fermée de 19 publics (miroir `publicEmoji` côté front)
 validation exact-match, cap 3, rien de valide → section masquée ; (2) les
 **4 questions citoyennes**
 (`app/ai/questions.py`, servies dans `resume.questions`, affichées par
-`QuestionsCard` en tête de fiche dossier) : « Pourquoi ont-ils débattu ? » (Q1,
+`QuestionsCard` en tête de fiche dossier — dont le **titre de la Q2 suit ce
+qu'elle montre** : « Quel était le principal désaccord ? » seulement si les
+groupes affichés ont plusieurs sens de vote, sinon « Ce que les groupes ont
+dit », et jamais « unanimité », que cette liste ne prouve pas ; une mention y
+rappelle que **seuls les groupes qui se sont exprimés en séance** y figurent —
+mesuré, ils sont en moyenne 6 de moins que les groupes ayant voté, et la carte se
+lisait sinon comme le panorama de l'hémicycle, §7.4) :
+« Pourquoi ont-ils débattu ? » (Q1,
 depuis l'exposé) et « Qu'est-ce que ça change ? » (Q4, au conditionnel) sont
 passées à des **contrôles déterministes** (`valider_reponse` : chiffres présents
 dans la source, nature du texte non inversée, lexique, caractères hors français,
@@ -320,7 +327,24 @@ est ensuite **paraphrasée en une phrase, validée et attribuée à
 son groupe** (§7.4) — le **sens pour/contre vient du scrutin**, jamais du LLM, et
 jamais de synthèse éditoriale (« qui a raison ») ; l'**objet du vote d'ancrage**
 accompagne les positions (`desaccordObjet`), sans quoi « pour » sur une motion de
-rejet se lirait comme « pour le texte ». ⚠️ On **ne génère toujours PAS** le
+rejet se lirait comme « pour le texte ». La validation d'un argument
+(`valider_argument`, règle unique partagée par la génération et la revalidation)
+ajoute aux contrôles communs un **ancrage lexical** : une part minimale des mots
+de contenu de la paraphrase doit se retrouver dans la phrase réellement
+prononcée. Même règle que les chiffres — *le modèle reformule, il n'ajoute rien* —
+mais c'est la seule qui attrape une phrase **plausible et fabriquée** : mesuré en
+base avant garde-fou, « le texte ne répond pas aux attentes des Français en
+matière de sécurité et d'immigration » était servi tel quel sur trois dossiers
+sans rapport (dont un texte sur les honoraires d'expert-comptable), attribué à un
+groupe qui avait voté **pour** — aucun contrôle de forme ne pouvait le voir. Pour
+que ce garde-fou (et les suivants) s'applique au passé, l'**extrait de compte
+rendu** qui a produit chaque argument est conservé hors payload
+(`dossier.desaccord_sources`) : la Q2 se revalide donc hors ligne comme la
+Q1/Q4 le font depuis l'exposé. Un argument sans source stockée est
+**invérifiable**, donc effacé par `revalider` (1 476 arguments l'ont été à
+l'introduction de l'ancrage). Le seuil est volontairement **permissif** au départ,
+le resserrer ne coûtant plus aucun appel au modèle. ⚠️ On **ne génère toujours
+PAS** le
 résumé/prose neutre par LLM (mistral 7B distordait les faits invisiblement ; seul
 ce qui est attribuable à une source unique ET vérifiable déterministiquement
 passe par le modèle) — le **gabarit déterministe reste seul maître du résumé**.
