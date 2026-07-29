@@ -68,7 +68,8 @@ async def _main(
         f"texte officiel), "
         f"{report.questions_amendements_generees} questions d'amendement générées, "
         f"{report.desaccords_generes} désaccords (débats) reliés, "
-        f"{report.amendements_enrichis} amendements enrichis (contenu)."
+        f"{report.amendements_enrichis} amendements enrichis (contenu), "
+        f"{report.initiatives} dossiers dont on sait qui porte le texte."
     )
     if report.scrutins_senat or report.senateurs:
         print(

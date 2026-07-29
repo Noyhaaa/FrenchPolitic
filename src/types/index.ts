@@ -344,6 +344,35 @@ export interface MiseAJourDossier {
  * Entité centrale : un dossier législatif (un texte) et sa trajectoire.
  * Agrège les scrutins successifs, les amendements clés et un résumé neutre.
  */
+/**
+ * Qui porte le texte, d'après son document de dépôt officiel (§5.1).
+ *
+ * Fait, jamais jugement : l'origine est lue dans l'archive des dossiers
+ * législatifs. Trois cas seulement — le Gouvernement (tout projet de loi,
+ * art. 39), un parlementaire, ou le Sénat quand le texte y a été déposé puis
+ * transmis à l'Assemblée.
+ *
+ * `nom` est absent quand la source désigne plusieurs auteurs (on ne choisit pas
+ * à sa place) ou quand l'auteur ne siège plus. `deputeId` suit la règle de
+ * `Votant` : présent seulement si sa fiche existe — un lien ne doit jamais
+ * mener à un 404.
+ *
+ * ⚠️ Le groupe est celui du parlementaire **aujourd'hui**, pas celui qu'il avait
+ * au dépôt : l'archive AMO ne publie que les mandats actifs.
+ */
+export interface Initiative {
+  origine: 'gouvernement' | 'parlementaire' | 'senat';
+  nom?: string | null;
+  deputeId?: string | null;
+  groupeNom?: string | null;
+  groupeCouleur?: string | null;
+  /**
+   * Photo officielle, telle que la porte le référentiel des parlementaires
+   * (jamais une URL devinée). Absente → l'app affiche les initiales.
+   */
+  portraitUrl?: string | null;
+}
+
 export interface Dossier {
   id: string;
   titreOfficiel: string;
@@ -377,6 +406,12 @@ export interface Dossier {
   amendements: Amendement[];
   sources: SourceOfficielle[];
   resume: ResumeScrutin;
+  /**
+   * Qui porte le texte (Gouvernement, parlementaire nommé, Sénat). Absente pour
+   * les dossiers sans document de dépôt à l'Assemblée (dossiers reconstitués,
+   * d'origine sénatoriale, motions) → la ligne disparaît de la fiche (§2.5).
+   */
+  initiative?: Initiative | null;
   /**
    * Exposé des motifs du texte (point de vue de l'auteur, bloc attribué).
    * Absent tant que le PDF officiel n'a pas pu être récupéré (§2.5).

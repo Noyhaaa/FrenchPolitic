@@ -80,6 +80,13 @@ python -m app.ingestion.revalider           # --dry-run pour voir le bilan sans 
 # colonne, puis à chaque changement des poids du calcul. Ni réseau ni LLM.
 python -m app.ingestion.divisions           # --dry-run pour voir le classement
 
+# Renseigne « qui porte le texte » (Dossier.initiative) sur les dossiers déjà en
+# base. Ne télécharge que l'archive des dossiers législatifs (~10 Mo) et lit les
+# identités dans la table `depute` : ni scrutins, ni PDF, ni LLM — quelques
+# secondes au lieu d'un run complet. À rejouer quand les règles de
+# `app/ingestion/initiative.py` changent.
+python -m app.ingestion.initiatives         # --dry-run pour voir la répartition
+
 # L'API sert alors la base ingérée (REPOSITORY_BACKEND=postgres via .env).
 uvicorn app.main:app --reload
 ```
@@ -238,6 +245,56 @@ avis du Conseil constitutionnel, qui ne sont ni adoption ni rejet — laisse
 l'étape **sans statut** (§2.5). Repli pour les dossiers sans actes (`TXT-…`,
 `SEN-…`) : les mentions de navette des objets de vote, **distinguées par
 chambre** (« Première lecture » à l'Assemblée et au Sénat sont deux étapes).
+
+### Qui porte le texte (`app/ingestion/initiative.py`)
+
+L'app disait *ce qui a été voté* et *comment chaque groupe a voté*, jamais **d'où
+vient le texte** : un projet de loi du Gouvernement et une proposition déposée
+par une députée de l'opposition s'affichaient à l'identique. La même archive le
+dit pourtant, sur le **document de dépôt** : `auteurs.auteur` porte soit un
+`acteurRef` (+ `qualite`), soit un `organeRef`.
+
+Trois origines, et rien d'autre :
+
+| Origine | Règle | Mesuré (dossiers officiels) |
+|---|---|---|
+| `gouvernement` | le texte est un *projet* de loi (art. 39) | 49 |
+| `parlementaire` | **un seul** auteur de `qualite="auteur"` | 124, dont 110 nommés |
+| `senat` | auteur = organe `PO838901` **et** dépôt `INITNAV` | 69 |
+
+**242 / 255**, et **zéro contradiction** avec la nature écrite dans le titre
+officiel (contrôle croisé en base : aucun `parlementaire`/`senat` sur un « projet
+de loi », aucun `gouvernement` ailleurs).
+
+Quatre refus qui font la fiabilité du champ :
+
+- **On ne nomme pas le ministre** déposant d'un projet de loi. Sa qualité
+  ministérielle n'est documentée dans aucune de nos sources, et 7 cas sur 48
+  seulement seraient nommables : une attribution qui ne marche qu'une fois sur
+  sept vaut moins que « Gouvernement », exact partout.
+- **Plusieurs auteurs → aucun nom.** L'origine reste vraie, mais désigner le
+  premier de la liste serait choisir à la place de la source (§2.5) — même règle
+  que `normalize.auteur_amendement`. Mesuré : 140 dépôts sur 143 n'ont qu'un
+  auteur, la prudence ne coûte presque rien.
+- **Un `qualite="rapporteur"` n'est jamais un auteur**, alors qu'il figure dans
+  la même liste.
+- **L'initiative se lit sur le dépôt initial**, jamais sur un document de
+  navette : un texte renvoyé par le Sénat après une première lecture à
+  l'Assemblée y est signé du Sénat, s'y rabattre ferait passer un texte né à
+  l'Assemblée pour un texte sénatorial.
+
+L'`acteurRef` est résolu en nom + groupe + **photo officielle** + `deputeId` par
+le même référentiel que le vote nominatif (la photo est celle de la table
+`depute`, déjà vérifiée à l'ingestion — on n'en dérive **aucune** ici ; absente,
+l'app affiche les initiales). Même frontière : `deputeId` n'est posé que si le
+parlementaire est au référentiel servi par l'API — un ancien député garde son
+origine mais perd son nom et son lien (jamais de `PA…` affiché, jamais de 404).
+⚠️ Le groupe est celui du député **aujourd'hui** : l'archive AMO ne publie que
+les mandats actifs, celui qu'il avait au dépôt n'y est plus.
+
+Préservée entre runs comme l'exposé des motifs (un run dont le téléchargement de
+l'archive a échoué ne l'efface pas), et rattrapable seule par
+`python -m app.ingestion.initiatives`.
 
 **Législature courante ET précédente.** `construire_reconciliation` /
 `construire_index_textes` / `construire_index_numeros` prennent désormais un

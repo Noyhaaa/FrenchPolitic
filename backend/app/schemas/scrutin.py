@@ -6,6 +6,8 @@ mobile consomme l'API sans transformation. Le §5.3 du MVP décrit ce modèle.
 """
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
@@ -321,6 +323,34 @@ class DispositifTexte(CamelModel):
     source: SourceOfficielle
 
 
+class Initiative(CamelModel):
+    """Qui porte le texte, d'après son document de dépôt officiel (§5.1).
+
+    Fait, pas jugement : l'origine est lue dans l'archive « dossiers
+    législatifs » (cf. `app.ingestion.initiative`), jamais déduite du contenu du
+    texte. Trois origines seulement — le Gouvernement (tout projet de loi, art.
+    39), un parlementaire, ou le Sénat quand le texte y a été déposé puis
+    transmis à l'Assemblée.
+
+    `nom` est absent quand la source désigne **plusieurs** auteurs (on ne choisit
+    pas à sa place) ou quand l'acteur n'est plus au référentiel : l'origine reste
+    vraie, la personne n'est pas nommée (§2.5).
+
+    `depute_id` suit exactement la règle de `Votant` : renseigné uniquement si le
+    parlementaire figure dans le référentiel servi par l'API, sinon le nom
+    s'affiche sans lien — jamais de cul-de-sac vers un 404.
+    """
+
+    origine: Literal["gouvernement", "parlementaire", "senat"]
+    nom: str | None = None
+    depute_id: str | None = None
+    groupe_nom: str | None = None
+    groupe_couleur: str | None = None
+    # Photo officielle, telle que la porte le référentiel des parlementaires
+    # (jamais une URL devinée ici). Absente → l'app affiche les initiales.
+    portrait_url: str | None = None
+
+
 class Dossier(CamelModel):
     """Entité centrale : un dossier législatif (un texte) et sa trajectoire."""
 
@@ -350,6 +380,11 @@ class Dossier(CamelModel):
     # Dispositif du texte déposé (fait officiel), extrait du même PDF. Sert de
     # source à la réponse « qu'est-ce que ça change » ; jamais affiché brut.
     dispositif: DispositifTexte | None = None
+    # Qui porte le texte (Gouvernement, un parlementaire nommé, le Sénat).
+    # Absente pour les dossiers sans document de dépôt à l'Assemblée (dossiers
+    # reconstitués « TXT-… », d'origine sénatoriale « SEN-… », motions) → la
+    # ligne disparaît de la fiche (§2.5).
+    initiative: Initiative | None = None
     # Ce dossier n'est pas un texte de loi mais un **événement autonome** :
     # motion de censure, déclaration du Gouvernement. Il n'a ni articles, ni
     # exposé des motifs, ni trajectoire — non pas parce qu'on ne les a pas

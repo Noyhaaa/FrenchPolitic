@@ -21,7 +21,7 @@ Tout ce qu'affiche l'app vient de sources publiques officielles. Rien n'est sais
 |---|---|
 | **Open data Assemblée nationale** — scrutins publics (17e législature) | Le vote lui-même : objet, date, résultat, ventilation par groupe, **nominatif** |
 | **Archive AMO** (acteurs & organes) | L'annuaire des députés, leur groupe, leur circonscription, leur photo |
-| **Archive « Dossiers législatifs »** | Le rattachement d'un vote à son **dossier**, le lien officiel, et la **trajectoire** du texte dans les deux chambres |
+| **Archive « Dossiers législatifs »** | Le rattachement d'un vote à son **dossier**, le lien officiel, la **trajectoire** du texte dans les deux chambres, et **qui le porte** |
 | **PDF des textes déposés** (AN, repli senat.fr) | L'**exposé des motifs** (parole de l'auteur) et le **dispositif** (les articles) |
 | **Archive « amendements »** (AN) | Le contenu réel d'un amendement : article visé, dispositif, exposé sommaire |
 | **Comptes rendus des débats** (« SyceronBrut ») | Les **explications de vote** des groupes en séance |
@@ -109,11 +109,12 @@ arithmétiquement depuis le vote décisif.
   fracture entre groupes), jamais par un jugement sur la mesure —, le récap du
   dernier mois actif, puis une rangée par thème. Un dossier qui reçoit un nouveau
   vote porte un badge **« mis à jour »**, descriptif et jamais évaluatif.
-- **Fiche dossier** : la frise **« Trajectoire au Parlement »** (les deux chambres,
-  chaque étape de jargon ouvrant sa définition), le résumé, **le vote en 4
-  questions**, puis trois sections — les votes sur le texte avec le **vote décisif**
-  mis en avant, les **amendements**, les **sous-amendements**. L'exposé des motifs
-  y est cité et attribué.
+- **Fiche dossier** : **qui porte le texte** (le Gouvernement, le parlementaire
+  auteur — cliquable vers sa fiche —, ou le Sénat), la frise **« Trajectoire au
+  Parlement »** (les deux chambres, chaque étape de jargon ouvrant sa
+  définition), le résumé, **le vote en 4 questions**, puis trois sections — les
+  votes sur le texte avec le **vote décisif** mis en avant, les **amendements**,
+  les **sous-amendements**. L'exposé des motifs y est cité et attribué.
 - **Fiche vote** : le résultat en tête, puis le **vote par groupe** avec la ligne
   de fracture et les **noms des votants** dépliables (chaque nom ouvre la fiche du
   parlementaire s'il siège encore). Sur un vote d'amendement, sa carte « en 4
@@ -146,6 +147,7 @@ Mesuré sur la base de développement au **29 juillet 2026** (dernier run comple
 | Scrutins | **8 433** Assemblée + **340** Sénat |
 | Parlementaires | **925** (577 députés + 348 sénateurs), **1,39 M** de votes nominatifs |
 | Trajectoire au Parlement | 262 / 328 dossiers |
+| Initiative (qui porte le texte) | **242 / 255 dossiers officiels** — 49 Gouvernement · 124 parlementaires (110 nommés) · 69 Sénat |
 | Accroche (le but du texte en une phrase) | 241 / 328 |
 | Exposé des motifs | 242 / 328 · dispositif : 176 |
 | Q2 « principal désaccord » (depuis les débats) | 211 / 328 |
@@ -197,6 +199,7 @@ python -m app.ingestion.senat --limit 40   # sénateurs + scrutins du Sénat seu
 python -m app.ingestion.deputes            # annuaire + votes nominatifs seuls
 python -m app.ingestion.revalider          # repasse les garde-fous sur les réponses en base
 python -m app.ingestion.divisions          # recalcule l'indice des « votes disputés »
+python -m app.ingestion.initiatives        # renseigne « qui porte le texte » en base
 pytest                                     # suite de tests
 ```
 

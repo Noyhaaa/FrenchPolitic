@@ -50,6 +50,12 @@ from app.ingestion.dossiers_legislatifs import (
     construire_reconciliation,
     legislature_du_ref,
 )
+from app.ingestion.initiative import (
+    IdentiteAuteur,
+    InitiativeBrute,
+    construire_index_initiatives,
+    resoudre_initiative,
+)
 from app.ingestion.navette import trajectoire
 from app.ingestion.senat import (
     URL_TEXTE_PDF as SENAT_URL_TEXTE_PDF,
@@ -111,6 +117,7 @@ from app.schemas import (
     DispositifTexte,
     Dossier,
     ExposeMotifs,
+    Initiative,
     MiseAJourDossier,
     PositionGroupe,
     QuestionsAmendement,
@@ -150,6 +157,9 @@ class SyncReport:
     desaccords_generes: int = 0
     # Votes d'amendement enrichis d'un contenu (dispositif ou exposé sommaire).
     amendements_enrichis: int = 0
+    # Dossiers dont on sait dire qui porte le texte (Gouvernement, parlementaire
+    # nommé, Sénat) — cf. `app.ingestion.initiative`.
+    initiatives: int = 0
     # Dossiers supprimés car vidés de leurs scrutins (ex. TXT- migrés vers un
     # dossier officiel après amélioration de la réconciliation).
     dossiers_orphelins_supprimes: int = 0
@@ -544,6 +554,11 @@ def _merge_avec_existant(prev: Dossier, incoming: Dossier) -> Dossier:
     # Dispositif : même raisonnement (extrait du même PDF, tout aussi stable).
     if incoming.dispositif is None and prev.dispositif is not None:
         incoming.dispositif = prev.dispositif
+    # Initiative : lue sur le document de dépôt, donc tout aussi stable. Un run
+    # dont le téléchargement de l'archive a échoué ne doit pas effacer qui porte
+    # le texte.
+    if incoming.initiative is None and prev.initiative is not None:
+        incoming.initiative = prev.initiative
     # Publics concernés : acquis d'un run avec LLM, préservés sur un run sans.
     if not incoming.resume.public_concerne and prev.resume.public_concerne:
         incoming.resume.public_concerne = prev.resume.public_concerne
@@ -709,6 +724,13 @@ class SyncJob:
         self._client_senat = client_senat
         self._slug_senat_par_dossier: dict[str, str] = {}
         self._actes_par_ref: dict[str, object] = {}
+        # dossierRef → qui porte le texte (lu sur son document de dépôt).
+        self._initiatives_par_ref: dict[str, InitiativeBrute] = {}
+        # acteurRef → identité du parlementaire (nom, groupe, photo), pour
+        # nommer l'auteur d'une proposition. Les clés sont exactement celles du
+        # référentiel servi par l'API : c'est la même frontière que celle qui
+        # rend un votant cliquable (§5.2) — hors de là, pas d'identifiant.
+        self._identite_par_acteur: dict[str, IdentiteAuteur] = {}
 
     # Abréviations de groupe divergentes entre le compte rendu et l'annuaire AMO
     # (fold appliqué de part et d'autre). À compléter si de nouveaux cas surgissent.
@@ -1302,6 +1324,14 @@ class SyncJob:
         self._groupe_par_acteur = {
             d.id: (d.groupe_id, d.groupe_nom) for d in deputes
         }
+        # Identité complète, pour nommer l'auteur d'une proposition de loi (et
+        # l'illustrer de sa photo officielle quand le référentiel en porte une).
+        self._identite_par_acteur = {
+            d.id: IdentiteAuteur(
+                d.nom, d.groupe_nom, d.groupe_couleur, d.portrait_url
+            )
+            for d in deputes
+        }
 
         # 1bis) Référentiel du Sénat : sénateurs + groupes. Même tables que les
         #       députés, discriminées par `chambre`. Best-effort : l'annuaire est
@@ -1413,6 +1443,10 @@ class SyncJob:
         # Index dossierRef → texte AN déposé, pour récupérer l'exposé des motifs
         # (PDF officiel) au niveau du dossier — bloc attribué, option (a).
         index_textes = construire_index_textes(documents, legislatures)
+        # Index dossierRef → qui porte le texte, lu sur le même document de dépôt.
+        self._initiatives_par_ref = construire_index_initiatives(
+            documents, legislatures
+        )
         # Index dossierRef → numéros de documents, pour la liaison certaine
         # débat ↔ dossier (le CR cite « (n° X) »). Les numéros exposés sont ceux
         # de la législature courante — la seule dont on lit les comptes rendus.
@@ -1500,6 +1534,13 @@ class SyncJob:
                     self._actes_par_ref.get(parses[0].dossier_ref or ""),
                     [p.scrutin for p in parses],
                 )
+                # Qui porte le texte — même archive, même document de dépôt que
+                # l'exposé des motifs. Absente pour un dossier sans `dossierRef`
+                # (« TXT-… », « SEN-… », motion) : la ligne disparaît (§2.5).
+                dossier.initiative = resoudre_initiative(
+                    self._initiatives_par_ref.get(parses[0].dossier_ref or ""),
+                    self._identite_par_acteur,
+                )
                 await self._enrichir_texte_depose(
                     session, dossier, parses[0].dossier_ref, index_textes, report
                 )
@@ -1515,6 +1556,10 @@ class SyncJob:
                 # Après les questions : l'accroche en est tirée.
                 self._composer_accroche(dossier)
                 dossier = await _upsert_dossier(session, dossier, desaccord_sources)
+                # Compté sur le dossier FUSIONNÉ : une initiative acquise à un
+                # run précédent compte toujours, même si ce run n'a rien relu.
+                if dossier.initiative is not None:
+                    report.initiatives += 1
                 report.amendements_enrichis += sum(
                     1
                     for a in dossier.amendements

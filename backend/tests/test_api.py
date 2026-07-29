@@ -45,6 +45,28 @@ def test_get_dossier_detail(client):
     assert body["amendements"][0]["scrutinId"]
 
 
+def test_dossier_dit_qui_porte_le_texte(client):
+    """L'initiative traverse l'API en camelCase — c'est le contrat que lit l'app.
+
+    Trois formes coexistent volontairement dans le seed : un auteur parlementaire
+    nommé et cliquable, le Gouvernement (sans personne), et un dossier sans
+    initiative du tout — dont la fiche masque la ligne (§2.5).
+    """
+    depose = client.get("/dossiers/dos-logement-2026").json()["initiative"]
+    assert depose["origine"] == "parlementaire"
+    assert depose["nom"] == "Léa Marchand"
+    # C'est `deputeId` — et lui seul — qui autorise l'app à ouvrir une fiche.
+    assert client.get(f"/deputes/{depose['deputeId']}").status_code == 200
+    assert depose["groupeNom"] and depose["groupeCouleur"]
+
+    projet = client.get("/dossiers/dos-energie-2026").json()["initiative"]
+    assert projet["origine"] == "gouvernement"
+    # Le Gouvernement n'est pas une personne : ni nom, ni lien (§2.5).
+    assert projet["nom"] is None and projet["deputeId"] is None
+
+    assert client.get("/dossiers/dos-ecoles-2026").json()["initiative"] is None
+
+
 def test_amendement_scrutin_accessible(client):
     # Le vote d'un amendement (lié via scrutinId) est servi comme un scrutin.
     dossier = client.get("/dossiers/dos-logement-2026").json()

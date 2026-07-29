@@ -16,6 +16,7 @@ import {
   AiNotice,
   AmendementsSection,
   ExposeMotifsCard,
+  InitiativeLigne,
   QuestionsCard,
   ErrorView,
   LoadingView,
@@ -325,6 +326,16 @@ export function DossierDetailScreen() {
             Titre officiel : {dossier.titreOfficiel}
           </Text>
         ) : null}
+
+        {/* Qui porte le texte (§5.1) : Gouvernement, un parlementaire nommé, ou
+            le Sénat. Absent des dossiers sans document de dépôt à l'Assemblée
+            (reconstitués, motions) → le bloc disparaît (§2.5). */}
+        <InitiativeLigne
+          initiative={dossier.initiative}
+          onOuvrirDepute={(deputeId) =>
+            navigation.navigate('DeputeDetail', { deputeId })
+          }
+        />
 
         {/* Badge « mis à jour » (§7.7) : le dossier a évolué depuis une
             consultation précédente (nouveau scrutin rattaché). */}

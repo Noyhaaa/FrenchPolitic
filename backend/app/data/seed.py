@@ -14,6 +14,7 @@ from app.schemas import (
     Depute,
     Dossier,
     GroupeListItem,
+    Initiative,
     MiseAJourDossier,
     PhaseScrutin,
     PhraseSourcee,
@@ -368,6 +369,15 @@ SEED_DOSSIERS: list[Dossier] = [
         ),
         statut="en_cours",
         phase=PhaseScrutin(label="Adopté en 1re lecture", statut="adopte"),
+        # Proposition de loi : l'auteur est un parlementaire, nommé et cliquable
+        # parce qu'il siège encore (même règle que `Votant`).
+        initiative=Initiative(
+            origine="parlementaire",
+            nom="Léa Marchand",
+            depute_id="dep-seed-06",
+            groupe_nom=_GROUPES["ECO"][0],
+            groupe_couleur=_GROUPES["ECO"][1],
+        ),
         theme="Logement",
         temps_lecture_sec=50,
         date_dernier_scrutin="2026-07-08T14:30:00Z",
@@ -464,6 +474,9 @@ SEED_DOSSIERS: list[Dossier] = [
         titre_clair="Baisser la facture d'énergie",
         accroche="Prolonge le bouclier tarifaire pour les ménages jusqu'en 2027.",
         statut="adopte",
+        # Projet de loi : l'initiative est celle du Gouvernement (art. 39), sans
+        # personne nommée — on ne descend jamais au ministre déposant.
+        initiative=Initiative(origine="gouvernement"),
         theme="Énergie",
         temps_lecture_sec=30,
         date_dernier_scrutin="2026-07-09T15:00:00Z",

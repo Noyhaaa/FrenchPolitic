@@ -82,6 +82,24 @@ Six écrans du cœur de valeur :
    d'un paragraphe ; une seule ouverte à la fois. ⚠️ Elle n'est
    plus dérivée côté app des objets de vote (`phasesNavette` a été supprimé de
    `format.ts`) : les scrutins d'une chambre ne peuvent pas documenter l'autre.
+   Sous le titre, la carte **« À l'origine du texte »** (`InitiativeLigne`,
+   `Dossier.initiative` servie par l'API) — **qui porte le texte**, la première
+   question qu'on se pose devant un vote : le **Gouvernement** (tout projet de
+   loi, art. 39), le **parlementaire auteur** (sa **photo officielle** — celle
+   du référentiel, jamais une URL dérivée ici —, repli sur les initiales, avec
+   la pastille **et le libellé** de son groupe ; la carte ouvre sa fiche), ou le
+   **Sénat**. Même
+   gabarit dans les trois cas (§7.4) — médaillon, intitulé, précision : le
+   médaillon d'une institution est l'`Avatar` réduit à son initiale, pour
+   qu'aucune origine ne reçoive un traitement plus flatteur. ⚠️ **Pas** le
+   liseré d'accent d'`ExposeMotifsCard` : là-bas il signale un contenu non
+   neutre, ici c'est un fait — et un liseré teinté du groupe laisserait croire
+   que la carte porte son opinion. Pas de `deputeId` → pas de chevron et carte
+   non pressable : jamais d'affordance qui ne mène nulle part. Origine sans
+   personne nommable → **carte masquée** plutôt qu'« un parlementaire », qui
+   n'apprendrait rien (§2.5). Mesuré : **242/255 dossiers officiels**
+   (49 Gouvernement · 124 parlementaires dont 110 nommés · 69 Sénat) ; les
+   dossiers reconstitués et les motions n'en ont pas.
    Puis résumé du texte,
    et **trois sections distinctes** — les **votes sur le texte**, avec le
    **vote décisif mis en avant** (`VoteDecisifCard` + `voteDecisif` dans
@@ -324,6 +342,25 @@ articles du texte : `decouper_dispositif`, `Dossier.dispositif`) — lui est un
 (10 000 car. : budget, PLFSS) n'est **pas stocké du tout** — le modèle ne doit
 jamais voir un texte partiel qu'il présenterait comme le tout (§2.5 ; à 15 700
 car. mistral-small part en rapport de 3 000 car., rejeté par les garde-fous).
+Le **même document de dépôt** livre enfin l'**initiative** — qui porte le texte
+(`app/ingestion/initiative.py`, `Dossier.initiative`) : le champ `auteurs` de
+l'archive donne soit un `acteurRef` (résolu en nom + groupe + `deputeId` par
+l'annuaire AMO, exactement comme un votant nominatif), soit un `organeRef`.
+Trois origines, aucune autre : **Gouvernement** dès que le texte est un *projet*
+de loi (art. 39 — on ne descend **jamais** au ministre déposant, dont la qualité
+n'est documentée dans aucune de nos sources et que 7 cas sur 48 seulement
+permettraient de nommer) ; **parlementaire** quand la source désigne **un seul**
+auteur de `qualite="auteur"` (plusieurs → l'origine reste, le nom disparaît :
+même règle que `auteur_amendement`, §2.5 ; les `qualite="rapporteur"` de la même
+liste ne sont jamais des auteurs) ; **Sénat** quand l'auteur est l'organe
+`PO838901` **et** que le dépôt est classé `INITNAV` — les deux indices sont
+exigés. L'initiative est lue sur le **dépôt initial** (plus petit numéro), jamais
+sur un document de navette : un texte renvoyé par le Sénat après une 1re lecture
+à l'Assemblée y est signé du Sénat, s'y rabattre ferait passer un texte né à
+l'Assemblée pour un texte sénatorial. Mesuré : **242/255 dossiers officiels**
+(49 · 124 · 69), zéro contradiction avec la nature écrite dans le titre.
+Préservée entre runs comme l'exposé (un run sans archive ne l'efface pas), et
+rattrapable seule par `python -m app.ingestion.initiatives`.
 Pas besoin de Légifrance pour ça (option a ; la
 neutralisation par LLM — option b — viendra avec un LLM assez fiable). **LLM local
 (Ollama, `qwen3:14b`) branché sur trois tâches vérifiables** : (1) la
@@ -538,6 +575,7 @@ python -m app.ingestion.deputes           # référentiel députés + votes nomi
 python -m app.ingestion.reformater        # recalcule titre court + accroche en base (ni réseau ni LLM)
 python -m app.ingestion.revalider         # repasse les garde-fous sur les réponses en base, efface les fautives
 python -m app.ingestion.divisions         # recalcule l'indice de division (rangée « votes les plus disputés »)
+python -m app.ingestion.initiatives       # renseigne « qui porte le texte » en base (archive 10 Mo, ni PDF ni LLM)
 uvicorn app.main:app --reload             # http://localhost:8000/docs (sert la base via .env)
 pytest                                     # suite de tests (forcés sur seed)
 ```
@@ -661,8 +699,12 @@ AN quand disponibles, `scrutinId` vers la fiche vote, et `sousAmendements?` — 
 `statut`, `theme`, `dateDernierScrutin`, `trajectoire` (les étapes du texte au
 Parlement, **les deux chambres**, calculées à l'ingestion — vide = frise
 masquée), `miseAJour?` (badge §7.7),
-`exposeMotifs?` (parole de l'auteur, bloc attribué) et `dispositif?` (les
+`exposeMotifs?` (parole de l'auteur, bloc attribué), `dispositif?` (les
 articles du texte — fait officiel, jamais affiché brut, source de la Q4),
+`initiative?` (**qui porte le texte** : `origine` — `gouvernement` |
+`parlementaire` | `senat` — plus `nom` / `deputeId` / `groupeNom` /
+`groupeCouleur` / `portraitUrl` quand l'auteur est un parlementaire identifié ;
+`deputeId` suit la règle de `Votant`, posé **seulement s'il siège encore**),
 `titreOfficiel` (la formulation d'origine, toujours conservée et affichée sur la
 fiche §7.5), `titreClair` (titre d'affichage raccourci), `accroche?`
 (le but du texte, tiré de la Q1 — **optionnelle**, absente = ligne masquée §2.5)

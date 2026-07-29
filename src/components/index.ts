@@ -25,6 +25,7 @@ export { VoteHistoryFil } from './VoteHistoryFil';
 export { AmendementRow } from './AmendementRow';
 export { AmendementsSection } from './AmendementsSection';
 export { ExposeMotifsCard } from './ExposeMotifsCard';
+export { InitiativeLigne } from './InitiativeLigne';
 export { QuestionsCard } from './QuestionsCard';
 export { QuestionsAmendementCard } from './QuestionsAmendementCard';
 export { TrajectoireNavette } from './TrajectoireNavette';
