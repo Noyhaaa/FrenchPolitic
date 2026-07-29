@@ -86,6 +86,32 @@ class InfoSenateur:
     groupe_abrev: str
     circonscription: str
     portrait_url: str | None = None
+    # Commission permanente, lue dans `organismes` (cf. `_commission_permanente`).
+    commission: str | None = None
+
+
+# Les sept commissions permanentes du Sénat portent un `ordre` 7001-7007 ; la
+# commission des affaires européennes, à laquelle 41 sénateurs appartiennent EN
+# PLUS de la leur, ouvre une autre série (8001). Prendre le plus petit `ordre`
+# donne donc la commission permanente — sans lister des libellés en dur, qui
+# vieilliraient mal. Vérifié sur l'annuaire complet : le premier élément est
+# toujours celui de plus petit `ordre` (346/346), et 346 sénateurs sur 348 en
+# ont une.
+def _commission_permanente(brut: dict) -> str | None:
+    """Libellé de la commission permanente du sénateur, sinon None (§2.5)."""
+    commissions = [
+        o
+        for o in (brut.get("organismes") or [])
+        if isinstance(o, dict)
+        and o.get("type") == "COMMISSION"
+        and (o.get("libelle") or "").strip()
+    ]
+    if not commissions:
+        return None
+    # `ordre` manquant → repoussé en fin de tri plutôt que traité comme 0, qui
+    # le ferait gagner à tort.
+    retenue = min(commissions, key=lambda o: o.get("ordre") or float("inf"))
+    return str(retenue["libelle"]).strip()
 
 
 def construire_annuaire(bruts: list[dict]) -> dict[str, InfoSenateur]:
@@ -117,6 +143,7 @@ def construire_annuaire(bruts: list[dict]) -> dict[str, InfoSenateur]:
             # Donnée par la source (contrairement à l'AN où l'URL est dérivée
             # de l'acteurRef, donc à vérifier avant de l'attacher).
             portrait_url=f"{_BASE}{avatar}" if avatar else None,
+            commission=_commission_permanente(brut),
         )
     return annuaire
 
@@ -126,6 +153,9 @@ def build_senateurs(annuaire: dict[str, InfoSenateur]) -> list[Depute]:
 
     `depuis` (début de mandat) reste `None` : l'annuaire ne le publie pas, et on
     ne le déduit pas de la série d'élection (§2.5) — l'app masque le champ.
+    Vérifié à la source : les champs servis sont matricule, nom, groupe,
+    circonscription, organismes, avatar — aucune date de mandat. Ce n'est donc
+    pas un oubli d'ingestion, et le combler demanderait une autre source.
     """
     return [
         Depute(
@@ -138,6 +168,7 @@ def build_senateurs(annuaire: dict[str, InfoSenateur]) -> list[Depute]:
             circonscription=info.circonscription,
             depuis=None,
             portrait_url=info.portrait_url,
+            commission=info.commission,
         )
         for info in annuaire.values()
     ]

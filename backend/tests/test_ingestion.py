@@ -212,6 +212,35 @@ def test_texte_de_rattachement():
     ) is None
 
 
+def test_texte_de_rattachement_retire_les_mentions_enchainees():
+    """La source enchaîne parfois DEUX mentions de procédure.
+
+    Cas réel : n'en retirer qu'une laissait « (seconde délibération) » dans le
+    titre, sa signature ne correspondait plus au titre officiel, et le texte se
+    dédoublait en un `TXT-…` vide à côté de son vrai dossier (vécu sur l'aide à
+    mourir, le PLF 2026 et Mayotte).
+    """
+    assert texte_de_rattachement(
+        "l'article 4 de la proposition de loi relative au droit à l'aide à "
+        "mourir (seconde délibération) (deuxième lecture)."
+    ) == "Proposition de loi relative au droit à l'aide à mourir"
+
+
+def test_texte_de_rattachement_garde_une_parenthese_interne():
+    """Seule la FIN est de la procédure : une parenthèse au milieu du titre fait
+    partie de ce que la source désigne et doit survivre."""
+    attendu = "Proposition de loi visant à abroger l'article 24 (supprimé) du code pénal"
+    assert texte_de_rattachement(
+        "l'ensemble de la proposition de loi visant à abroger l'article 24 "
+        "(supprimé) du code pénal."
+    ) == attendu
+    # Et elle survit même quand une mention de procédure la suit.
+    assert texte_de_rattachement(
+        "l'ensemble de la proposition de loi visant à abroger l'article 24 "
+        "(supprimé) du code pénal (deuxième lecture)."
+    ) == attendu
+
+
 def test_sans_dossier_ref_regroupe_par_texte_cite():
     """Sans dossierRef, les votes citant le même texte partagent un dossier
     reconstitué — le fil montre le texte, pas chaque amendement (pas de
@@ -241,13 +270,29 @@ def test_sans_dossier_ref_regroupe_par_texte_cite():
 
 
 def test_sans_dossier_ref_ni_texte_reste_singleton():
-    """Un vote autonome (motion de censure…) reste son propre dossier."""
+    """Un vote autonome (motion de censure…) reste son propre dossier, et se
+    déclare comme tel : il n'a pas d'articles, donc pas de « qu'est-ce que ça
+    change ? » à afficher (§2.5, l'app masque au lieu d'annoncer un manque)."""
     resolver = build_resolver_from_organes(ORGANES)
     p = parse_scrutin(
         _sans_dossier_ref("la motion de censure déposée par 185 députés"),
         resolver,
     )
     assert p.dossier_id == "VTANR5L17V999"  # l'uid du scrutin
+    assert p.est_evenement_autonome
+
+
+def test_vote_sur_un_texte_n_est_pas_un_evenement_autonome():
+    """Le drapeau ne doit pas déborder : un vote citant un texte porte sur un
+    texte, même sans `dossierRef`."""
+    resolver = build_resolver_from_organes(ORGANES)
+    p = parse_scrutin(
+        _sans_dossier_ref(
+            "l'ensemble de la proposition de loi visant à protéger la ressource en eau"
+        ),
+        resolver,
+    )
+    assert not p.est_evenement_autonome
 
 
 # Documents « dossiers législatifs » factices pour la réconciliation.

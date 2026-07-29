@@ -103,12 +103,33 @@ plusieurs dossiers réels) — le titre cité s'arrête net en plein mot avant l
 fin du titre officiel, plus long ; non ambigu à chaque niveau — retrouve le
 vrai `dossierRef` et son lien officiel ; +24 dossiers récupérés via la
 signature, +4 via le préfixe) ; sinon le **texte de rattachement**
-(dossier reconstitué `TXT-…`, mention de lecture ignorée, id dérivé de la
+(dossier reconstitué `TXT-…`, mentions de lecture ignorées, id dérivé de la
 **signature** du titre plutôt que du simple fold — un même texte cité avec une
 apostrophe droite sur un scrutin et courbe sur un autre fusionne en un seul
 dossier au lieu de se scinder en deux) ; sinon un dossier
 singleton (motion de censure, déclaration…). Le fil n'expose ainsi que des
 textes — jamais un vote d'amendement isolé — et ~60 % ont leur page officielle.
+
+⚠️ **Toutes** les mentions finales de procédure sont retirées du titre cité, pas
+seulement la dernière : la source en enchaîne parfois deux (« …le droit à l'aide à
+mourir **(seconde délibération) (deuxième lecture)** »). N'en retirer qu'une
+laissait « (seconde délibération) » collé au titre, dont la signature ne
+correspondait plus au titre officiel — le texte se **dédoublait** alors dans le
+fil : une fiche complète et un `TXT-…` vide à côté. Mesuré sur la base de dev,
+**10 dossiers `TXT-` sur 54** ont rejoint leur dossier officiel au run suivant
+(dont l'aide à mourir, le PLF 2026, le PLFSS 2025 et 2026, Mayotte, le
+narcotrafic) — « aide à mourir » est passé de 66 à **69 scrutins**, la somme
+exacte des deux fragments. Les 44 restants se répartissent en **32** dont le
+titre est absent de l'archive (dont des coquilles de la source : « de
+**ss**implification », « fin **des** gestion ») et **12** que l'archive contient
+mais que le garde-fou d'ambiguïté écarte, le même titre existant en L17 et en L16
+(cf. le backlog de `CLAUDE.md`).
+
+Un vote de **conduite de séance** (demande de suspension, de seconde délibération)
+qui deviendrait un dossier à lui seul est **écarté du fil** — il ne décide de rien
+et n'a ni texte ni trajectoire. Même prédicat que la rangée « votes les plus
+disputés » (`est_vote_de_conduite_de_seance`). Le même vote formulé pendant
+l'examen d'un texte reste un vote de ce dossier.
 L'archive sert **uniquement** à retrouver le `dossierRef` : ses titres (en
 minuscules, fragmentés) ne sont pas importés.
 
@@ -124,9 +145,22 @@ Il expose en revanche, **par scrutin**, deux ressources jointes :
   (codes `p` / `c` / `a` / `n`).
 
 L'annuaire des sénateurs vient de `senat.fr/api-senat/senateurs.json` (matricule,
-nom, groupe, circonscription, **photo officielle donnée par la source** — pas
-dérivée, donc pas à vérifier comme côté AN). Endpoint non documenté par
-data.senat.fr : traité en best-effort.
+nom, groupe, circonscription, `organismes`, **photo officielle donnée par la
+source** — pas dérivée, donc pas à vérifier comme côté AN). Endpoint non documenté
+par data.senat.fr : traité en best-effort.
+
+La **commission permanente** (`Depute.commission`, 346/348) se lit dans
+`organismes` : les sept permanentes portent un `ordre` 7001-7007, tandis que la
+commission des affaires européennes — à laquelle 41 sénateurs siègent **en plus**
+de la leur — ouvre une autre série (8001). Retenir le plus petit `ordre` donne donc
+la permanente, sans liste de libellés en dur qui vieillirait mal.
+
+> ⚠️ L'annuaire **ne publie aucune date de début de mandat** (vérifié à la
+> source : les champs servis sont matricule, nom, groupe, circonscription,
+> organismes, avatar). `depuis` reste donc `None` pour les 348 sénateurs et l'app
+> masque le champ — ce n'est **pas** un trou d'ingestion à combler, et le déduire
+> de la série d'élection serait une supposition (§2.5). Il faudrait une autre
+> source (`data.senat.fr`, jeu ODSEN).
 
 > ⚠️ **`{session}` est l'année de DÉBUT de session** (octobre → septembre), pas
 > l'année civile : le scrutin n° 340 de la session « 2025 » a eu lieu le

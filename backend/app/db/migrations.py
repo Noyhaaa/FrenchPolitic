@@ -86,6 +86,13 @@ MIGRATIONS: tuple[tuple[str, str], ...] = (
         "dossier.desaccord_sources",
         "ALTER TABLE dossier ADD COLUMN IF NOT EXISTS desaccord_sources JSONB",
     ),
+    # `commission` : publiée par l'annuaire du Sénat, absente côté Assemblée.
+    # NULLABLE sans défaut — NULL veut dire « non documentée », ce qui décrit
+    # exactement les lignes existantes (et durablement les députés).
+    (
+        "depute.commission",
+        "ALTER TABLE depute ADD COLUMN IF NOT EXISTS commission TEXT",
+    ),
 )
 
 

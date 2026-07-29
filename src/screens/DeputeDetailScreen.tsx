@@ -161,10 +161,14 @@ export function DeputeDetailScreen() {
               />
               <Text style={styles.badgeTexte}>{depute.groupeNom}</Text>
             </View>
-            {/* Circonscription et début de mandat : masqués si non documentés. */}
+            {/* Circonscription, commission et début de mandat : chaque champ
+                masqué s'il n'est pas documenté (§2.5). La commission n'est
+                servie qu'au Sénat, le début de mandat qu'à l'Assemblée — les
+                sources ne publient pas les mêmes choses de part et d'autre. */}
             <Text style={typography.meta}>
               {[
                 depute.circonscription,
+                depute.commission,
                 depute.depuis ? `depuis le ${formatDateLong(depute.depuis)}` : null,
               ]
                 .filter(Boolean)

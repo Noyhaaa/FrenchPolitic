@@ -279,6 +279,7 @@ def _depute_row_values(d: Depute) -> dict:
         "circonscription": d.circonscription,
         "depuis": d.depuis,
         "portrait_url": d.portrait_url,
+        "commission": d.commission,
         "search_index": fold(f"{d.nom} {d.groupe_nom} {d.circonscription}"),
     }
 

@@ -19,7 +19,13 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.models import DossierRow, GroupeRow, ScrutinRow, SyncRunRow
+from app.db.models import (
+    DossierRow,
+    GroupeRow,
+    ScrutinRow,
+    SyncRunRow,
+    VoteDeputeRow,
+)
 from app.ingestion.assemblee import (
     AssembleeOpenDataClient,
     ScrutinParse,
@@ -77,6 +83,7 @@ from app.ingestion.normalize import (
     est_amendement,
     est_sous_amendement,
     est_texte_procedural,
+    est_vote_de_conduite_de_seance,
     numero_amendement,
     numero_amendement_parent,
     titre_court,
@@ -146,6 +153,10 @@ class SyncReport:
     # Dossiers supprimés car vidés de leurs scrutins (ex. TXT- migrés vers un
     # dossier officiel après amélioration de la réconciliation).
     dossiers_orphelins_supprimes: int = 0
+    # Votes de conduite de séance (suspension, demande de seconde délibération)
+    # écartés du fil parce qu'ils y seraient devenus un dossier à eux seuls —
+    # qu'ils viennent d'être rencontrés ou qu'ils soient purgés d'un run antérieur.
+    conduites_de_seance_ecartees: int = 0
     groupes: int = 0
     # Référentiel des députés (AMO) et lignes de vote nominatif écrites (§5.2).
     deputes: int = 0
@@ -422,6 +433,10 @@ def build_dossier(
         scrutins=[ScrutinResume.from_scrutin(s) for s in votes_texte],
         amendements=_structurer_amendements(votes_amendement, index_amendements),
         sources=_dedupe_sources(sources),
+        # Événement autonome (motion de censure, déclaration) : vrai seulement si
+        # AUCUN des votes du dossier ne se rattache à un texte. Un dossier qui a
+        # reçu ne serait-ce qu'un vote sur un texte est un dossier de texte.
+        est_evenement_autonome=all(p.est_evenement_autonome for p in parses),
         # Résumé neutre par gabarit, ancré sur les faits des scrutins (§4.1).
         resume=generer_resume(
             construire_faits(
@@ -1015,6 +1030,45 @@ class SyncJob:
         brut = ((row.payload or {}).get("resume") or {}).get("questions")
         return QuestionsCitoyennes.model_validate(brut) if brut else None
 
+    async def _purger_conduites_de_seance(self, report: SyncReport) -> None:
+        """Retire de la base les votes de conduite de séance qui sont leur propre
+        dossier (demande de suspension, de seconde délibération).
+
+        Le prédicat vit en Python (`est_vote_de_conduite_de_seance`, liste fermée
+        partagée avec la rangée « votes les plus disputés ») : on lit donc les
+        seuls scrutins candidats — ceux qui sont leur propre dossier, une poignée
+        — et on tranche en mémoire plutôt que de réécrire la règle en SQL, où
+        elle divergerait tôt ou tard.
+
+        Le vote nominatif part avec le scrutin : le conserver laisserait des
+        lignes pointant vers un scrutin inexistant, et « qui a voté la suspension
+        de séance » n'est pas une position législative à porter dans l'historique
+        d'un parlementaire.
+        """
+        async with self._sf() as session:
+            lignes = (
+                await session.execute(
+                    select(ScrutinRow.id, ScrutinRow.payload).where(
+                        ScrutinRow.dossier_id == ScrutinRow.id
+                    )
+                )
+            ).all()
+            a_purger = [
+                identifiant
+                for identifiant, payload in lignes
+                if est_vote_de_conduite_de_seance((payload or {}).get("objet") or "")
+            ]
+            if not a_purger:
+                return
+            await session.execute(
+                delete(VoteDeputeRow).where(VoteDeputeRow.scrutin_id.in_(a_purger))
+            )
+            await session.execute(
+                delete(ScrutinRow).where(ScrutinRow.id.in_(a_purger))
+            )
+            report.conduites_de_seance_ecartees += len(a_purger)
+            await session.commit()
+
     async def _construire_desaccord(
         self,
         dossier: Dossier,
@@ -1388,6 +1442,19 @@ class SyncJob:
             except (KeyError, TypeError) as exc:
                 report.anomalies.append(f"parsing échoué: {exc}")
                 continue
+            # Une demande de suspension de séance n'est pas un dossier
+            # législatif : elle ne décide de rien, n'a ni texte ni trajectoire,
+            # et n'a donc rien à faire dans le fil. On l'écarte UNIQUEMENT quand
+            # elle deviendrait un dossier à elle seule (`dossier_id` = son
+            # propre uid) : la même demande formulée pendant l'examen d'un texte
+            # reste un vote de ce dossier, à sa place dans sa liste de votes.
+            # Même liste fermée que la rangée « votes les plus disputés »
+            # (`est_vote_de_conduite_de_seance`), une seule référence pour les deux.
+            if parse.dossier_id == parse.scrutin.id and est_vote_de_conduite_de_seance(
+                parse.scrutin.objet
+            ):
+                report.conduites_de_seance_ecartees += 1
+                continue
             report.anomalies.extend(controles_coherence(parse.scrutin))
             par_dossier.setdefault(parse.dossier_id, []).append(parse)
 
@@ -1514,6 +1581,15 @@ class SyncJob:
                 await session.commit()
                 if self._on_progress:
                     self._on_progress(i, total, dossier.titre_clair)
+
+        # 3ter) Purge des votes de conduite de séance DÉJÀ en base. L'exclusion
+        #       posée au parsing empêche d'en créer de nouveaux, mais ne retire
+        #       pas ceux qu'un run antérieur avait écrits : leur dossier
+        #       garderait un scrutin et échapperait donc au nettoyage des
+        #       orphelins ci-dessous. Ne vise que les scrutins qui sont leur
+        #       PROPRE dossier — un vote de suspension tenu pendant l'examen d'un
+        #       texte reste un vote de ce dossier et n'est pas touché.
+        await self._purger_conduites_de_seance(report)
 
         # 3bis) Nettoyage des dossiers orphelins : un dossier dont plus aucun
         #       scrutin ne dépend a été vidé par une migration (ex. un `TXT-`

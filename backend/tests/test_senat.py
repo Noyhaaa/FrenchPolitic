@@ -527,6 +527,52 @@ def test_groupes_du_senat(annuaire):
     assert groupes["SEN-UMP"].couleur.startswith("#")
 
 
+def _senateur_brut(organismes: list[dict]) -> dict:
+    return {
+        "matricule": "08061X",
+        "prenom": "François",
+        "nom": "Patriat",
+        "groupe": {"code": "LREM", "libelle": "Groupe RDPI"},
+        "circonscription": {"libelle": "Côte-d'Or"},
+        "organismes": organismes,
+    }
+
+
+def test_commission_permanente_prise_sur_le_plus_petit_ordre():
+    """Un sénateur peut siéger à sa commission permanente ET à celle des
+    affaires européennes. Les sept permanentes portent un `ordre` 7001-7007,
+    les affaires européennes ouvrent une autre série (8001) : le plus petit
+    `ordre` donne donc la permanente, sans lister des libellés en dur."""
+    annuaire = construire_annuaire(
+        [
+            _senateur_brut(
+                [
+                    {"type": "COMMISSION", "libelle": "Commission des affaires européennes", "ordre": 8001},
+                    {"type": "COMMISSION", "libelle": "Commission des finances", "ordre": 7006},
+                    {"type": "ETUDE", "libelle": "Groupe d'études sur la vigne", "ordre": 1},
+                ]
+            )
+        ]
+    )
+    assert annuaire["08061X"].commission == "Commission des finances"
+
+
+def test_commission_absente_reste_none():
+    """Aucune commission publiée → None, l'app masque le champ (§2.5)."""
+    annuaire = construire_annuaire(
+        [_senateur_brut([{"type": "ETUDE", "libelle": "Groupe d'études", "ordre": 1}])]
+    )
+    assert annuaire["08061X"].commission is None
+    assert build_senateurs(annuaire)[0].commission is None
+
+
+def test_senateur_n_a_jamais_de_date_de_mandat():
+    """L'annuaire senat.fr ne publie pas de date de début de mandat : `depuis`
+    reste None et n'est pas déduit de la série d'élection (§2.5)."""
+    annuaire = construire_annuaire([_senateur_brut([])])
+    assert build_senateurs(annuaire)[0].depuis is None
+
+
 def test_annuaire_ignore_les_entrees_incompletes():
     annuaire = construire_annuaire(
         [

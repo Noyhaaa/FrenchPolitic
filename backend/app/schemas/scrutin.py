@@ -350,6 +350,17 @@ class Dossier(CamelModel):
     # Dispositif du texte déposé (fait officiel), extrait du même PDF. Sert de
     # source à la réponse « qu'est-ce que ça change » ; jamais affiché brut.
     dispositif: DispositifTexte | None = None
+    # Ce dossier n'est pas un texte de loi mais un **événement autonome** :
+    # motion de censure, déclaration du Gouvernement. Il n'a ni articles, ni
+    # exposé des motifs, ni trajectoire — non pas parce qu'on ne les a pas
+    # trouvés, mais parce qu'ils n'existent pas. L'app doit alors masquer les
+    # questions qui ne se posent pas (« pourquoi ce texte ? », « qu'est-ce que
+    # ça change ? ») plutôt qu'afficher « information non disponible », qui
+    # laisserait croire à une lacune de notre côté (§2.5).
+    #
+    # Renseigné à l'ingestion, PAS déduit de la forme de l'id (« VTA-… ») :
+    # un artefact d'ingestion n'est pas une sémantique.
+    est_evenement_autonome: bool = False
 
 
 class DossierListItem(CamelModel):

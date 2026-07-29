@@ -87,6 +87,9 @@ class ScrutinParse:
     # vit sur senat.fr. Sans elle, la fiche retomberait sur les sources des
     # votes, moins utiles au lecteur (§7.5).
     source_dossier: SourceOfficielle | None = None
+    # Le vote ne porte sur aucun texte de loi (motion de censure, déclaration) :
+    # il est son propre dossier. Voir `Dossier.est_evenement_autonome`.
+    est_evenement_autonome: bool = False
 
 
 class AssembleeOpenDataClient:
@@ -371,6 +374,7 @@ def parse_scrutin(
     # 3) sinon (motion de censure, déclaration…), le scrutin est son propre
     #    dossier : c'est un événement autonome, légitime dans le fil.
     reco = reconciliation
+    est_evenement_autonome = False
 
     if dossier_ref:
         dossier_id = dossier_ref
@@ -398,6 +402,12 @@ def parse_scrutin(
         else:
             dossier_id = s["uid"]
             dossier_titre = dossier_titre_raw or objet.get("libelle") or objet_libelle
+            # Ni `dossierRef`, ni texte cité : ce vote ne porte sur aucun texte
+            # de loi. C'est une motion de censure, une déclaration — un
+            # événement autonome. Il n'a donc ni articles, ni exposé des motifs,
+            # ni trajectoire, et l'app doit masquer les questions qui n'ont pas
+            # d'objet plutôt que d'annoncer une information manquante (§2.5).
+            est_evenement_autonome = True
 
     decompte = (s.get("syntheseVote") or {}).get("decompte") or {}
     resultat = ResultatGlobal(
@@ -453,4 +463,5 @@ def parse_scrutin(
         theme=guess_theme(dossier_titre, objet_libelle),
         legislature=legislature,
         numero=numero,
+        est_evenement_autonome=est_evenement_autonome,
     )

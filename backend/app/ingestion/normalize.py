@@ -263,10 +263,20 @@ _RE_TEXTE_RATTACHEMENT = re.compile(
     r"(?:projet de loi|proposition de loi|proposition de r[ée]solution)\b.*$",
     re.IGNORECASE | re.DOTALL,
 )
-# Mention finale de procédure entre parenthèses (« (deuxième lecture) »,
+# Mentions finales de procédure entre parenthèses (« (deuxième lecture) »,
 # « (texte de la commission mixte paritaire) ») : à retirer de la clé de
 # regroupement pour qu'un même texte ne soit pas éclaté par lecture.
-_RE_MENTION_FINALE = re.compile(r"\s*\([^()]*\)\s*$")
+#
+# ⚠️ La source en ENCHAÎNE parfois deux : « …le droit à l'aide à mourir (seconde
+# délibération) (deuxième lecture). » Le motif doit donc être répétable — ancré
+# sur `$`, il n'en retirait qu'une, le titre gardait « (seconde délibération) »,
+# sa signature ne correspondait plus au titre officiel et la réconciliation
+# échouait : le texte se dédoublait en un `TXT-…` vide à côté de son vrai
+# dossier. Vécu sur l'aide à mourir, le PLF 2026 et Mayotte.
+#
+# Seule la FIN est concernée : une parenthèse au milieu du titre (« l'article 24
+# (supprimé) du projet de loi… ») fait partie de ce que la source désigne.
+_RE_MENTION_FINALE = re.compile(r"(?:\s*\([^()]*\))+\s*$")
 
 
 def texte_de_rattachement(objet: str) -> str | None:

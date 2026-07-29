@@ -88,6 +88,11 @@ async def _main(
             f"  {report.dossiers_orphelins_supprimes} dossier(s) orphelin(s) "
             "supprimé(s) (votes migrés vers leur vrai dossier)."
         )
+    if report.conduites_de_seance_ecartees:
+        print(
+            f"  {report.conduites_de_seance_ecartees} vote(s) de conduite de "
+            "séance écarté(s) du fil (suspension, seconde délibération)."
+        )
     if report.abrevs_non_resolues:
         # Fuite mesurée (§7.4) : abréviation de groupe au CR non résolue par
         # l'annuaire AMO → à ajouter à `_ALIAS_ABBREV` sur preuve, sans deviner.

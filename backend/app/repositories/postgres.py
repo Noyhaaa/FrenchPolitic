@@ -397,6 +397,7 @@ class PostgresDossierRepository(DossierRepository):
             circonscription=row.circonscription,
             depuis=row.depuis,
             portrait_url=row.portrait_url,
+            commission=row.commission,
             portrait=portrait,
             historique=historique,
         )

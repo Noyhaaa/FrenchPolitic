@@ -9,6 +9,18 @@ Exception assumée : les **députés** et leurs **votes nominatifs**
 dans l'autre sens (« tous les votes d'un député », statistiques sur 12 mois) :
 le lire depuis les payloads de scrutins imposerait de tout parcourir à chaque
 requête.
+
+⚠️ **Pas de colonne `updated_at`** — et ce n'est pas un oubli. L'ingestion écrit
+par `INSERT … ON CONFLICT DO UPDATE`, sur lequel le `onupdate` de SQLAlchemy ne
+s'applique pas ; seules les commandes de maintenance qui passent par l'ORM
+(`divisions`, `reformater`, `revalider`) la faisaient bouger. Un dossier ayant
+gagné trois votes gardait donc une date ancienne, un dossier dont on avait juste
+recalculé l'indice de division en affichait une fraîche : la colonne ne disait
+pas ce qu'elle avait l'air de dire, et personne ne pouvait s'y fier. La fraîcheur
+des données se lit dans `sync_run` (au grain du run) et l'évolution d'un dossier
+dans `mise_a_jour` (au grain de l'événement, §7.7). La rétablir n'aurait de sens
+que pour une synchro incrémentale (`?depuis=`), et il faudrait alors d'abord
+réparer les upserts.
 """
 from __future__ import annotations
 
@@ -56,10 +68,8 @@ class DossierRow(Base):
     desaccord_sources: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # Texte plié (minuscule, sans accents) pour la recherche ILIKE.
     search_index: Mapped[str] = mapped_column(Text, index=True)
+    # Première entrée en base. Pas de `updated_at` : cf. la note en tête de module.
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        server_default=func.now(), onupdate=func.now()
-    )
 
 
 class ScrutinRow(Base):
@@ -88,9 +98,6 @@ class ScrutinRow(Base):
         Float, index=True, nullable=True, default=None
     )
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        server_default=func.now(), onupdate=func.now()
-    )
 
 
 class GroupeRow(Base):
@@ -140,12 +147,12 @@ class DeputeRow(Base):
     # l'annuaire. Non vérifiable → NULL et l'app affiche les initiales : on
     # n'invente pas d'URL de portrait (§2.5).
     portrait_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Commission permanente (sénateurs : publiée par l'annuaire senat.fr ;
+    # députés : NULL, cf. `Depute.commission`).
+    commission: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Texte plié (minuscule, sans accents) pour la recherche ILIKE de l'annuaire.
     search_index: Mapped[str] = mapped_column(Text, index=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        server_default=func.now(), onupdate=func.now()
-    )
 
 
 class VoteDeputeRow(Base):

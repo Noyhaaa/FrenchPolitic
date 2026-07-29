@@ -387,6 +387,15 @@ export interface Dossier {
    * l'exposé. Source de la réponse Q4 ; jamais affiché brut.
    */
   dispositif?: DispositifTexte;
+  /**
+   * Ce dossier n'est pas un texte de loi mais un **événement autonome** :
+   * motion de censure, déclaration du Gouvernement. Il n'a ni articles, ni
+   * exposé des motifs — non pas parce qu'on ne les a pas trouvés, mais parce
+   * qu'ils n'existent pas. On masque alors les questions sans objet
+   * (« pourquoi ce texte ? », « qu'est-ce que ça change ? ») au lieu d'afficher
+   * « information non disponible », qui laisserait croire à une lacune (§2.5).
+   */
+  estEvenementAutonome?: boolean;
 }
 
 /**
@@ -532,10 +541,19 @@ export interface Depute {
   /** Couleur du groupe (même source que `PositionGroupe.couleur`). */
   groupeCouleur: string;
   circonscription: string;
-  /** Début de mandat (ISO), absent si non documenté. */
+  /**
+   * Début de mandat (ISO), absent si non documenté.
+   * ⚠️ Toujours absent au Sénat : l'annuaire senat.fr ne publie pas de date de
+   * mandat. Ce n'est pas un trou d'ingestion — le champ est simplement masqué.
+   */
   depuis?: string;
   /** Photo officielle si disponible — sinon l'app affiche les initiales. */
   portraitUrl?: string;
+  /**
+   * Commission permanente. Servie pour les **sénateurs** (l'annuaire senat.fr
+   * la publie) ; absente côté Assemblée pour l'instant. Absente = masquée (§2.5).
+   */
+  commission?: string;
 }
 
 /**

@@ -205,8 +205,10 @@ Six écrans du cœur de valeur :
    circonscription). L'effectif affiché est celui réellement servi, jamais
    « 577 » ni « 925 » en dur.
 6. **Fiche parlementaire** (`DeputeDetailScreen` → `useDepute`, `GET /deputes/{id}`) :
-   identité (groupe, circonscription, début de mandat — chaque champ masqué s'il
-   n'est pas documenté), puis le **portrait de vote** sur 12 mois glissants
+   identité (groupe, circonscription, **commission**, début de mandat — chaque
+   champ masqué s'il n'est pas documenté, et les deux chambres ne documentent pas
+   les mêmes : la **commission** n'existe qu'au Sénat, le **début de mandat** qu'à
+   l'Assemblée), puis le **portrait de vote** sur 12 mois glissants
    (`PortraitVoteCard` : votes exprimés, part **avec son groupe**, ventilation
    pour/abstention/contre avec légende) et l'**historique de vote**
    (`VoteHistoryFil` : fil groupé par mois, rail + nœud coloré par position,
@@ -264,7 +266,17 @@ dossier reconstitué à id stable `TXT-…` (dérivé de la **signature** du tit
 du simple fold — un même texte cité avec une apostrophe droite sur un scrutin et
 courbe sur un autre fusionne en un seul dossier, ne se scinde pas en deux) ;
 sinon singleton (motion de censure, déclaration — événements autonomes
-légitimes dans le fil). La réconciliation couvre la législature **courante et
+légitimes dans le fil, marqués `estEvenementAutonome`, cf. plus bas). ⚠️ Le
+titre cité est débarrassé de **toutes** ses mentions finales de procédure
+(`_RE_MENTION_FINALE`, répétable) : la source en **enchaîne** parfois deux
+(« …le droit à l'aide à mourir **(seconde délibération) (deuxième lecture)** »),
+et n'en retirer qu'une laissait « (seconde délibération) » dans le titre, dont
+la signature ne correspondait plus au titre officiel — le texte se **dédoublait**
+alors en un `TXT-…` vide à côté de son vrai dossier (vécu sur l'aide à mourir, le
+PLF 2026, le PLFSS 2025 et 2026, Mayotte, le narcotrafic : mesuré, **22 dossiers
+sur 54** rejoignent leur dossier officiel une fois la mention retirée). Une
+parenthèse **au milieu** du titre est en revanche conservée : elle fait partie de
+ce que la source désigne. La réconciliation couvre la législature **courante et
 la précédente** (archive `download_dossiers` téléchargée deux fois, best-effort
 sur la précédente) : un dossier **reporté après une dissolution** garde son
 `dossierRef` d'origine (cas réel : « simplification de la vie économique »,
@@ -276,7 +288,12 @@ l'archive amendements est justement le `dossierRef`). Le garde-fou d'ambiguïté
 de titre entre deux législatures. ~60 % des dossiers ont
 ainsi leur page officielle. On n'importe PAS les titres de l'archive (minuscules,
 fragmentés) : le libellé du scrutin est plus propre. Le fil ne montre donc que des
-textes/dossiers, jamais un amendement isolé. Les votes d'amendement sont classés à
+textes/dossiers, jamais un amendement isolé — ni un vote de **conduite de séance**
+(demande de suspension, de seconde délibération) : quand un tel vote deviendrait un
+dossier à lui seul, il est **écarté du fil** (`est_vote_de_conduite_de_seance`, la
+même liste fermée que la rangée « votes les plus disputés » — une seule référence
+pour les deux). Le même vote formulé pendant l'examen d'un texte reste, lui, un vote
+de ce dossier, à sa place dans sa liste. Les votes d'amendement sont classés à
 l'ingestion (`est_amendement` / `est_sous_amendement` sur l'objet officiel, avec
 extraction du numéro et de l'auteur quand ils sont sans ambiguïté) et chaque
 sous-amendement est **rattaché à son amendement parent** (« … à l'amendement
@@ -462,8 +479,19 @@ politique (§7.4). Les sénateurs vivent dans les **mêmes tables** que les dép
 (`depute`, `vote_depute`, `groupe`), discriminés par `chambre`, ids préfixés
 `SEN-…`. Commande autonome `python -m app.ingestion.senat` (~10 s pour
 40 scrutins), ou intégrée au run complet (`--sans-senat` pour s'en passer).
+L'annuaire livre aussi les `organismes` de chaque sénateur, d'où la **commission
+permanente** (`Depute.commission`, 346/348) : les sept permanentes portent un
+`ordre` 7001-7007, la commission des affaires européennes — à laquelle 41
+sénateurs appartiennent **en plus** de la leur — ouvre une autre série (8001), si
+bien que retenir le plus petit `ordre` donne la permanente sans lister de libellés
+en dur, qui vieilliraient mal.
+
 Hors périmètre pour l'instant : les **débats du Sénat** (donc pas de Q2 sur un
 dossier purement sénatorial) et l'enrichissement des **amendements** (base Ameli).
+⚠️ Le **début de mandat** d'un sénateur n'est pas un trou d'ingestion : `senateurs.json`
+ne publie **aucune date de mandat** (vérifié à la source). Le combler demanderait
+une autre source (`data.senat.fr`, ODSEN) — d'ici là `depuis` reste `None` et
+l'app masque le champ, ce qui est le comportement correct (§2.5).
 
 **Trajectoire au Parlement** (`app/ingestion/navette.py`) — la frise est
 calculée à l'ingestion depuis les **`actesLegislatifs`** des
@@ -636,8 +664,17 @@ masquée), `miseAJour?` (badge §7.7),
 `exposeMotifs?` (parole de l'auteur, bloc attribué) et `dispositif?` (les
 articles du texte — fait officiel, jamais affiché brut, source de la Q4),
 `titreOfficiel` (la formulation d'origine, toujours conservée et affichée sur la
-fiche §7.5), `titreClair` (titre d'affichage raccourci) et `accroche?`
-(le but du texte, tiré de la Q1 — **optionnelle**, absente = ligne masquée §2.5). La partition
+fiche §7.5), `titreClair` (titre d'affichage raccourci), `accroche?`
+(le but du texte, tiré de la Q1 — **optionnelle**, absente = ligne masquée §2.5)
+et `estEvenementAutonome` (motion de censure, déclaration : le dossier ne porte
+**aucun texte de loi**). Ce dernier n'est pas un détail : une motion n'a ni
+articles, ni exposé des motifs, ni trajectoire — non pas parce qu'on ne les a pas
+trouvés, mais parce qu'ils n'existent pas. `QuestionsCard` **retire** alors les
+questions sans objet (« pourquoi ce texte ? », « qu'est-ce que ça change ? ») et
+renumérote les restantes, au lieu d'afficher « information non disponible », qui
+ferait passer une absence de sens pour une lacune de nos données (§2.5). Le champ
+est posé à l'ingestion — **jamais déduit de la forme de l'id** (`VTA-…`) : un
+artefact d'ingestion n'est pas une sémantique. La partition
 texte / amendement / sous-amendement se fait à l'ingestion (`est_amendement`,
 `est_sous_amendement`, `numero_amendement_parent` sur l'objet du scrutin).
 Un `Scrutin` est **vote-niveau** : `dossierId`, `objet` (ce sur quoi on a voté),
@@ -659,8 +696,12 @@ recherche renvoient un `DossierListItem` allégé (dont `nombreScrutins`,
 voté le texte, sans quoi une carte du fil se lirait comme un vote de
 l'Assemblée ; il ne porte PAS `titreOfficiel`, d'où la nature calculée côté API).
 Côté **parlementaires** : `Depute` (identité + `chambre` + groupe +
-circonscription — le type garde son nom historique, `chambre` est le
-discriminant), `DeputeListItem` (annuaire — **photo comprise**, la liste doit
+circonscription + `commission?` + `depuis?` — le type garde son nom historique,
+`chambre` est le discriminant ; ⚠️ `commission` n'est servie qu'au **Sénat**
+(l'annuaire senat.fr la publie dans `organismes` : 346/348) et `depuis` qu'à
+l'**Assemblée** — l'annuaire du Sénat **ne publie aucune date de mandat**, ce
+n'est donc pas un trou d'ingestion à combler mais une absence de source),
+`DeputeListItem` (annuaire — **photo comprise**, la liste doit
 être identifiable sans charger chaque fiche), `DeputeDetail` (= `Depute` +
 `portrait` + `historique` paginé), `PortraitVote` (12 mois glissants : `votes`,
 `pour` / `contre` / `abstention`, `cohesionGroupe` — **pas de participation**, et
@@ -683,6 +724,28 @@ camelCase des schémas Pydantic backend, à répercuter des deux côtés).
   l'open data AN, cf. `amendements.py`) ; planification du job de synchro
   (plusieurs fois/jour). *(La classification de thème est déjà affinée par un LLM
   local — cf. ci-dessous.)*
+- **Commission des députés** : `Depute.commission` n'est servie qu'au Sénat.
+  Côté AN, l'archive AMO porte les mandats d'organe `COMPER`, mais
+  `GroupResolver` ne garde que les organes `codeType == "GP"` — il faudrait
+  l'étendre pour résoudre un `organeRef` de commission en libellé. Tant que ce
+  n'est pas fait, la fiche d'un député masque simplement la ligne (§2.5).
+- **Dossiers `TXT-` restants** (44 après le correctif des mentions finales, qui
+  en a résorbé 10). Deux causes **mesurées**, de natures opposées :
+  - **32** dont le titre est réellement absent de l'archive, dont quelques
+    **coquilles de la source** (« de **ss**implification », « fin **des**
+    gestion ») que `signature_titre` ne rattrape pas. Une distance d'édition
+    tolérante à 1 caractère les récupérerait, au prix d'un risque de faux
+    appariement à évaluer (§2.5 : ne jamais deviner).
+  - **12** que l'archive contient pourtant, mais que le **garde-fou d'ambiguïté
+    entre législatures** écarte : le même titre existe en L17 et en L16 (cas
+    mesuré : « lutter contre la pédocriminalité » → `DLR5L17N50627` **et**
+    `DLR5L16N49866`), donc la table s'abstient. C'est le **prix du repli sur la
+    législature précédente** — il rattrape les textes reportés après une
+    dissolution, mais fait perdre ceux dont le titre a été réutilisé. Piste :
+    quand les candidats s'étalent sur plusieurs législatures, préférer la
+    **courante** — ce n'est pas deviner (un scrutin de la 17e vote un dossier de
+    la 17e ; un dossier L16 n'est pertinent que si AUCUN candidat L17 n'existe,
+    ce qui est justement le cas du report après dissolution).
 - **Sénat, suite** : les **comptes rendus** (`data.senat.fr/data/debats/cri.zip`,
   schéma XML distinct de SyceronBrut) pour que la Q2 « principal désaccord »
   existe aussi sur un dossier purement sénatorial ; l'enrichissement des

@@ -343,10 +343,18 @@ export function DossierDetailScreen() {
             n'est documentée (§2.5). */}
         {phases.length > 0 ? <TrajectoireNavette phases={phases} /> : null}
 
-        {/* 2. Le vote en 4 questions — l'entrée de compréhension (§2.2) :
+        {/* 2. Le vote en questions — l'entrée de compréhension (§2.2) :
             pourquoi / désaccord / résultat / changement, en langage simple.
-            Réponse absente = « information non disponible » (§2.5). */}
-        {resume.questions ? <QuestionsCard questions={resume.questions} /> : null}
+            Réponse absente = « information non disponible » (§2.5).
+            Sur un événement autonome (motion de censure, déclaration), les
+            questions qui portent sur un texte sont RETIRÉES : il n'y a pas de
+            texte, ce n'est donc pas une donnée manquante. */}
+        {resume.questions ? (
+          <QuestionsCard
+            questions={resume.questions}
+            evenementAutonome={dossier.estEvenementAutonome}
+          />
+        ) : null}
 
         {/* 2ter. Exposé des motifs — le « pourquoi » selon l'AUTEUR du texte.
             Bloc distinct et attribué (contenu non neutre §4.3), placé après le

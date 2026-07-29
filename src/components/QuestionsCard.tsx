@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import { Fragment, ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { colors, radius, spacing, typography } from '@/theme';
 import type { ArgumentGroupe, PositionVote, QuestionsCitoyennes } from '@/types';
@@ -7,6 +7,12 @@ import { SourceLink } from './SourceLink';
 
 interface Props {
   questions: QuestionsCitoyennes;
+  /**
+   * Le dossier est un événement autonome (motion de censure, déclaration) :
+   * il n'a pas de texte, donc les questions qui portent sur un texte n'ont pas
+   * d'objet. Voir `Dossier.estEvenementAutonome`.
+   */
+  evenementAutonome?: boolean;
 }
 
 const COULEUR_SENS: Record<PositionVote, string> = {
@@ -78,7 +84,7 @@ function QARow({
  * pris la parole — mesuré en base, ils sont en moyenne 6 de moins que les
  * groupes ayant voté.
  */
-export function QuestionsCard({ questions }: Props) {
+export function QuestionsCard({ questions, evenementAutonome }: Props) {
   const desaccord = questions.desaccord;
   const objet = questions.desaccordObjet;
   const voteAncre = objet ? libelleScrutin(objet) : undefined;
@@ -96,17 +102,31 @@ export function QuestionsCard({ questions }: Props) {
   const questionDesaccord = unSeulSens
     ? 'Ce que les groupes ont dit'
     : 'Quel était le principal désaccord ?';
-  return (
-    <View style={styles.card}>
-      <Text style={[typography.overline, styles.title]}>
-        Le vote en 4 questions
-      </Text>
+  // Les questions réellement posées. Sur un événement autonome (motion de
+  // censure, déclaration), « pourquoi ce TEXTE » et « qu'est-ce que ça change »
+  // n'ont pas d'objet : il n'y a pas de texte. On les retire au lieu de
+  // répondre « information non disponible », qui ferait passer une absence de
+  // sens pour une lacune de nos données (§2.5). Les restantes se renumérotent —
+  // une pastille « 2 » sans « 1 » se lirait comme un bloc manquant.
+  const blocs: { cle: string; rendu: (n: number) => ReactNode }[] = [];
 
-      <QARow n={1} question="Pourquoi ce texte a-t-il été débattu ?" reponse={questions.pourquoi} />
+  if (!evenementAutonome) {
+    blocs.push({
+      cle: 'pourquoi',
+      rendu: (n) => (
+        <QARow
+          n={n}
+          question="Pourquoi ce texte a-t-il été débattu ?"
+          reponse={questions.pourquoi}
+        />
+      ),
+    });
+  }
 
-      <View style={styles.sep} />
-
-      <QARow n={2} question={questionDesaccord}>
+  blocs.push({
+    cle: 'desaccord',
+    rendu: (n) => (
+      <QARow n={n} question={questionDesaccord}>
         {desaccord && desaccord.length > 0 ? (
           <>
             {libelleAncre ? (
@@ -153,17 +173,24 @@ export function QuestionsCard({ questions }: Props) {
           </Text>
         )}
       </QARow>
+    ),
+  });
 
-      <View style={styles.sep} />
+  blocs.push({
+    cle: 'resultat',
+    rendu: (n) => (
+      <QARow n={n} question="Quel est le résultat du vote ?" reponse={questions.resultat} />
+    ),
+  });
 
-      <QARow n={3} question="Quel est le résultat du vote ?" reponse={questions.resultat} />
-
-      <View style={styles.sep} />
-
-      {/* Q4 : la réponse vient du dispositif officiel (fait — elle porte alors
-          son lien vers le texte déposé, §7.5) ou, à défaut, de l'exposé des
-          motifs (parole de l'auteur, signalée par son préfixe §4.3). */}
-      <QARow n={4} question="Qu'est-ce que ça change concrètement ?">
+  if (!evenementAutonome) {
+    blocs.push({
+      cle: 'changement',
+      rendu: (n) => (
+        // Q4 : la réponse vient du dispositif officiel (fait — elle porte alors
+        // son lien vers le texte déposé, §7.5) ou, à défaut, de l'exposé des
+        // motifs (parole de l'auteur, signalée par son préfixe §4.3).
+        <QARow n={n} question="Qu'est-ce que ça change concrètement ?">
         {questions.changement ? (
           <>
             <Text style={styles.reponse}>{questions.changement}</Text>
@@ -178,7 +205,22 @@ export function QuestionsCard({ questions }: Props) {
             Information non disponible.
           </Text>
         )}
-      </QARow>
+        </QARow>
+      ),
+    });
+  }
+
+  return (
+    <View style={styles.card}>
+      <Text style={[typography.overline, styles.title]}>
+        Le vote en {blocs.length} questions
+      </Text>
+      {blocs.map((bloc, i) => (
+        <Fragment key={bloc.cle}>
+          {i > 0 ? <View style={styles.sep} /> : null}
+          {bloc.rendu(i + 1)}
+        </Fragment>
+      ))}
     </View>
   );
 }
