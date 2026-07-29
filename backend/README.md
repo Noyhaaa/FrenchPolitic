@@ -87,6 +87,12 @@ python -m app.ingestion.divisions           # --dry-run pour voir le classement
 # `app/ingestion/initiative.py` changent.
 python -m app.ingestion.initiatives         # --dry-run pour voir la répartition
 
+# Renseigne « où en est le texte » (Dossier.etat) sur les dossiers déjà en base,
+# et pose la source Légifrance des lois promulguées. Même archive (~10 Mo), même
+# coût : ni scrutins, ni PDF, ni LLM. À rejouer quand les règles de
+# `etat_du_texte` changent.
+python -m app.ingestion.etats               # --dry-run pour voir la répartition
+
 # L'API sert alors la base ingérée (REPOSITORY_BACKEND=postgres via .env).
 uvicorn app.main:app --reload
 ```
@@ -245,6 +251,56 @@ avis du Conseil constitutionnel, qui ne sont ni adoption ni rejet — laisse
 l'étape **sans statut** (§2.5). Repli pour les dossiers sans actes (`TXT-…`,
 `SEN-…`) : les mentions de navette des objets de vote, **distinguées par
 chambre** (« Première lecture » à l'Assemblée et au Sénat sont deux étapes).
+
+⚠️ **La copie de la législature courante prime.** 193 dossiers figurent dans les
+deux archives téléchargées (un texte reporté après la dissolution garde son
+`dossierRef` L16), mais celle de la législature précédente est un instantané
+**figé** : mesuré, 36 d'entre eux y sont sans leur promulgation, que l'archive
+courante documente. La première copie vue gagne, et la liste commence par la
+courante.
+
+### Où en est le texte (`etat_du_texte`, même module)
+
+La frise, seule, ne raconte que le **passé** : un lecteur devant une loi
+promulguée voyait la même chaîne de pastilles grises qu'un texte encore en
+navette. `etat_du_texte` lit dans les **mêmes actes** l'état d'aujourd'hui —
+liste fermée, premier signal positif rencontré :
+
+| État | Signal dans l'archive | Mesuré |
+|---|---|---|
+| `promulgue` | `PROM-PUB` (+ `codeLoi`, `infoJO`) | 96 |
+| `en_navette` | la dernière étape retenue, telle quelle | 126 |
+| `resolution` | `procedureParlementaire` 8 ou 22 + étape conclue | 21 |
+| `conseil_constitutionnel` | `CC-SAISIE-*` sans `CC-CONCLUSION` | 7 |
+| `retire` | `…RTRINI` **dans la dernière étape** | 4 |
+| *(aucun)* | dossier sans actes (`TXT-…`, `SEN-…`) | 74 |
+
+Soit **254/328 dossiers** qui répondent à « et maintenant ? ».
+
+⚠️ **Aucun champ ne décrit une étape à venir**, et un test le vérifie. Le
+calendrier parlementaire est une décision politique (inscription à l'ordre du
+jour, convocation d'une CMP), pas une donnée lisible dans l'archive : annoncer
+« prochaine étape : le Sénat » serait une prédiction (§2.5). Un texte en
+circulation reçoit son **dernier point documenté**, suivi de ce que la source ne
+dit pas (« Aucune étape postérieure n'est publiée »).
+
+Deux choix qui ne vont pas de soi :
+
+- **`resolution` mérite son état.** Une résolution est conclue dès sa lecture
+  unique — ni transmise à l'autre chambre, ni promulguée. La ranger dans
+  `en_navette` ferait passer 21 textes **terminés** pour des textes en attente.
+  Le code de procédure est le seul indice retenu : on ne devine pas la nature
+  d'un texte à partir du libellé de son étape.
+- **Un `RTRINI` ne compte que dans la dernière étape.** Un retrait suivi
+  d'autres actes ne conclut rien.
+
+Le `PROM-PUB` donne en prime la **source Légifrance** (`source_legifrance`,
+partagée par l'ingestion et le rattrapage) : le premier lien de l'app vers le
+texte **en vigueur** (§7.5) — jusqu'ici on ne remontait qu'au dossier et aux
+scrutins. L'URL est celle que l'Assemblée publie dans `infoJO`, jamais une URL
+construite ici ; elle n'est pas vérifiée à l'ingestion (Légifrance répond 403 à
+tout script, challenge Cloudflare — ce n'est pas une preuve de lien mort), et la
+référence écrite (n° + date + JO) reste affichée à côté.
 
 ### Qui porte le texte (`app/ingestion/initiative.py`)
 
@@ -490,6 +546,7 @@ app/
     senat.py         Scrutins publics du Sénat (senat.fr) : parse_page_scrutin + parse_scrutin_senat (purs) + CLI autonome
     senateurs.py     Référentiel des sénateurs + votes nominatifs (purs) — jamais de « contre son groupe »
     navette.py       Trajectoire au Parlement : actes législatifs officiels (2 chambres), repli sur les objets de vote
+                     + etat_du_texte : où en est le texte AUJOURD'HUI (jamais l'étape suivante) + source Légifrance
     debats.py        Comptes rendus (SyceronBrut) : explications de vote par groupe + liaison au vote
     amendements.py   Contenu des amendements (dispositif + exposé sommaire + article visé) : archive AN → index (dossierRef, numéro)
     textes_an.py     Exposé des motifs ET dispositif : uid → URL du PDF officiel → extraction (pypdf)

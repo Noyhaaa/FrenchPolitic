@@ -21,14 +21,21 @@ Deux voies, dans cet ordre :
 Règle d'or (§2.5) : une étape n'apparaît que si la source la documente, et son
 statut n'est posé que si la source le dit. Un libellé de conclusion inconnu
 laisse l'étape **sans** statut plutôt que de la ranger au jugé.
+
+Le module calcule aussi **où en est le texte aujourd'hui** (`etat_du_texte`) :
+la frise, à elle seule, ne dit que le passé et laisse le lecteur sans réponse à
+« et maintenant ? ». L'état vient des mêmes actes — promulgation, retrait,
+saisine du Conseil constitutionnel, résolution conclue, ou simplement la
+dernière étape enregistrée. ⚠️ Il ne décrit **jamais** l'étape suivante :
+l'inscription à l'ordre du jour est une décision politique, pas une donnée.
 """
 from __future__ import annotations
 
 import re
 
-from app.domain.enums import Chambre, StatutScrutin
+from app.domain.enums import Chambre, StatutScrutin, TypeSource
 from app.ingestion.normalize import as_list
-from app.schemas import PhaseScrutin, Scrutin
+from app.schemas import EtatTexte, PhaseScrutin, Scrutin, SourceOfficielle
 from app.utils.text import fold
 
 # ---------------------------------------------------------------------------
@@ -130,24 +137,28 @@ def _conclusion(acte: dict) -> tuple[str | None, StatutScrutin | None]:
     return date_decision or (min(dates) if dates else None), statut
 
 
+def _etapes_retenues(actes_legislatifs: object) -> list[dict]:
+    """Les actes de premier niveau qui sont des étapes de navette, dans l'ordre
+    de l'archive — l'ordre procédural officiel."""
+    if isinstance(actes_legislatifs, dict):
+        actes = as_list(actes_legislatifs.get("acteLegislatif"))
+    else:
+        actes = as_list(actes_legislatifs)
+    return [
+        a
+        for a in actes
+        if isinstance(a, dict) and (a.get("codeActe") or "") in _CHAMBRE_PAR_ACTE
+    ]
+
+
 def phases_depuis_actes(actes_legislatifs: object) -> list[PhaseScrutin]:
     """Étapes de la navette depuis les `actesLegislatifs` du dossier.
 
     L'ordre est celui de l'archive — l'ordre procédural officiel. On ne trie pas
     par date : les nœuds d'étape n'en portent pas (elle vit dans leurs
     descendants) et un tri les rejetterait arbitrairement en fin de frise."""
-    if isinstance(actes_legislatifs, dict):
-        actes = as_list(actes_legislatifs.get("acteLegislatif"))
-    else:
-        actes = as_list(actes_legislatifs)
-
     phases: list[PhaseScrutin] = []
-    for acte in actes:
-        if not isinstance(acte, dict):
-            continue
-        code = acte.get("codeActe") or ""
-        if code not in _CHAMBRE_PAR_ACTE:
-            continue
+    for acte in _etapes_retenues(actes_legislatifs):
         label = (acte.get("libelleActe") or {}).get("nomCanonique")
         if not label:
             continue
@@ -155,12 +166,135 @@ def phases_depuis_actes(actes_legislatifs: object) -> list[PhaseScrutin]:
         phases.append(
             PhaseScrutin(
                 label=label,
-                chambre=_CHAMBRE_PAR_ACTE[code],
+                chambre=_CHAMBRE_PAR_ACTE[acte["codeActe"]],
                 statut=statut,
                 date=date,
             )
         )
     return phases
+
+
+# ---------------------------------------------------------------------------
+# Où en est le texte aujourd'hui — la clôture de la frise
+# ---------------------------------------------------------------------------
+
+# Codes de `procedureParlementaire` dont l'aboutissement est la **résolution**
+# et non la loi : elle est conclue dès sa lecture unique — ni transmise à
+# l'autre chambre, ni promulguée. Sans ce cas, une résolution adoptée serait
+# annoncée « en cours d'examen », ce qui la ferait passer pour un texte en
+# attente alors qu'elle est terminée.
+_PROCEDURES_RESOLUTION = frozenset({"8", "22"})
+
+
+def _descendants(noeud: object) -> list[dict]:
+    """Tous les nœuds d'acte sous `noeud`, lui compris."""
+    trouves: list[dict] = []
+
+    def descendre(courant: object) -> None:
+        if isinstance(courant, list):
+            for element in courant:
+                descendre(element)
+        elif isinstance(courant, dict):
+            trouves.append(courant)
+            for valeur in courant.values():
+                descendre(valeur)
+
+    descendre(noeud)
+    return trouves
+
+
+def _premier(noeuds: list[dict], predicat) -> dict | None:
+    return next((n for n in noeuds if predicat(n.get("codeActe") or "")), None)
+
+
+def etat_du_texte(
+    actes_legislatifs: object, procedure: object = None
+) -> EtatTexte | None:
+    """Où en est le texte aujourd'hui, d'après ses actes officiels.
+
+    Liste fermée d'états, au **premier signal positif rencontré**. Chacun est un
+    fait écrit dans l'archive ; aucun ne décrit une étape à venir — le calendrier
+    parlementaire est une décision politique, pas une donnée (§2.5).
+
+    `None` quand aucun acte ne documente d'étape (dossiers reconstitués
+    « TXT-… », d'origine sénatoriale « SEN-… », motions) : le bloc disparaît."""
+    etapes = _etapes_retenues(actes_legislatifs)
+    if not etapes:
+        return None
+    tous = _descendants(actes_legislatifs)
+
+    # 1. Promulguée : l'archive donne le numéro de la loi, sa date, celle du
+    #    Journal officiel et l'URL Légifrance — mesuré présents ensemble sur
+    #    96/96 des dossiers promulgués, donc rien à combler.
+    promulgation = _premier(tous, lambda c: c == "PROM-PUB")
+    if promulgation is not None:
+        info_jo = promulgation.get("infoJO") or {}
+        date_jo = info_jo.get("dateJO")
+        return EtatTexte(
+            etat="promulgue",
+            date=_jour(promulgation.get("dateActe")),
+            numero_loi=promulgation.get("codeLoi"),
+            date_journal_officiel=date_jo[:10] if isinstance(date_jo, str) else None,
+            url_legifrance=info_jo.get("urlLegifrance"),
+        )
+
+    derniere = etapes[-1]
+    label_dernier = (derniere.get("libelleActe") or {}).get("nomCanonique")
+    date_dernier, statut_dernier = _conclusion(derniere)
+
+    # 2. Initiative retirée par son auteur — mais seulement si le retrait est
+    #    dans la DERNIÈRE étape : un retrait suivi d'autres actes ne conclut
+    #    rien (le dossier a continué sur un autre texte).
+    retrait = _premier(_descendants(derniere), lambda c: c.endswith("RTRINI"))
+    if retrait is not None:
+        return EtatTexte(etat="retire", date=_jour(retrait.get("dateActe")))
+
+    # 3. Devant le Conseil constitutionnel : saisi, sans conclusion publiée. On
+    #    dit qu'il est saisi, jamais ce qu'il décidera ni quand.
+    saisine = _premier(tous, lambda c: c.startswith("CC-SAISIE"))
+    if saisine is not None and _premier(tous, lambda c: c == "CC-CONCLUSION") is None:
+        return EtatTexte(
+            etat="conseil_constitutionnel", date=_jour(saisine.get("dateActe"))
+        )
+
+    code = procedure.get("code") if isinstance(procedure, dict) else None
+    # 4. Résolution conclue : son parcours s'arrête là, par nature.
+    if code in _PROCEDURES_RESOLUTION and statut_dernier is not None:
+        return EtatTexte(
+            etat="resolution",
+            date=date_dernier,
+            etape=label_dernier,
+            chambre=_CHAMBRE_PAR_ACTE[derniere["codeActe"]],
+            statut=statut_dernier,
+        )
+
+    # 5. Sinon : la dernière étape enregistrée, telle quelle. C'est le dernier
+    #    point que la source documente — pas une promesse de suite.
+    return EtatTexte(
+        etat="en_navette",
+        date=date_dernier,
+        etape=label_dernier,
+        chambre=_CHAMBRE_PAR_ACTE[derniere["codeActe"]],
+        statut=statut_dernier,
+    )
+
+
+def source_legifrance(etat: EtatTexte | None) -> SourceOfficielle | None:
+    """La loi telle qu'elle est entrée en vigueur (§7.5), quand il y en a une.
+
+    C'est le premier lien de l'app vers le **texte en vigueur** — jusqu'ici on
+    ne pouvait remonter qu'au dossier et aux scrutins. L'URL est celle que
+    l'Assemblée publie elle-même dans `infoJO`, jamais une URL construite ici.
+
+    Partagée par l'ingestion et la commande de rattrapage, pour que les deux
+    posent exactement la même source."""
+    if etat is None or etat.etat != "promulgue" or not etat.url_legifrance:
+        return None
+    return SourceOfficielle(
+        type=TypeSource.texte,
+        libelle="Loi publiée au Journal officiel (Légifrance)",
+        url=etat.url_legifrance,
+    )
 
 
 # ---------------------------------------------------------------------------

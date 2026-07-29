@@ -67,6 +67,29 @@ def test_dossier_dit_qui_porte_le_texte(client):
     assert client.get("/dossiers/dos-ecoles-2026").json()["initiative"] is None
 
 
+def test_dossier_dit_ou_en_est_le_texte(client):
+    """L'état traverse l'API en camelCase — la frise dit le passé, lui le présent.
+
+    Trois formes dans le seed : une loi promulguée (avec sa référence complète et
+    sa source Légifrance, §7.5), un texte encore en circulation, et un dossier
+    sans état — dont la fiche masque le bloc (§2.5).
+    """
+    loi = client.get("/dossiers/dos-sante-2026").json()
+    assert loi["etat"]["etat"] == "promulgue"
+    assert loi["etat"]["numeroLoi"] == "2026-630"
+    assert loi["etat"]["dateJournalOfficiel"] == "2026-07-14"
+    # Le seul lien de l'app vers le texte tel qu'il est entré en vigueur.
+    assert any(s["url"] == loi["etat"]["urlLegifrance"] for s in loi["sources"])
+
+    en_cours = client.get("/dossiers/dos-energie-2026").json()["etat"]
+    assert en_cours["etat"] == "en_navette"
+    assert en_cours["etape"] == "Commission Mixte Paritaire"
+    # Rien ne décrit l'étape suivante : ce n'est pas une donnée (§2.5).
+    assert en_cours["numeroLoi"] is None
+
+    assert client.get("/dossiers/dos-ecoles-2026").json()["etat"] is None
+
+
 def test_amendement_scrutin_accessible(client):
     # Le vote d'un amendement (lié via scrutinId) est servi comme un scrutin.
     dossier = client.get("/dossiers/dos-logement-2026").json()

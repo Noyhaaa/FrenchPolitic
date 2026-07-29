@@ -228,10 +228,16 @@ export function DossierDetailScreen() {
   // Badge de tête : la phase précise si elle est documentée, sinon le statut du
   // dossier. Une phase peut être connue sans statut (étape en cours) — on
   // retombe alors sur celui du dossier plutôt que d'afficher un badge vide.
-  const badge = {
-    label: dossier.phase?.label,
-    statut: dossier.phase?.statut ?? dossier.statut,
-  };
+  // Une loi promulguée passe devant tout le reste : « Adopté » (le résultat du
+  // dernier vote) est exact mais laisse croire que le texte est encore en
+  // chemin, alors que la source dit qu'il est arrivé au bout.
+  const badge =
+    dossier.etat?.etat === 'promulgue'
+      ? { label: 'Promulguée', statut: 'adopte' as const }
+      : {
+          label: dossier.phase?.label,
+          statut: dossier.phase?.statut ?? dossier.statut,
+        };
   // Le vote décisif (sur l'ensemble du texte) sort de la liste : mis en avant
   // en tête de section pour que l'utilisateur voie quel vote a tranché — les
   // autres votes (articles, motions…) restent en liste compacte.
@@ -351,8 +357,11 @@ export function DossierDetailScreen() {
             dossier (1re lecture à l'Assemblée puis au Sénat, CMP, Conseil
             constitutionnel…), calculée à l'ingestion. Le statut d'une étape
             n'est posé que si la source le documente. Masquée si aucune étape
-            n'est documentée (§2.5). */}
-        {phases.length > 0 ? <TrajectoireNavette phases={phases} /> : null}
+            n'est documentée (§2.5). Elle se clôt sur l'état actuel du texte —
+            la frise dit le passé, `etat` répond à « et maintenant ? ». */}
+        {phases.length > 0 || dossier.etat ? (
+          <TrajectoireNavette phases={phases} etat={dossier.etat} />
+        ) : null}
 
         {/* 2. Le vote en questions — l'entrée de compréhension (§2.2) :
             pourquoi / désaccord / résultat / changement, en langage simple.

@@ -130,6 +130,44 @@ class PhaseScrutin(CamelModel):
     date: str | None = None  # ISO 8601
 
 
+class EtatTexte(CamelModel):
+    """Où en est le texte **aujourd'hui** (§3.2) — le pendant de `PhaseScrutin`.
+
+    La frise dit le passé ; cet objet dit le présent. Il est lu dans les mêmes
+    `actesLegislatifs` officiels (cf. `app.ingestion.navette`), et n'existe que
+    si l'un d'eux le documente — sinon le bloc disparaît (§2.5).
+
+    ⚠️ **Aucun champ ne décrit une étape à venir**, et c'est délibéré :
+    l'inscription à l'ordre du jour est une décision politique, pas une donnée.
+    Annoncer « prochaine étape : le Sénat » serait une prédiction. On dit où le
+    texte **est**, jamais où il ira.
+
+    Le cas `resolution` mérite son état : une résolution est conclue dès sa
+    lecture unique — elle n'est ni transmise à l'autre chambre ni promulguée.
+    La ranger dans `en_navette` la ferait passer pour un texte en attente.
+    """
+
+    etat: Literal[
+        "promulgue",
+        "resolution",
+        "retire",
+        "conseil_constitutionnel",
+        "en_navette",
+    ]
+    # Date de l'acte qui fonde l'état (promulgation, retrait, saisine, dernière
+    # étape connue), ISO 8601.
+    date: str | None = None
+    # Libellé officiel de l'étape concernée (`en_navette`, `resolution`).
+    etape: str | None = None
+    chambre: Chambre | None = None
+    statut: StatutScrutin | None = None
+    # Loi promulguée : la référence publiée au Journal officiel. Les trois vont
+    # ensemble — l'archive les fournit toujours conjointement.
+    numero_loi: str | None = None  # « 2026-630 »
+    date_journal_officiel: str | None = None
+    url_legifrance: str | None = None
+
+
 class ArgumentGroupe(CamelModel):
     """La position d'un groupe dans le débat : son sens de vote (factuel, issu
     du scrutin) et l'argument qu'il a lui-même donné (§7.4).
@@ -366,6 +404,9 @@ class Dossier(CamelModel):
     # fiche). Vide quand aucune étape n'est documentée — la frise est alors
     # masquée plutôt que devinée (§2.5).
     trajectoire: list[PhaseScrutin] = []
+    # Où en est le texte aujourd'hui — la clôture de la frise. Absent pour les
+    # dossiers sans actes législatifs (« TXT-… », « SEN-… ») : bloc masqué (§2.5).
+    etat: EtatTexte | None = None
     theme: str
     temps_lecture_sec: int
     date_dernier_scrutin: str

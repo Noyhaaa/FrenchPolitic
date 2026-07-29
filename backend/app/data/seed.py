@@ -13,6 +13,7 @@ from app.schemas import (
     ChangementTexte,
     Depute,
     Dossier,
+    EtatTexte,
     GroupeListItem,
     Initiative,
     MiseAJourDossier,
@@ -498,6 +499,13 @@ SEED_DOSSIERS: list[Dossier] = [
             ),
             PhaseScrutin(label="Commission Mixte Paritaire", date="2026-07-20"),
         ],
+        # Texte encore en circulation : on donne le dernier point documenté, et
+        # rien de plus — l'étape suivante n'est pas une donnée (§2.5).
+        etat=EtatTexte(
+            etat="en_navette",
+            date="2026-07-20",
+            etape="Commission Mixte Paritaire",
+        ),
         scrutins=[
             _resume_scrutin("SEN-2026-118"),
             _resume_scrutin("scr-2026-0410"),
@@ -572,12 +580,29 @@ SEED_DOSSIERS: list[Dossier] = [
         titre_clair="Lutter contre les déserts médicaux",
         accroche="Encourager l'installation de médecins dans les zones qui en manquent.",
         statut="adopte",
+        # Texte allé au bout : promulgué. C'est la réponse à « et maintenant ? »
+        # que la frise seule ne donne pas — et la référence de la loi permet de
+        # la retrouver même si le lien Légifrance vieillit (§7.5).
+        etat=EtatTexte(
+            etat="promulgue",
+            date="2026-07-13",
+            numero_loi="2026-630",
+            date_journal_officiel="2026-07-14",
+            url_legifrance="https://www.legifrance.gouv.fr/jorf/id/JORFTEXT_SEED",
+        ),
         theme="Santé",
         temps_lecture_sec=35,
         date_dernier_scrutin="2026-07-03T09:45:00Z",
         scrutins=[_resume_scrutin("scr-2026-0398")],
         amendements=[],
-        sources=_sources("texte", "debats"),
+        sources=[
+            *_sources("texte", "debats"),
+            SourceOfficielle(
+                type="texte",
+                libelle="Loi publiée au Journal officiel (Légifrance)",
+                url="https://www.legifrance.gouv.fr/jorf/id/JORFTEXT_SEED",
+            ),
+        ],
         resume=ResumeScrutin(
             titre_clair="Lutter contre les déserts médicaux",
             resume=[

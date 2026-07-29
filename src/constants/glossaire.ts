@@ -320,6 +320,27 @@ export const GLOSSAIRE: TermeGlossaire[] = [
     voisins: ['Projet de loi'],
   },
   {
+    id: 'resolution',
+    libelle: 'Résolution',
+    nature: 'n.f.',
+    categorie: 'procedure',
+    definition:
+      'Un texte par lequel une chambre exprime une position, sans créer de règle de droit.',
+    etapes: [
+      {
+        titre: 'Une seule lecture',
+        detail:
+          'La chambre l’examine et la vote en lecture unique. Elle n’est pas transmise à l’autre chambre.',
+      },
+      {
+        titre: 'Le parcours s’arrête au vote',
+        detail:
+          'Une résolution n’est ni promulguée ni publiée comme une loi : elle n’oblige personne.',
+      },
+    ],
+    voisins: ['Lecture unique', 'Promulgation'],
+  },
+  {
     id: 'scrutin-public',
     libelle: 'Scrutin public',
     nature: 'n.m.',
@@ -392,6 +413,7 @@ const MOTIFS: readonly { motif: string; id: string }[] = [
   { motif: 'commission mixte paritaire', id: 'commission-mixte-paritaire' },
   { motif: 'conseil constitutionnel', id: 'conseil-constitutionnel' },
   { motif: 'promulgation', id: 'promulgation' },
+  { motif: 'resolution', id: 'resolution' },
   { motif: 'motion de rejet prealable', id: 'motion-de-rejet-prealable' },
   { motif: 'motion de censure', id: 'motion-de-censure' },
   { motif: 'motion referendaire', id: 'motion-referendaire' },

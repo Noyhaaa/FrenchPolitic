@@ -9,11 +9,13 @@ from __future__ import annotations
 
 from app.domain.enums import Chambre, StatutScrutin
 from app.ingestion.navette import (
+    etat_du_texte,
     phases_depuis_actes,
     phases_depuis_votes,
+    source_legifrance,
     trajectoire,
 )
-from app.schemas import ResultatGlobal, Scrutin
+from app.schemas import EtatTexte, ResultatGlobal, Scrutin
 
 
 def _etape(code: str, label: str, date: str | None, conclusion: str | None) -> dict:
@@ -303,3 +305,231 @@ def test_repli_quand_le_dossier_n_a_pas_d_actes():
 
 def test_ni_actes_ni_mentions_frise_masquee():
     assert trajectoire(None, []) == []
+
+
+# --------------------------------------------------------------------------
+# Où en est le texte aujourd'hui — la clôture de la frise
+# --------------------------------------------------------------------------
+
+
+def _promulgation(date: str, code_loi: str) -> dict:
+    """Étape « Promulgation de la loi », telle que l'archive la sérialise :
+    l'étape elle-même est vide, tout vit dans son acte `PROM-PUB`."""
+    return {
+        "@xsi:type": "Etape_Type",
+        "codeActe": "PROM",
+        "libelleActe": {"nomCanonique": "Promulgation de la loi"},
+        "dateActe": None,
+        "actesLegislatifs": {
+            "acteLegislatif": {
+                "@xsi:type": "Promulgation_Type",
+                "codeActe": "PROM-PUB",
+                "libelleActe": {"nomCanonique": "Promulgation d'une loi"},
+                "dateActe": f"{date}T00:00:00.000+02:00",
+                "codeLoi": code_loi,
+                "infoJO": {
+                    "dateJO": "2026-07-14+02:00",
+                    "numJO": "163",
+                    "urlLegifrance": (
+                        "http://www.legifrance.gouv.fr/WAspad/UnTexteDeJorf"
+                        "?numjo=JUSF2534988L"
+                    ),
+                    "referenceNOR": "JUSF2534988L",
+                },
+            }
+        },
+    }
+
+
+def _etape_avec(code: str, label: str, enfants: list[dict]) -> dict:
+    return {
+        "@xsi:type": "Etape_Type",
+        "codeActe": code,
+        "libelleActe": {"nomCanonique": label},
+        "dateActe": None,
+        "actesLegislatifs": {"acteLegislatif": enfants},
+    }
+
+
+def _retrait(date: str) -> dict:
+    return {
+        "@xsi:type": "RetraitInitiative_Type",
+        "codeActe": "AN1-RTRINI",
+        "libelleActe": {"nomCanonique": "Retrait d'une initiative"},
+        "dateActe": f"{date}T00:00:00.000+02:00",
+        "actesLegislatifs": None,
+    }
+
+
+def test_loi_promulguee_porte_sa_reference_complete():
+    """Le fait le plus important d'une fiche, et le seul lien de l'app vers le
+    texte en vigueur (§7.5). Les quatre champs viennent de la source."""
+    actes = {
+        "acteLegislatif": [
+            _etape("AN1", "1ère lecture (1ère assemblée saisie)", "2025-12-11", "adopté"),
+            _promulgation("2026-07-13", "2026-630"),
+        ]
+    }
+    etat = etat_du_texte(actes)
+    assert etat is not None
+    assert etat.etat == "promulgue"
+    assert etat.date == "2026-07-13"
+    assert etat.numero_loi == "2026-630"
+    assert etat.date_journal_officiel == "2026-07-14"
+    assert etat.url_legifrance is not None
+    source = source_legifrance(etat)
+    assert source is not None and source.url == etat.url_legifrance
+
+
+def test_retrait_dans_la_derniere_etape_conclut_le_texte():
+    actes = {
+        "acteLegislatif": [
+            _etape_avec(
+                "AN1",
+                "1ère lecture (1ère assemblée saisie)",
+                [_retrait("2025-06-26")],
+            )
+        ]
+    }
+    etat = etat_du_texte(actes)
+    assert etat is not None
+    assert etat.etat == "retire"
+    assert etat.date == "2025-06-26"
+
+
+def test_retrait_dans_une_etape_anterieure_ne_conclut_rien():
+    """Le dossier a continué après : c'est la dernière étape qui dit où il en
+    est, pas un retrait dépassé."""
+    actes = {
+        "acteLegislatif": [
+            _etape_avec(
+                "AN1",
+                "1ère lecture (1ère assemblée saisie)",
+                [_retrait("2025-06-26")],
+            ),
+            _etape("SN1", "1ère lecture (2ème assemblée saisie)", "2026-02-10", None),
+        ]
+    }
+    etat = etat_du_texte(actes)
+    assert etat is not None
+    assert etat.etat == "en_navette"
+    assert etat.chambre is Chambre.senat
+
+
+def test_conseil_constitutionnel_saisi_sans_conclusion():
+    """On dit qu'il est saisi et depuis quand. Jamais ce qu'il décidera."""
+    actes = {
+        "acteLegislatif": [
+            _etape("AN1", "1ère lecture (1ère assemblée saisie)", "2026-05-02", "adopté"),
+            _etape_avec(
+                "CC",
+                "Conseil constitutionnel",
+                [
+                    {
+                        "codeActe": "CC-SAISIE-AN",
+                        "libelleActe": {"nomCanonique": "Saisine"},
+                        "dateActe": "2026-06-03T00:00:00.000+02:00",
+                        "actesLegislatifs": None,
+                    }
+                ],
+            ),
+        ]
+    }
+    etat = etat_du_texte(actes)
+    assert etat is not None
+    assert etat.etat == "conseil_constitutionnel"
+    assert etat.date == "2026-06-03"
+
+
+def test_conseil_constitutionnel_ayant_conclu_nest_plus_cet_etat():
+    actes = {
+        "acteLegislatif": [
+            _etape_avec(
+                "CC",
+                "Conseil constitutionnel",
+                [
+                    {
+                        "codeActe": "CC-SAISIE-AN",
+                        "libelleActe": {"nomCanonique": "Saisine"},
+                        "dateActe": "2026-06-03T00:00:00.000+02:00",
+                        "actesLegislatifs": None,
+                    },
+                    {
+                        "codeActe": "CC-CONCLUSION",
+                        "libelleActe": {"nomCanonique": "Décision"},
+                        "dateActe": "2026-06-20T00:00:00.000+02:00",
+                        "actesLegislatifs": None,
+                    },
+                ],
+            )
+        ]
+    }
+    etat = etat_du_texte(actes)
+    assert etat is not None
+    assert etat.etat != "conseil_constitutionnel"
+
+
+def test_resolution_conclue_est_terminee_pas_en_navette():
+    """Une résolution n'est ni transmise à l'autre chambre ni promulguée : la
+    ranger « en cours d'examen » la ferait passer pour un texte en attente."""
+    actes = {
+        "acteLegislatif": [
+            _etape("ANLUNI", "Lecture unique", "2024-10-09", "adoptée")
+        ]
+    }
+    etat = etat_du_texte(actes, {"code": "22", "libelle": "Résolution Article 34-1"})
+    assert etat is not None
+    assert etat.etat == "resolution"
+    assert etat.statut is StatutScrutin.adopte
+    assert etat.date == "2024-10-09"
+
+
+def test_meme_etape_sans_procedure_de_resolution_reste_en_navette():
+    """Le code de procédure est le seul indice retenu — on ne devine pas la
+    nature du texte à partir du libellé de son étape (§2.5)."""
+    actes = {
+        "acteLegislatif": [
+            _etape("ANLUNI", "Lecture unique", "2024-10-09", "adoptée")
+        ]
+    }
+    etat = etat_du_texte(actes, {"code": "1", "libelle": "Projet de loi ordinaire"})
+    assert etat is not None
+    assert etat.etat == "en_navette"
+
+
+def test_texte_en_navette_donne_sa_derniere_etape_enregistree():
+    etat = etat_du_texte(_ACTES)
+    assert etat is not None
+    # _ACTES se termine par le Conseil constitutionnel « Conforme » — un avis
+    # qui n'est ni adoption ni rejet, mais bien une conclusion publiée.
+    assert etat.etat == "en_navette"
+    assert etat.etape == "Conseil constitutionnel"
+
+
+def test_dossier_sans_actes_na_pas_d_etat():
+    """« TXT-… », « SEN-… », motions : le bloc disparaît (§2.5)."""
+    assert etat_du_texte(None) is None
+    assert etat_du_texte({"acteLegislatif": []}) is None
+    assert source_legifrance(None) is None
+
+
+def test_aucun_etat_ne_decrit_une_etape_a_venir():
+    """Garde-fou de doctrine : le calendrier parlementaire est une décision
+    politique, pas une donnée. Aucun champ ne peut annoncer la suite — s'il en
+    apparaissait un, ce test le signalerait."""
+    champs = set(EtatTexte.model_fields)
+    assert champs == {
+        "etat",
+        "date",
+        "etape",
+        "chambre",
+        "statut",
+        "numero_loi",
+        "date_journal_officiel",
+        "url_legifrance",
+    }
+    etat = etat_du_texte(_ACTES)
+    assert etat is not None
+    # Rien de ce qu'on sérialise ne parle du futur.
+    rendu = " ".join(str(v) for v in etat.model_dump().values() if v)
+    assert "prochain" not in rendu.lower()

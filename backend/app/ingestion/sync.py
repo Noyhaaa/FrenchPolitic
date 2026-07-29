@@ -56,7 +56,7 @@ from app.ingestion.initiative import (
     construire_index_initiatives,
     resoudre_initiative,
 )
-from app.ingestion.navette import trajectoire
+from app.ingestion.navette import etat_du_texte, source_legifrance, trajectoire
 from app.ingestion.senat import (
     URL_TEXTE_PDF as SENAT_URL_TEXTE_PDF,
     SenatOpenDataClient,
@@ -160,6 +160,9 @@ class SyncReport:
     # Dossiers dont on sait dire qui porte le texte (Gouvernement, parlementaire
     # nommé, Sénat) — cf. `app.ingestion.initiative`.
     initiatives: int = 0
+    # Dossiers dont on sait dire où en est le texte aujourd'hui (promulgué,
+    # devant le Conseil constitutionnel, dernière étape connue…).
+    etats: int = 0
     # Dossiers supprimés car vidés de leurs scrutins (ex. TXT- migrés vers un
     # dossier officiel après amélioration de la réconciliation).
     dossiers_orphelins_supprimes: int = 0
@@ -559,6 +562,10 @@ def _merge_avec_existant(prev: Dossier, incoming: Dossier) -> Dossier:
     # le texte.
     if incoming.initiative is None and prev.initiative is not None:
         incoming.initiative = prev.initiative
+    # Où en est le texte : même archive, même raison. Un run sans elle garde
+    # l'état connu plutôt que de faire disparaître le bloc de la fiche.
+    if incoming.etat is None and prev.etat is not None:
+        incoming.etat = prev.etat
     # Publics concernés : acquis d'un run avec LLM, préservés sur un run sans.
     if not incoming.resume.public_concerne and prev.resume.public_concerne:
         incoming.resume.public_concerne = prev.resume.public_concerne
@@ -724,6 +731,9 @@ class SyncJob:
         self._client_senat = client_senat
         self._slug_senat_par_dossier: dict[str, str] = {}
         self._actes_par_ref: dict[str, object] = {}
+        # dossierRef → `procedureParlementaire` : distingue une résolution (dont
+        # la lecture unique est l'aboutissement) d'un texte de loi.
+        self._procedure_par_ref: dict[str, object] = {}
         # dossierRef → qui porte le texte (lu sur son document de dépôt).
         self._initiatives_par_ref: dict[str, InitiativeBrute] = {}
         # acteurRef → identité du parlementaire (nom, groupe, photo), pour
@@ -1432,14 +1442,27 @@ class SyncJob:
         # de l'Assemblée, plutôt que d'ouvrir un second dossier pour le même texte.
         jointure_senat = construire_jointure_senat(dossiers_parlementaires)
         # Actes législatifs par dossier : la trajectoire officielle du texte au
-        # Parlement (lectures AN ET Sénat, CMP, Conseil constitutionnel).
-        self._actes_par_ref = {
-            (d.get("dossierParlementaire") or d).get("uid"): (
-                d.get("dossierParlementaire") or d
-            ).get("actesLegislatifs")
-            for d in dossiers_parlementaires
-            if (d.get("dossierParlementaire") or d).get("uid")
-        }
+        # Parlement (lectures AN ET Sénat, CMP, Conseil constitutionnel) et,
+        # dans les mêmes actes, où en est le texte aujourd'hui. La procédure
+        # (résolution ? loi ordinaire ?) vient du même dossier, sans un
+        # téléchargement de plus : elle dit si le parcours s'arrête là.
+        #
+        # ⚠️ **La première copie vue gagne**, et la liste commence par la
+        # législature COURANTE. 193 dossiers figurent dans les deux archives (un
+        # texte reporté après la dissolution garde son `dossierRef` L16), mais la
+        # copie L16 est un instantané **figé** : mesuré, 36 d'entre eux y sont
+        # sans leur promulgation, que l'archive L17 documente. Écraser avec la
+        # précédente amputerait leur frise et les ferait passer pour des textes
+        # encore en navette.
+        self._actes_par_ref = {}
+        self._procedure_par_ref = {}
+        for d in dossiers_parlementaires:
+            dossier_pa = d.get("dossierParlementaire") or d
+            uid = dossier_pa.get("uid")
+            if not uid or uid in self._actes_par_ref:
+                continue
+            self._actes_par_ref[uid] = dossier_pa.get("actesLegislatifs")
+            self._procedure_par_ref[uid] = dossier_pa.get("procedureParlementaire")
         # Index dossierRef → texte AN déposé, pour récupérer l'exposé des motifs
         # (PDF officiel) au niveau du dossier — bloc attribué, option (a).
         index_textes = construire_index_textes(documents, legislatures)
@@ -1530,10 +1553,22 @@ class SyncJob:
                 # Trajectoire au Parlement (frise) : les actes officiels du
                 # dossier quand l'archive les porte, sinon les mentions de
                 # navette des objets de vote — les deux chambres comprises.
+                ref_dossier = parses[0].dossier_ref or ""
                 dossier.trajectoire = trajectoire(
-                    self._actes_par_ref.get(parses[0].dossier_ref or ""),
+                    self._actes_par_ref.get(ref_dossier),
                     [p.scrutin for p in parses],
                 )
+                # Où en est le texte aujourd'hui — la frise dit le passé, ceci
+                # dit le présent. Jamais l'étape suivante (§2.5). Une loi
+                # promulguée apporte en prime sa source Légifrance : le seul
+                # lien de l'app vers le texte en vigueur (§7.5).
+                dossier.etat = etat_du_texte(
+                    self._actes_par_ref.get(ref_dossier),
+                    self._procedure_par_ref.get(ref_dossier),
+                )
+                source_loi = source_legifrance(dossier.etat)
+                if source_loi is not None:
+                    dossier.sources = _dedupe_sources([*dossier.sources, source_loi])
                 # Qui porte le texte — même archive, même document de dépôt que
                 # l'exposé des motifs. Absente pour un dossier sans `dossierRef`
                 # (« TXT-… », « SEN-… », motion) : la ligne disparaît (§2.5).
@@ -1560,6 +1595,10 @@ class SyncJob:
                 # run précédent compte toujours, même si ce run n'a rien relu.
                 if dossier.initiative is not None:
                     report.initiatives += 1
+                # Même raison pour l'état : préservé par la fusion quand ce run
+                # n'a pas pu relire l'archive.
+                if dossier.etat is not None:
+                    report.etats += 1
                 report.amendements_enrichis += sum(
                     1
                     for a in dossier.amendements

@@ -82,6 +82,28 @@ Six écrans du cœur de valeur :
    d'un paragraphe ; une seule ouverte à la fois. ⚠️ Elle n'est
    plus dérivée côté app des objets de vote (`phasesNavette` a été supprimé de
    `format.ts`) : les scrutins d'une chambre ne peuvent pas documenter l'autre.
+   La frise **se clôt sur « Où en est le texte ? »** (`Dossier.etat` servi par
+   l'API) : à elle seule elle ne raconte que le passé et laissait sans réponse
+   la question suivante. Cinq états, chacun un fait des mêmes actes officiels —
+   **« C'est la loi »** (+ « Loi n° 2026-630 du 13 juillet 2026, publiée au
+   *Journal officiel* du 14 juillet », et la **source Légifrance** ajoutée à la
+   fiche : le seul lien de l'app vers le texte **en vigueur**), « Résolution
+   adoptée », « Texte retiré par son auteur », « Devant le Conseil
+   constitutionnel », ou « En cours d'examen » suivi de la **dernière étape
+   enregistrée**. ⚠️ **Jamais l'étape suivante** : le calendrier parlementaire
+   est une décision politique, pas une donnée — l'annoncer serait une
+   prédiction (§2.5). Ce que la source ne dit pas est dit explicitement
+   (« Aucune étape postérieure n'est publiée »), pour que le silence se lise
+   comme celui de l'archive et non de l'app. Le bloc porte glyphe **et** libellé
+   (RGAA §8) et partage l'état « une seule définition ouverte » des pastilles ;
+   seul « Résolution » y ouvre son aide, car c'est le seul mot qu'aucune
+   pastille de la frise ne porte (la sienne dit « Lecture unique ») — on
+   n'explique pas deux fois au même endroit. Une **loi promulguée** remonte
+   aussi dans le **badge de tête** (« Promulguée » au lieu d'« Adopté », le
+   résultat du dernier vote : exact, mais il laissait croire que le texte était
+   encore en chemin). Mesuré : **254/328 dossiers** (96 promulgués · 126 en
+   navette · 21 résolutions · 7 au Conseil constitutionnel · 4 retirés) ; les
+   74 sans actes (`TXT-…`, `SEN-…`) gardent le bloc masqué.
    Sous le titre, la carte **« À l'origine du texte »** (`InitiativeLigne`,
    `Dossier.initiative` servie par l'API) — **qui porte le texte**, la première
    question qu'on se pose devant un vote : le **Gouvernement** (tout projet de
@@ -116,8 +138,9 @@ Six écrans du cœur de valeur :
    la fiche vote. Un vote d'amendement n'apparaît **que** dans sa section (un
    sous-amendement que dans la sienne), et les listes longues sont repliées
    au-delà de 4 éléments (« Voir les N autres… »). Les **Sources officielles**
-   de la fiche sont de **niveau dossier** uniquement (dossier législatif…) — la
-   source de chaque vote vit sur sa propre fiche, pas de doublon.
+   de la fiche sont de **niveau dossier** uniquement (dossier législatif, et
+   **Légifrance** quand le texte est promulgué — le seul lien vers la loi en
+   vigueur) — la source de chaque vote vit sur sa propre fiche, pas de doublon.
 3. **Fiche vote** (`ScrutinDetailScreen` → `useScrutin`, `GET /scrutins/{id}`) :
    titre = type du vote en clair — **cliquable quand c'est un terme de
    procédure** (« Motion de rejet préalable », « Vote sur l'ensemble »…), il
@@ -318,7 +341,8 @@ sous-amendement est **rattaché à son amendement parent** (« … à l'amendeme
 n° X ») ; le scrutin du parent embarque ses sous-amendements pour la fiche vote.
 La fusion inter-runs pose le badge « mis à jour » quand un nouveau scrutin
 (texte, amendement ou sous-amendement) rejoint un dossier connu. Les **sources
-du dossier** sont de niveau dossier uniquement (la page du dossier législatif) —
+du dossier** sont de niveau dossier uniquement (la page du dossier législatif,
+plus **Légifrance** dès que l'état du texte est `promulgue`) —
 la source de chaque vote reste sur son scrutin, servie par sa fiche vote. Le
 **résumé neutre est généré à l'ingestion par un gabarit déterministe** (`app/ai/`
 — `faits` → `rag` → `gabarit` → garde-fous, dans `generer_resume`), ancré
@@ -541,7 +565,27 @@ les avis du Conseil constitutionnel, qui ne sont ni adoption ni rejet — laisse
 l'étape **sans statut** (§2.5). Repli pour les dossiers sans actes (`TXT-…`,
 `SEN-…`) : les mentions de navette des objets de vote, **distinguées par
 chambre**. C'est la raison du déplacement côté backend : les scrutins d'une
-chambre ne peuvent pas documenter l'autre.
+chambre ne peuvent pas documenter l'autre. ⚠️ Quand un dossier figure dans les
+**deux** archives téléchargées (193 cas : un texte reporté après la dissolution
+garde son `dossierRef` L16), c'est la copie de la législature **courante** qui
+prime — celle de la précédente est un instantané figé, et 36 dossiers y sont
+sans leur promulgation.
+
+**Où en est le texte** (`etat_du_texte`, même module) — les mêmes actes donnent
+l'état **d'aujourd'hui**, que la frise seule ne disait pas : `promulgue` (96 —
+`PROM-PUB` livre `codeLoi`, la date, le JO et l'URL Légifrance, présents
+ensemble sur 96/96, d'où la **source du texte en vigueur** posée sur le
+dossier), `en_navette` (126 — la dernière étape retenue, telle quelle),
+`resolution` (21), `conseil_constitutionnel` (7 — saisi sans conclusion
+publiée), `retire` (4 — un `…RTRINI` **dans la dernière étape** seulement : un
+retrait suivi d'autres actes ne conclut rien). Soit **254/328** ; sans actes,
+pas d'état (§2.5). `resolution` mérite son état parce qu'une résolution est
+conclue dès sa lecture unique — ni transmise à l'autre chambre, ni promulguée :
+la ranger « en navette » ferait passer 21 textes terminés pour des textes en
+attente. Le **code de procédure** (8 ou 22) est le seul indice retenu, jamais le
+libellé de l'étape. ⚠️ **Aucun champ ne décrit une étape à venir** — un test le
+vérifie sur la liste des champs elle-même. Préservé entre runs comme
+l'initiative, et rattrapable seul par `python -m app.ingestion.etats`.
 
 ⚠️ **Pas d'Alembic** dans le dépôt (`init_models` = `create_all`, qui ne touche
 jamais une table existante). Les colonnes ajoutées au modèle s'appliquent via
@@ -576,6 +620,7 @@ python -m app.ingestion.reformater        # recalcule titre court + accroche en 
 python -m app.ingestion.revalider         # repasse les garde-fous sur les réponses en base, efface les fautives
 python -m app.ingestion.divisions         # recalcule l'indice de division (rangée « votes les plus disputés »)
 python -m app.ingestion.initiatives       # renseigne « qui porte le texte » en base (archive 10 Mo, ni PDF ni LLM)
+python -m app.ingestion.etats             # renseigne « où en est le texte » + source Légifrance (même archive)
 uvicorn app.main:app --reload             # http://localhost:8000/docs (sert la base via .env)
 pytest                                     # suite de tests (forcés sur seed)
 ```
@@ -698,7 +743,12 @@ AN quand disponibles, `scrutinId` vers la fiche vote, et `sousAmendements?` — 
 **sous-amendements rattachés** à cet amendement, même forme), `sources`,
 `statut`, `theme`, `dateDernierScrutin`, `trajectoire` (les étapes du texte au
 Parlement, **les deux chambres**, calculées à l'ingestion — vide = frise
-masquée), `miseAJour?` (badge §7.7),
+masquée), `etat?` (**où en est le texte aujourd'hui**, la clôture de la frise :
+`etat` — `promulgue` | `resolution` | `retire` | `conseil_constitutionnel` |
+`en_navette` — plus `date` / `etape` / `chambre` / `statut`, et pour une loi
+`numeroLoi` / `dateJournalOfficiel` / `urlLegifrance`. ⚠️ **Aucun champ ne
+décrit une étape à venir** : n'en ajoutez pas, et ne composez pas de phrase au
+futur à partir de ceux-là), `miseAJour?` (badge §7.7),
 `exposeMotifs?` (parole de l'auteur, bloc attribué), `dispositif?` (les
 articles du texte — fait officiel, jamais affiché brut, source de la Q4),
 `initiative?` (**qui porte le texte** : `origine` — `gouvernement` |

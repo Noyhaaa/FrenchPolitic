@@ -373,6 +373,33 @@ export interface Initiative {
   portraitUrl?: string | null;
 }
 
+/**
+ * Où en est le texte **aujourd'hui** (miroir de `EtatTexte` backend) — le
+ * pendant de `PhaseScrutin` : la frise dit le passé, celui-ci dit le présent.
+ *
+ * ⚠️ **Aucun champ ne décrit une étape à venir**, et c'est délibéré :
+ * l'inscription à l'ordre du jour est une décision politique, pas une donnée.
+ * L'app ne doit donc jamais composer de phrase au futur à partir d'ici (§2.5).
+ */
+export interface EtatTexte {
+  etat:
+    | 'promulgue'
+    | 'resolution'
+    | 'retire'
+    | 'conseil_constitutionnel'
+    | 'en_navette';
+  /** Date de l'acte qui fonde l'état (ISO). */
+  date?: string | null;
+  /** Libellé officiel de l'étape concernée (`en_navette`, `resolution`). */
+  etape?: string | null;
+  chambre?: Chambre | null;
+  statut?: StatutScrutin | null;
+  /** Loi promulguée : sa référence au Journal officiel. Les trois vont ensemble. */
+  numeroLoi?: string | null;
+  dateJournalOfficiel?: string | null;
+  urlLegifrance?: string | null;
+}
+
 export interface Dossier {
   id: string;
   titreOfficiel: string;
@@ -395,6 +422,11 @@ export interface Dossier {
    * Vide quand aucune étape n'est documentée → frise masquée (§2.5).
    */
   trajectoire: PhaseScrutin[];
+  /**
+   * Où en est le texte aujourd'hui — la clôture de la frise. Absent pour les
+   * dossiers sans actes législatifs (« TXT-… », « SEN-… ») → bloc masqué (§2.5).
+   */
+  etat?: EtatTexte | null;
   theme: ThemeScrutin;
   tempsLectureSec: number;
   /** Date du scrutin le plus récent du dossier (ISO). */
