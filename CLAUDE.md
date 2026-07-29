@@ -75,7 +75,11 @@ Six écrans du cœur de valeur :
    dossier, **les deux chambres comprises** (1re lecture à l'Assemblée puis au
    Sénat, CMP, Conseil constitutionnel, promulgation), chacune avec sa chambre
    écrite en toutes lettres. Le statut n'est posé que si la source le
-   documente ; frise masquée si aucune étape ne l'est (§2.5). ⚠️ Elle n'est
+   documente ; frise masquée si aucune étape ne l'est (§2.5). Chaque étape dont
+   le libellé officiel est du jargon (**12/12 de ceux présents en base**) s'ouvre
+   sur sa **définition de procédure** (`constants/glossaire.ts`), affichée sous
+   la frise — les pastilles s'enchaînent horizontalement et n'ont pas la place
+   d'un paragraphe ; une seule ouverte à la fois. ⚠️ Elle n'est
    plus dérivée côté app des objets de vote (`phasesNavette` a été supprimé de
    `format.ts`) : les scrutins d'une chambre ne peuvent pas documenter l'autre.
    Puis résumé du texte,
@@ -97,7 +101,12 @@ Six écrans du cœur de valeur :
    de la fiche sont de **niveau dossier** uniquement (dossier législatif…) — la
    source de chaque vote vit sur sa propre fiche, pas de doublon.
 3. **Fiche vote** (`ScrutinDetailScreen` → `useScrutin`, `GET /scrutins/{id}`) :
-   titre = type du vote en clair, **objet officiel complet en dessous**, la
+   titre = type du vote en clair — **cliquable quand c'est un terme de
+   procédure** (« Motion de rejet préalable », « Vote sur l'ensemble »…), il
+   déplie alors sa définition (`constants/glossaire.ts`, §8) ; la recherche se
+   fait sur le **titre**, jamais sur l'objet officiel, dont les mots
+   déclencheraient des définitions sans rapport avec le type de vote —,
+   **objet officiel complet en dessous**, la
    **chambre** (`scrutin.chambre` via `libelleChambre`, jamais « Assemblée
    nationale » en dur), puis —
    **sur toutes les fiches, quel que soit le type de vote** — le **Résultat du
@@ -133,10 +142,37 @@ Six écrans du cœur de valeur :
    (exposé sommaire, bloc attribué non neutre §4.3), et
    **ses sous-amendements** (chacun ouvrant sa propre fiche vote, empilée via
    `navigation.push`).
-4. **Recherche** (`SearchScreen` → `useRecherche` + `useThemes`, avec debounce) :
-   un champ, des **chips de thème** (`GET /themes` — seuls les thèmes qui ont
-   des dossiers, §2.5), et des résultats en **deux sections** — les *textes*
-   puis les *députés* (`GET /deputes?q=`, plafonné à 5), section vide masquée.
+4. **Explorer** (`ExplorerScreen` → `useRecherche` + `useThemes`, avec debounce ;
+   remplace l'ancien `SearchScreen`, supprimé) : tant que rien n'est cherché,
+   l'écran ne montre plus un vide en attente d'un mot — quatre **portes
+   d'entrée** (Dossiers, Élus, Assistant, Glossaire), puis les **catégories**,
+   la plus fournie en vedette et les suivantes en rangées, écrêtées à 5 avec un
+   « Voir les N autres » qui **déplie vraiment** la liste. Le libellé de la
+   vedette dit ce que la donnée dit — « la plus fournie en dossiers », un
+   décompte de `useThemes` —, pas « la plus suivie », qui demanderait une
+   analytique qu'on n'a pas (§2.5). ⚠️ **Explorer n'interroge pas la
+   recherche** : la tuile *Dossiers*, la validation du champ et le tap sur une
+   catégorie **ouvrent l'écran `Dossiers`**. Explorer fait découvrir, `Dossiers`
+   montre ce qu'on a trouvé — les afficher au même endroit ferait disparaître la
+   découverte au premier mot tapé, et le retour arrière n'aurait plus de sens.
+4ter. **Dossiers** (`DossiersScreen` → `useRecherche`, route
+   `{ query, theme? }`) : les **résultats**, délibérément dissemblables
+   d'Explorer — barre d'outils `surface` portant la requête, onglets soulignés
+   *Textes* / *Députés* avec leur décompte, puis une **chronologie** de lignes
+   denses (`DossierChronoRow`, pas de cartes : `DossierCard` reste au fil
+   d'accueil). Les deux vides = parcourir tous les textes ; `theme` seul =
+   parcourir une catégorie. Le groupage (« Cette semaine », « Plus tôt en
+   juillet ») vient de `utils/periodes.ts`, **seule source du tri** : libellés de
+   groupe et ordre des lignes sortent du même calcul, ils ne peuvent pas se
+   contredire. Une ligne n'affiche sa **barre pour/contre** que si
+   `resultatDernierScrutin` est présent ; sinon la mention qui l'explique la
+   remplace — « Pas encore mis aux voix » si `nombreScrutins === 0`, sinon
+   « Vote à main levée — pas de nominatif » (§5.2, §2.5). Cet écran demande
+   `LIMITE_MAX` (100) à l'API là où le défaut est 20 : il annonce des catégories
+   entières (« Justice · 51 dossiers » côté Explorer) et n'en rendrait sinon que
+   20, se contredisant à l'écran. Quand le plafond est atteint, le titre dit
+   « Les 100 plus récents » au lieu d'un décompte qui se lirait comme un total.
+   Les *députés* viennent de `GET /deputes?q=` (plafonné à 5), onglet vide masqué.
    La requête est **multi-termes** : tous les mots sont exigés mais pas
    forcément côte à côte ni dans le titre, car l'index de recherche
    (`app/domain/recherche.py`, source unique de `search_index`) couvre aussi les
@@ -147,6 +183,18 @@ Six écrans du cœur de valeur :
    parcourt le thème. L'exposé des motifs est hors index (trop de bruit). Le
    filtre de thème ne s'applique pas aux personnes : les députés disparaissent
    quand il est actif.
+4bis. **Glossaire** (`GlossaireScreen` l'index, `GlossaireTermeScreen` la fiche —
+   au niveau du stack racine, atteints depuis Explorer **et** depuis l'aide en
+   ligne). L'index : un **mot du jour** déterministe (index sur le numéro de
+   jour — même mot pour tous, changement à minuit, aucun stockage), des chips de
+   famille (Procédure · Institutions · Budget · Vote), puis les termes groupés
+   par lettre avec leur définition courte, pour comprendre **sans ouvrir la
+   fiche**. La fiche : la définition en une phrase, le déroulé « Concrètement »
+   (`etapes`), les faux amis (« À ne pas confondre » — un voisin sans fiche
+   reste affiché mais **atténué et non cliquable**, il ne doit pas promettre un
+   lien qui n'existe pas), et surtout **les dossiers où le mot apparaît**
+   (`useRecherche` sur `requete ?? libelle`) : une définition ne doit pas être un
+   cul-de-sac, on repart lire un texte. Bloc sans contenu → masqué (§2.5).
 5. **Annuaire des parlementaires** (`DeputesScreen` → `useDeputes`,
    `GET /deputes`) : recherche par nom (debounce), **chips de chambre**
    (Les deux / Assemblée nationale / Sénat) **puis** chips de groupe
@@ -484,19 +532,29 @@ src/
   hooks/                     useDossiers / useDossier / useScrutin / useRecherche + useThemes
                              + useDeputes / useDepute (chargement + cache + états)
   constants/themes.ts        Emoji + teintes par thème
+  constants/glossaire.ts     Glossaire : contenu + reconnaissance des libellés (§8)
+  types/glossaire.ts         Types du glossaire (PAS un miroir backend — contenu local)
   utils/format.ts            Formatage dates, libellés de statut/position/chambre, temps de lecture
                              (⚠️ plus de `phasesNavette` : la trajectoire vient de l'API)
+  utils/periodes.ts          Groupage/tri par période de la chronologie (écran Dossiers)
   components/                Composants réutilisables (DossierCard, StateViews…)
   screens/                   Un écran par fichier (barrel dans index.ts)
   navigation/
     types.ts                 Types de navigation (RootStack + MainTabs)
-    MainTabs.tsx             Bottom tabs : Accueil · Recherche · Députés · Assistant · Profil
+    MainTabs.tsx             Bottom tabs : Accueil · Recherche (→ ExplorerScreen) · Députés · Assistant · Profil
     RootNavigator.tsx        Stack : MainTabs + DossierDetail + ScrutinDetail + DeputeDetail
+                             + Dossiers (résultats) + Glossaire + GlossaireTerme
 ```
 
 Flux : `RootNavigator` → `MainTabs` (tabs) → `DossierDetail` puis `ScrutinDetail`
-sont au niveau du stack racine (accessibles depuis Accueil ET Recherche, couvrent
-la tab bar).
+sont au niveau du stack racine (accessibles depuis Accueil ET Explorer, couvrent
+la tab bar). `Dossiers` s'y trouve également : Explorer l'**ouvre** au lieu
+d'afficher les résultats sur place, de sorte que la page de découverte reste
+derrière et que le retour arrière y ramène.
+`Glossaire` / `GlossaireTerme` y sont aussi : on y entre par
+Explorer, mais également par l'aide en ligne d'une frise de dossier ou d'un titre
+de fiche vote — d'où le libellé de retour **« Retour »** sur la fiche d'un terme
+(plusieurs provenances) et « Explorer » sur l'index (une seule).
 
 ## Règles produit qui contraignent le code
 
@@ -521,6 +579,18 @@ qui affiche du contenu de scrutin doit les respecter.
    `scrutinPublic` (au niveau de chaque `Scrutin`) conditionne l'affichage du « vote
    par groupe » ; sinon on explique l'absence de ventilation (vote à main levée).
 7. **Langue simple (§8).** Phrases courtes, pas de jargon non expliqué.
+   `constants/glossaire.ts` est la **source unique** du glossaire, pour ses
+   **deux surfaces** : les écrans dédiés (on vient y chercher un mot) et
+   l'**aide en ligne** là où le mot s'affiche sans être expliqué — une étape de
+   `TrajectoireNavette`, le titre d'une fiche vote —, dépliée par
+   `DefinitionGlossaire`, qui renvoie vers la fiche complète. Un seul fichier
+   pour les deux, sinon la même app explique un mot de deux façons. Les libellés
+   affichés ne sont pas les entrées du glossaire (« 1ère lecture (2ème assemblée
+   saisie) ») : la table `MOTIFS` fait le pont, **ordre significatif** (le cas
+   particulier avant le général), motifs pliés d'avance car la source mélange
+   les casses. Terme hors liste → aucune aide, on n'improvise pas d'explication
+   (§2.5). Ajouter un terme = une entrée dans ce fichier, jamais une définition
+   en dur dans un écran.
 8. **Mise à jour factuelle (§7.7).** Le badge « mis à jour » d'un dossier reste
    descriptif (« Nouveau vote »), jamais évaluatif. Il signale qu'un scrutin s'est
    ajouté, pas un jugement sur l'évolution du texte.
@@ -539,11 +609,14 @@ qui affiche du contenu de scrutin doit les respecter.
   interactifs et les badges ; `importantForAccessibility="no"` sur les emojis
   décoratifs.
 - **Safe area.** Les écrans gèrent eux-mêmes `useSafeAreaInsets` (padding top/bottom).
-- **Icônes.** La **barre d'onglets** utilise un jeu d'icônes-lignes maison
-  (`TabBarIcon`, tracés SVG via `react-native-svg`) : monochromes, la couleur
-  vient de l'état actif/inactif. Partout ailleurs, ce sont des emojis (thèmes,
-  repères décoratifs → `importantForAccessibility="no"`). Pas de librairie
-  d'icônes : une nouvelle icône se dessine dans `TabBarIcon`.
+- **Icônes.** Deux jeux maison, même grammaire (tracés SVG `react-native-svg`,
+  monochromes, la couleur vient de l'appelant) : `TabBarIcon` pour la **barre
+  d'onglets** (couleur = état actif/inactif) et `IconLigne` / `ThemeIcone` pour
+  les **écrans Explorer et Glossaire** (loupe, chevrons, portes d'entrée, et une
+  icône par thème qui remplace l'emoji de `themeEmoji` sur ces écrans). Partout
+  ailleurs, ce sont des emojis (thèmes, repères décoratifs →
+  `importantForAccessibility="no"`). Pas de librairie d'icônes : une nouvelle
+  icône se dessine dans l'un de ces deux fichiers.
 - **Commentaires.** Référencer la section du MVP concernée (`§3.2`, `§4.5`…) quand un
   choix découle d'une règle produit — c'est la convention en place.
 

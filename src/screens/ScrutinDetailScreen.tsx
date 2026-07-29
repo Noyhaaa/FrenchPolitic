@@ -11,13 +11,16 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { termeGlossaire } from '@/constants/glossaire';
 import { colors, mono, radius, serif, spacing, typography } from '@/theme';
 import {
+  DefinitionGlossaire,
   ErrorView,
   GroupVoteRow,
   Legend,
   LigneFracture,
   LoadingView,
+  MarqueurGlossaire,
   OfflineBanner,
   QuestionsAmendementCard,
   ResultBar,
@@ -119,6 +122,9 @@ export function ScrutinDetailScreen() {
   const { data: scrutin, loading, refreshing, offline, error, retry, refresh } =
     useScrutin(route.params.scrutinId);
   const [ouverts, setOuverts] = useState<ReadonlySet<string>>(new Set());
+  // Définition du type de vote (glossaire) : fermée par défaut, comme tout dépli
+  // de cette app — rien ne s'ouvre tant que le lecteur ne le demande.
+  const [definitionOuverte, setDefinitionOuverte] = useState(false);
   const goBack = () => navigation.goBack();
 
   const toggleGroupe = (groupeId: string) =>
@@ -181,6 +187,11 @@ export function ScrutinDetailScreen() {
   // Titre = type du vote en clair ; l'objet officiel complet (le sujet exact)
   // reste affiché dessous — rien n'est perdu, tout reste sourcé (§2.5).
   const lib = libelleScrutin(scrutin.objet);
+  // Le titre est-il un terme de procédure défini par le glossaire ? On cherche
+  // sur le TITRE (« Motion de rejet préalable »), pas sur l'objet officiel : lui
+  // contient le texte visé, dont les mots déclencheraient des définitions sans
+  // rapport avec le type de vote.
+  const termeTitre = termeGlossaire(lib.titre);
   // Fiche d'un vote d'amendement : entrée par les « 4 questions » (le « qui
   // était pour / contre » y vit) — pas de section « Vote par groupe ».
   const estAmendement = estVoteAmendement(scrutin.objet);
@@ -214,7 +225,29 @@ export function ScrutinDetailScreen() {
       >
         {/* Type du vote + statut + date, puis l'objet officiel complet */}
         <StatusBadge statut={scrutin.statut} />
-        <Text style={[typography.title, styles.title]}>{lib.titre}</Text>
+        {/* Le type du vote est du jargon de procédure (« Motion de rejet
+            préalable », « Vote sur l'ensemble ») : reconnu par le glossaire, le
+            titre s'ouvre sur sa définition (§8). Non reconnu → titre inerte,
+            aucune explication devinée (§2.5). */}
+        {termeTitre ? (
+          <Pressable
+            onPress={() => setDefinitionOuverte((o) => !o)}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: definitionOuverte }}
+            accessibilityLabel={`${lib.titre}. Définition de « ${termeTitre.libelle} »`}
+            style={styles.titreAvecAide}
+          >
+            <Text style={[typography.title, styles.title, styles.titreDansAide]}>
+              {lib.titre}
+            </Text>
+            <MarqueurGlossaire />
+          </Pressable>
+        ) : (
+          <Text style={[typography.title, styles.title]}>{lib.titre}</Text>
+        )}
+        {termeTitre && definitionOuverte ? (
+          <DefinitionGlossaire terme={termeTitre} />
+        ) : null}
         {lib.titre !== scrutin.objet ? (
           <Text style={[typography.readingBody, styles.objetOfficiel]}>
             {scrutin.objet}
@@ -574,6 +607,18 @@ const styles = StyleSheet.create({
     marginTop: -spacing.sm,
     fontSize: 20,
     lineHeight: 26,
+  },
+  // Titre cliquable (glossaire) : le décalage vertical passe sur le conteneur,
+  // sinon il s'appliquerait deux fois — au rang et au texte.
+  titreAvecAide: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: -spacing.sm,
+  },
+  titreDansAide: {
+    marginTop: 0,
+    flexShrink: 1,
   },
   subtitle: {
     marginTop: -spacing.md,

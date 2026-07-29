@@ -44,10 +44,17 @@ export function searchDossiers(
   query: string,
   theme?: string,
   signal?: AbortSignal,
+  limite?: number,
 ): Promise<DossierListItem[]> {
   return apiGet<DossierListItem[]>(
     '/recherche',
-    { q: query, theme: theme ?? '' },
+    {
+      q: query,
+      theme: theme ?? '',
+      // Omis = le défaut de l'API (20). L'écran Dossiers en demande plus :
+      // il doit pouvoir afficher une catégorie entière (cf. `useRecherche`).
+      ...(limite ? { limit: limite } : {}),
+    },
     signal,
   );
 }

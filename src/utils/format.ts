@@ -68,7 +68,7 @@ export function formatMicroResultat(pour: number, contre: number): string {
 }
 
 /** Minuscules sans accents (miroir de `fold` côté backend), apostrophe droite. */
-function plier(texte: string): string {
+export function plier(texte: string): string {
   return texte
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')

@@ -1,7 +1,10 @@
 export { HomeScreen } from './HomeScreen';
 export { DossierDetailScreen } from './DossierDetailScreen';
 export { ScrutinDetailScreen } from './ScrutinDetailScreen';
-export { SearchScreen } from './SearchScreen';
+export { ExplorerScreen } from './ExplorerScreen';
+export { DossiersScreen } from './DossiersScreen';
+export { GlossaireScreen } from './GlossaireScreen';
+export { GlossaireTermeScreen } from './GlossaireTermeScreen';
 export { DeputesScreen } from './DeputesScreen';
 export { DeputeDetailScreen } from './DeputeDetailScreen';
 export { AssistantScreen } from './AssistantScreen';

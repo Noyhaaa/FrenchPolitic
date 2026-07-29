@@ -6,9 +6,9 @@ import { TabBarIcon } from '@/components';
 import {
   AssistantScreen,
   DeputesScreen,
+  ExplorerScreen,
   HomeScreen,
   ProfileScreen,
-  SearchScreen,
 } from '@/screens';
 import type { MainTabsParamList } from './types';
 
@@ -43,7 +43,10 @@ export function MainTabs() {
       })}
     >
       <Tab.Screen name="Accueil" component={HomeScreen} />
-      <Tab.Screen name="Recherche" component={SearchScreen} />
+      {/* L'onglet garde son nom de route (`Recherche`) — il porte l'icône et
+          le libellé de la barre —, mais l'écran est « Explorer » : la recherche
+          n'est plus une page vide en attente d'un mot. */}
+      <Tab.Screen name="Recherche" component={ExplorerScreen} />
       <Tab.Screen
         name="Deputes"
         component={DeputesScreen}

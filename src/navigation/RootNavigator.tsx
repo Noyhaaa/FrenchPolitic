@@ -9,6 +9,9 @@ import { colors } from '@/theme';
 import {
   DeputeDetailScreen,
   DossierDetailScreen,
+  DossiersScreen,
+  GlossaireScreen,
+  GlossaireTermeScreen,
   ScrutinDetailScreen,
 } from '@/screens';
 import { MainTabs } from './MainTabs';
@@ -46,6 +49,21 @@ export function RootNavigator() {
         <Stack.Screen
           name="DeputeDetail"
           component={DeputeDetailScreen}
+          options={{ presentation: 'card', animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="Dossiers"
+          component={DossiersScreen}
+          options={{ presentation: 'card', animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="Glossaire"
+          component={GlossaireScreen}
+          options={{ presentation: 'card', animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="GlossaireTerme"
+          component={GlossaireTermeScreen}
           options={{ presentation: 'card', animation: 'slide_from_right' }}
         />
       </Stack.Navigator>

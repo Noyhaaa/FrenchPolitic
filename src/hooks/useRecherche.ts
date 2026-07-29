@@ -14,6 +14,11 @@ interface State {
 
 const DEBOUNCE_MS = 300;
 
+/** Plafond par défaut, aligné sur celui de l'API (`GET /recherche?limit=`). */
+export const LIMITE_DEFAUT = 20;
+/** Plafond maximal accepté par l'API — au-delà, elle rejette la requête. */
+export const LIMITE_MAX = 100;
+
 /**
  * Recherche unifiée textes + députés, avec debounce (§3.3).
  *
@@ -21,8 +26,17 @@ const DEBOUNCE_MS = 300;
  * frappe : une réponse obsolète ne peut pas écraser la suivante. Un thème actif
  * ne s'applique qu'aux textes — il ne qualifie pas une personne —, la liste des
  * députés est donc vidée dans ce cas.
+ *
+ * `limite` plafonne les textes rendus. L'écran Dossiers en demande plus que
+ * l'aperçu d'Explorer : il annonce des décomptes par catégorie (« Justice · 51
+ * dossiers »), et une page de résultats qui n'en montrerait que 20 les
+ * contredirait à l'écran.
  */
-export function useRecherche(query: string, theme?: string) {
+export function useRecherche(
+  query: string,
+  theme?: string,
+  limite: number = LIMITE_DEFAUT
+) {
   const [state, setState] = useState<State>({
     dossiers: [],
     deputes: [],
@@ -40,7 +54,7 @@ export function useRecherche(query: string, theme?: string) {
       setState((s) => ({ ...s, loading: true, error: false }));
       try {
         const [dossiers, deputes] = await Promise.all([
-          searchDossiers(query, theme, controller.signal),
+          searchDossiers(query, theme, controller.signal, limite),
           // Pas de recherche de personne sans terme, ni sous filtre de thème.
           query.trim() && !theme
             ? fetchDeputes({ q: query }, controller.signal)
@@ -62,7 +76,7 @@ export function useRecherche(query: string, theme?: string) {
     }, DEBOUNCE_MS);
 
     return () => clearTimeout(handle);
-  }, [query, theme]);
+  }, [query, theme, limite]);
 
   return state;
 }
