@@ -786,7 +786,7 @@ camelCase des schémas Pydantic backend, à répercuter des deux côtés).
 - L'URL d'un scrutin du Sénat prend l'année de **début de session**
   (oct.→sept.) : `scr2025-340` date du 21 juillet **2026**, et `scr2026.html`
   répond 404. Passer par `session_pour(annee, mois)`.
-- ⚠️ Le fichier `MVP_Assemblee_Nationale_v2.md` cité comme référence **n'est pas
-  présent dans le dépôt** (jamais committé). Les `§x.y` renvoient à ce document
-  externe. Le décalage introduit ici (dossier-centré + §7.7 + levée §2.4) doit y
-  être reporté quand il sera versionné.
+- ⚠️ Le fichier `MVP_Assemblee_Nationale_v2.md` est désormais **versionné** (commit
+  `ff9c2a1`) : les `§x.y` y renvoient et sont vérifiables. Mais il n'a **pas** été
+  mis à jour du décalage introduit ici (dossier-centré + §7.7 + levée §2.4) — sur
+  ces trois points, c'est ce fichier-ci qui décrit le produit réel.
