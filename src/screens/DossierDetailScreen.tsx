@@ -367,7 +367,7 @@ export function DossierDetailScreen() {
         {/* 1ter. La loi finale — sa référence et où la lire (§7.5). Tout le
             reste de la fiche décrit le texte DÉPOSÉ ; sur un texte promulgué,
             cette version n'existe plus. Masquée hors promulgation. */}
-        <LoiCard etat={dossier.etat} texteAdopte={dossier.texteAdopte} />
+        <LoiCard etat={dossier.etat} />
 
         {/* 2. Le vote en questions — l'entrée de compréhension (§2.2) :
             pourquoi / désaccord / résultat / changement, en langage simple.
@@ -522,12 +522,17 @@ export function DossierDetailScreen() {
           />
         )}
 
-        {/* 8. Sources officielles du DOSSIER (dossier législatif…). La source
-            de chaque vote ou amendement vit sur sa propre fiche — pas de
-            doublon ici. Masqué si rien au niveau dossier (§2.5). */}
+        {/* 8. Les documents du DOSSIER (§7.5) : dossier législatif, texte
+            déposé, rapports de commission, compte rendu de séance, texte voté,
+            texte en vigueur — dans l'ordre de la vie du texte, composés côté
+            API. ⚠️ SEUL endroit lié de la fiche : les cartes qui citent un
+            document (ExposeMotifsCard, QuestionsCard, LoiCard) n'ont plus de
+            SourceLink, elles gardent la provenance écrite. Ce qui reste hors
+            d'ici, c'est la source de chaque VOTE : elle vit sur sa propre
+            fiche. Masqué si rien au niveau dossier (§2.5). */}
         {dossier.sources.length > 0 && (
           <View style={styles.flatSection}>
-            <Text style={typography.overline}>Sources officielles</Text>
+            <Text style={typography.overline}>Les documents du dossier</Text>
             <SourceGrid sources={dossier.sources} />
           </View>
         )}

@@ -43,6 +43,7 @@ from app.ingestion.deputes import (
 from app.domain.division import division
 from app.domain.enums import Chambre
 from app.domain.recherche import index_recherche
+from app.domain.sources import dedupe_sources, documents_du_dossier
 from app.ingestion.debats import IndexDebats, url_compte_rendu
 from app.ingestion.dossiers_legislatifs import (
     JointureSenat,
@@ -56,11 +57,8 @@ from app.ingestion.initiative import (
     construire_index_initiatives,
     resoudre_initiative,
 )
-from app.ingestion.navette import (
-    etat_du_texte,
-    sources_sans_le_lien_de_la_loi,
-    trajectoire,
-)
+from app.ingestion.navette import etat_du_texte, trajectoire
+from app.ingestion.rapports import construire_index_rapports, verifier_rapports
 from app.ingestion.senat import (
     URL_TEXTE_PDF as SENAT_URL_TEXTE_PDF,
     SenatOpenDataClient,
@@ -178,6 +176,9 @@ class SyncReport:
     # sous-ensemble dont le corps est exploitable (source de la Q4 factuelle).
     textes_adoptes: int = 0
     lois_lues: int = 0
+    # Rapports de commission attachés (un par lecture) — le dernier document du
+    # dossier qui manquait à la liste des sources (§7.5).
+    rapports: int = 0
     # Dossiers supprimés car vidés de leurs scrutins (ex. TXT- migrés vers un
     # dossier officiel après amélioration de la réconciliation).
     dossiers_orphelins_supprimes: int = 0
@@ -325,13 +326,9 @@ def _positions_documentees(
 
 
 def _dedupe_sources(sources: list[SourceOfficielle]) -> list[SourceOfficielle]:
-    seen: set[str] = set()
-    out: list[SourceOfficielle] = []
-    for s in sources:
-        if s.url not in seen:
-            seen.add(s.url)
-            out.append(s)
-    return out
+    # Même règle que la composition des documents du dossier : une URL, une
+    # entrée, la première vue gagne (`app.domain.sources`).
+    return dedupe_sources(sources)
 
 
 IndexAmendements = dict[tuple[str, str], list[AmendementEnrichi]]
@@ -547,14 +544,19 @@ def _merge_avec_existant(prev: Dossier, incoming: Dossier) -> Dossier:
     if prev.date_dernier_scrutin > incoming.date_dernier_scrutin:
         incoming.date_dernier_scrutin = prev.date_dernier_scrutin
         incoming.statut = prev.statut
-    # Sources : niveau dossier uniquement. La page du dossier législatif
-    # (type « texte ») est stable inter-runs → la version fraîche suffit (et
-    # purge d'anciennes sources par-scrutin) ; en repli (pas de page dossier),
-    # union pour ne pas perdre les sources des runs passés.
+    # Sources : on ne fusionne ici que la **base** (la page du dossier), pas la
+    # liste servie — celle-ci est recomposée en fin d'upsert par
+    # `documents_du_dossier`. La page du dossier législatif (type « texte ») est
+    # stable inter-runs → la version fraîche suffit ; en repli (pas de page
+    # dossier), union avec les sources de scrutins déjà connues, pour ne pas
+    # perdre celles des runs passés. ⚠️ L'union se **restreint au type
+    # `scrutin`** : reprendre les entrées composées d'un run précédent les
+    # ferait survivre à la disparition de leur document.
     if any(s.type == "texte" for s in incoming.sources):
         incoming.sources = _dedupe_sources(incoming.sources)
     else:
-        incoming.sources = _dedupe_sources(incoming.sources + prev.sources)
+        anciennes = [s for s in prev.sources if s.type == "scrutin"]
+        incoming.sources = _dedupe_sources(incoming.sources + anciennes)
     # Résumé : le gabarit est déterministe et reflète les faits à jour, donc on
     # garde la version fraîche. On ne préserve QUE le résumé relu/édité par un
     # humain (le travail éditorial ne doit pas être écrasé par une régénération).
@@ -585,6 +587,10 @@ def _merge_avec_existant(prev: Dossier, incoming: Dossier) -> Dossier:
     # pu joindre le PDF ne doit pas faire disparaître le lien ni sa source de Q4.
     if incoming.texte_adopte is None and prev.texte_adopte is not None:
         incoming.texte_adopte = prev.texte_adopte
+    # Rapports de commission : déposés une fois pour toutes, et leur URL a été
+    # vérifiée. Un run sans archive (ou sans réseau) garde ceux déjà connus.
+    if not incoming.rapports_commission and prev.rapports_commission:
+        incoming.rapports_commission = prev.rapports_commission
     # Publics concernés : acquis d'un run avec LLM, préservés sur un run sans.
     if not incoming.resume.public_concerne and prev.resume.public_concerne:
         incoming.resume.public_concerne = prev.resume.public_concerne
@@ -645,6 +651,12 @@ async def _upsert_dossier(
     if existing is not None:
         prev = Dossier.model_validate(existing.payload)
         dossier = _merge_avec_existant(prev, dossier)
+    # Les documents du dossier (§7.5) : recomposés ICI, tout à la fin — après la
+    # fusion et après la génération des questions, dont sort le lien du compte
+    # rendu. `sources` est une **vue** de ce que le dossier porte, pas un
+    # accumulateur : la composition est idempotente, donc rejouable à chaque run
+    # comme au rattrapage sans que rien ne s'empile.
+    dossier.sources = documents_du_dossier(dossier)
     values = _dossier_row_values(dossier, desaccord_sources)
     stmt = insert(DossierRow).values(**values)
     update = {k: v for k, v in values.items() if k != "id"}
@@ -758,6 +770,9 @@ class SyncJob:
         self._publication_ta: dict[str, str] = {}
         # dossierRef → qui porte le texte (lu sur son document de dépôt).
         self._initiatives_par_ref: dict[str, InitiativeBrute] = {}
+        # dossierRef → uids des rapports de commission sur le texte (un par
+        # lecture). Leur URL est vérifiée avant d'être attachée (cf. `rapports`).
+        self._rapports_par_ref: dict[str, list[str]] = {}
         # acteurRef → identité du parlementaire (nom, groupe, photo), pour
         # nommer l'auteur d'une proposition. Les clés sont exactement celles du
         # référentiel servi par l'API : c'est la même frontière que celle qui
@@ -897,6 +912,44 @@ class SyncJob:
             return None
         brut = (row.payload or {}).get("texteAdopte")
         return TexteAdopte.model_validate(brut) if brut else None
+
+    async def _enrichir_rapports(
+        self,
+        session: AsyncSession,
+        dossier: Dossier,
+        dossier_ref: str | None,
+        report: SyncReport,
+    ) -> None:
+        """Attache les rapports de commission sur le texte (un par lecture).
+
+        Un rapport déposé ne change plus et son URL a déjà été vérifiée : ce qui
+        est en base est réutilisé **sans réseau**. Sinon, on vérifie les uids que
+        l'archive rattache au dossier — un uid que le site ne résout pas ne
+        produit aucun lien (§2.5). Best-effort et silencieux.
+        """
+        uids = self._rapports_par_ref.get(dossier_ref or "")
+        if not uids:
+            return
+        prev = await self._rapports_en_base(session, dossier.id)
+        # Rien de nouveau côté archive → on garde ce qui est connu, sans un seul
+        # appel réseau. Un rapport de plus (nouvelle lecture) relance la
+        # vérification de l'ensemble : elle est courte et l'ordre doit suivre.
+        if prev and len(prev) == len(uids):
+            dossier.rapports_commission = prev
+            report.rapports += len(prev)
+            return
+        dossier.rapports_commission = await verifier_rapports(uids)
+        report.rapports += len(dossier.rapports_commission)
+
+    async def _rapports_en_base(
+        self, session: AsyncSession, dossier_id: str
+    ) -> list[SourceOfficielle]:
+        """Les rapports déjà persistés pour ce dossier (URL déjà vérifiée)."""
+        row = await session.get(DossierRow, dossier_id)
+        if row is None:
+            return []
+        bruts = (row.payload or {}).get("rapportsCommission") or []
+        return [SourceOfficielle.model_validate(b) for b in bruts]
 
     async def _enrichir_senat(
         self, dossier: Dossier, pdf_transmission: bytes, report: SyncReport
@@ -1243,7 +1296,10 @@ class SyncJob:
         questions.desaccord = arguments
         questions.desaccord_objet = ancre.objet
         questions.desaccord_source = SourceOfficielle(
-            type="texte",
+            # `debats`, pas `texte` : c'est un compte rendu de séance, et
+            # l'app lui associe déjà 💬 — dans la liste des documents du
+            # dossier, six 📄 identiques ne distingueraient rien.
+            type="debats",
             libelle="Compte rendu de la séance (Assemblée nationale)",
             url=url_compte_rendu(self._client.legislature, debat.seance_uid),
         )
@@ -1557,6 +1613,10 @@ class SyncJob:
         self._initiatives_par_ref = construire_index_initiatives(
             documents, legislatures
         )
+        # Index dossierRef → rapports de commission sur le texte. Encore les
+        # mêmes documents : le rapport était le seul document du dossier qu'on
+        # ne restituait pas, alors qu'il était déjà téléchargé (§7.5).
+        self._rapports_par_ref = construire_index_rapports(documents, legislatures)
         # Index dossierRef → numéros de documents, pour la liaison certaine
         # débat ↔ dossier (le CR cite « (n° X) »). Les numéros exposés sont ceux
         # de la législature courante — la seule dont on lit les comptes rendus.
@@ -1653,14 +1713,6 @@ class SyncJob:
                     self._actes_par_ref.get(ref_dossier),
                     self._procedure_par_ref.get(ref_dossier),
                 )
-                # ⚠️ Le lien Légifrance n'est PAS ajouté aux `sources` : il vit
-                # dans la carte « La loi » de la fiche, appairé au texte voté —
-                # « ce qui s'applique » à côté de « ce qui a été voté ». Le
-                # remettre ici afficherait deux fois la même URL sous deux
-                # libellés différents, ce qui laisserait croire à deux textes.
-                dossier.sources = sources_sans_le_lien_de_la_loi(
-                    dossier.sources, dossier.etat
-                )
                 # Qui porte le texte — même archive, même document de dépôt que
                 # l'exposé des motifs. Absente pour un dossier sans `dossierRef`
                 # (« TXT-… », « SEN-… », motion) : la ligne disparaît (§2.5).
@@ -1675,6 +1727,11 @@ class SyncJob:
                 # Il devient la source de la Q4 : le dispositif déposé décrit une
                 # version que la navette a modifiée et qui n'est plus en vigueur.
                 await self._enrichir_texte_adopte(
+                    session, dossier, parses[0].dossier_ref, report
+                )
+                # Les rapports de commission : le dernier document du dossier
+                # qui manquait à la liste (§7.5).
+                await self._enrichir_rapports(
                     session, dossier, parses[0].dossier_ref, report
                 )
                 # Texte d'origine sénatoriale : son PDF vit sur senat.fr (le PDF

@@ -72,7 +72,8 @@ async def _main(
         f"{report.initiatives} dossiers dont on sait qui porte le texte, "
         f"{report.etats} dossiers dont on sait où en est le texte, "
         f"{report.textes_adoptes} lois avec leur texte voté "
-        f"(dont {report.lois_lues} lues, source de la Q4)."
+        f"(dont {report.lois_lues} lues, source de la Q4), "
+        f"{report.rapports} rapports de commission liés."
     )
     if report.scrutins_senat or report.senateurs:
         print(

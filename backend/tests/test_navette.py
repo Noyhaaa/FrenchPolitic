@@ -12,7 +12,6 @@ from app.ingestion.navette import (
     etat_du_texte,
     phases_depuis_actes,
     phases_depuis_votes,
-    sources_sans_le_lien_de_la_loi,
     trajectoire,
 )
 from app.schemas import EtatTexte, ResultatGlobal, Scrutin
@@ -530,40 +529,3 @@ def test_aucun_etat_ne_decrit_une_etape_a_venir():
     # Rien de ce qu'on sérialise ne parle du futur.
     rendu = " ".join(str(v) for v in etat.model_dump().values() if v)
     assert "prochain" not in rendu.lower()
-
-
-def test_le_lien_de_la_loi_quitte_la_liste_des_sources():
-    """Il a d'abord vécu parmi les `sources`, avant que la carte « La loi » ne
-    l'affiche à côté du texte voté. Il en est donc retiré : deux fois la même URL
-    sous deux libellés laisserait croire à deux textes."""
-    from app.schemas import SourceOfficielle
-
-    url_loi = "http://www.legifrance.gouv.fr/WAspad/UnTexteDeJorf?numjo=JUSF2534988L"
-    etat = EtatTexte(etat="promulgue", url_legifrance=url_loi)
-    lien_de_la_loi = SourceOfficielle(
-        type="texte", libelle="Loi publiée au Journal officiel", url=url_loi
-    )
-    dossier_legislatif = SourceOfficielle(
-        type="texte",
-        libelle="Dossier législatif",
-        url="https://www.assemblee-nationale.fr/dyn/17/dossiers/DLR5L17N50001",
-    )
-    # ⚠️ Une autre source peut légitimement pointer vers Légifrance : c'est
-    # l'URL EXACTE de la loi qu'on retire, pas tout ce qui y ressemble.
-    autre_legifrance = SourceOfficielle(
-        type="texte", libelle="Texte de loi", url="https://www.legifrance.gouv.fr/"
-    )
-    restantes = sources_sans_le_lien_de_la_loi(
-        [dossier_legislatif, lien_de_la_loi, autre_legifrance], etat
-    )
-    assert restantes == [dossier_legislatif, autre_legifrance]
-
-
-def test_sans_loi_promulguee_les_sources_sont_intactes():
-    from app.schemas import SourceOfficielle
-
-    sources = [SourceOfficielle(type="texte", libelle="Dossier", url="https://an.fr/d")]
-    assert sources_sans_le_lien_de_la_loi(sources, None) == sources
-    assert (
-        sources_sans_le_lien_de_la_loi(sources, EtatTexte(etat="en_navette")) == sources
-    )

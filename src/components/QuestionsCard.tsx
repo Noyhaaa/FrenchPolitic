@@ -3,7 +3,6 @@ import { StyleSheet, Text, View } from 'react-native';
 import { colors, radius, spacing, typography } from '@/theme';
 import type { ArgumentGroupe, PositionVote, QuestionsCitoyennes } from '@/types';
 import { libelleScrutin, positionLabel } from '@/utils/format';
-import { SourceLink } from './SourceLink';
 
 interface Props {
   questions: QuestionsCitoyennes;
@@ -69,8 +68,12 @@ function QARow({
  * suivie de sa réponse aérée, séparées par un filet fin — fini le mur de petits
  * labels. Le désaccord (Q2) devient des **cartes de groupe** : pastille de sens
  * + LIBELLÉ (jamais la couleur seule, §8/RGAA), nom du groupe, puis l'argument
- * qu'il a lui-même donné (§7.4), avec lien vers le compte rendu (§7.5).
- * Réponse absente → « Information non disponible » (§2.5).
+ * qu'il a lui-même donné (§7.4). Réponse absente → « Information non
+ * disponible » (§2.5).
+ *
+ * ⚠️ Aucun lien de source ici : ils vivent tous dans « Les documents du
+ * dossier », en bas de fiche (§7.5). Ce qui reste, c'est le **nom** du document
+ * dont sort la Q4 — lequel des trois a servi change le sens de la phrase.
  *
  * Les positions du désaccord sont celles exprimées sur UN vote précis, nommé
  * au-dessus d'elles : « pour » sur une motion de rejet préalable veut dire
@@ -161,11 +164,11 @@ export function QuestionsCard({ questions, evenementAutonome }: Props) {
                 </View>
               ))}
             </View>
-            {questions.desaccordSource ? (
-              <View style={styles.source}>
-                <SourceLink source={questions.desaccordSource} />
-              </View>
-            ) : null}
+            {/* Le compte rendu de séance d'où sortent ces prises de parole est
+                dans « Les documents du dossier », en bas de fiche — pas ici :
+                la même URL deux fois sur une page n'ajoute rien (§7.5). Sa
+                provenance, elle, reste écrite juste au-dessus (« exprimés en
+                séance »). */}
           </>
         ) : (
           <Text style={[styles.reponse, styles.indispo]}>
@@ -187,17 +190,23 @@ export function QuestionsCard({ questions, evenementAutonome }: Props) {
     blocs.push({
       cle: 'changement',
       rendu: (n) => (
-        // Q4 : la réponse vient du dispositif officiel (fait — elle porte alors
-        // son lien vers le texte déposé, §7.5) ou, à défaut, de l'exposé des
-        // motifs (parole de l'auteur, signalée par son préfixe §4.3).
+        // Q4 : la réponse vient du texte définitivement voté (la loi, à
+        // l'indicatif), du dispositif du texte déposé (fait, au conditionnel)
+        // ou, à défaut, de l'exposé des motifs (parole de l'auteur, signalée
+        // par son préfixe §4.3).
         <QARow n={n} question="Qu'est-ce que ça change concrètement ?">
         {questions.changement ? (
           <>
             <Text style={styles.reponse}>{questions.changement}</Text>
+            {/* Le NOM du document, pas son lien : celui-ci vit dans « Les
+                documents du dossier » (§7.5). Mais lequel des trois a servi
+                change le sens de la phrase — « le texte voté » décrit ce qui
+                s'applique, « le texte déposé » une version que la navette a
+                modifiée. Le taire laisserait les deux se lire pareil. */}
             {questions.changementSource ? (
-              <View style={styles.source}>
-                <SourceLink source={questions.changementSource} />
-              </View>
+              <Text style={styles.provenance}>
+                D'après : {questions.changementSource.libelle}
+              </Text>
             ) : null}
           </>
         ) : (
@@ -317,8 +326,11 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: colors.textSecondary,
   },
-  source: {
+  // Nom du document d'où sort la réponse — factuel, pas un lien (celui-ci vit
+  // dans « Les documents du dossier »).
+  provenance: {
+    ...typography.meta,
     marginTop: spacing.sm,
-    alignSelf: 'flex-start',
+    color: colors.textTertiary,
   },
 });

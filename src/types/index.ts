@@ -452,7 +452,22 @@ export interface Dossier {
   /** Votes du dossier (allégés), du plus récent au plus ancien. */
   scrutins: ScrutinResume[];
   amendements: Amendement[];
+  /**
+   * Les documents officiels du dossier, dans l'ordre de la vie du texte
+   * (dossier législatif → texte déposé → rapports → compte rendu → texte voté
+   * → texte en vigueur). Liste **dérivée** côté backend de ce que le dossier
+   * porte déjà.
+   *
+   * ⚠️ C'est le **seul endroit lié** de la fiche : les cartes qui citent un
+   * document (exposé des motifs, Q2/Q4, « La loi ») n'ont plus de `SourceLink`.
+   * Elles gardent la provenance en toutes lettres, pas l'URL.
+   */
   sources: SourceOfficielle[];
+  /**
+   * Rapports de commission sur le texte (un par lecture). Alimentent `sources` ;
+   * la fiche ne les rend pas à part.
+   */
+  rapportsCommission?: SourceOfficielle[];
   resume: ResumeScrutin;
   /**
    * Qui porte le texte (Gouvernement, parlementaire nommé, Sénat). Absente pour

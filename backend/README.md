@@ -99,6 +99,12 @@ python -m app.ingestion.etats               # --dry-run pour voir la répartitio
 # --sans-llm récupère les textes sans toucher aux questions.
 python -m app.ingestion.lois                # --dry-run · --sans-llm
 
+# Attache les RAPPORTS DE COMMISSION (URL vérifiée par HEAD) et recompose « les
+# documents du dossier » (Dossier.sources) sur toute la base. Même archive
+# (~10 Mo) : ni scrutins, ni PDF, ni LLM. À rejouer quand l'ordre ou les
+# libellés de `app/domain/sources.py` changent — la composition est idempotente.
+python -m app.ingestion.sources             # --dry-run · --sans-rapports
+
 # L'API sert alors la base ingérée (REPOSITORY_BACKEND=postgres via .env).
 uvicorn app.main:app --reload
 ```
@@ -305,11 +311,9 @@ Le `PROM-PUB` donne en prime le lien vers le texte **en vigueur**
 `infoJO`, jamais une URL construite ici ; elle n'est pas vérifiée à l'ingestion
 (Légifrance répond 403 à tout script, challenge Cloudflare — ce n'est pas une
 preuve de lien mort), et la référence écrite (n° + date + JO) reste affichée à
-côté. ⚠️ Ce lien **ne figure pas** dans `Dossier.sources` : il vit dans la carte
-« La loi », appairé au texte voté (cf. ci-dessous). L'y laisser afficherait deux
-fois la même URL sous deux libellés — d'où `sources_sans_le_lien_de_la_loi`, qui
-retire l'URL **exacte** de l'état et non « tout ce qui ressemble à du
-Légifrance » (une source légitime peut y pointer).
+côté. ⚠️ Ce lien n'est **pas** dans la carte « La loi » (qui ne porte que la
+référence écrite) : il vit, comme tous les autres, dans « Les documents du
+dossier » — un seul endroit lié par fiche (cf. ci-dessous).
 
 ### La loi finale (`app/ingestion/textes_adoptes.py`)
 
@@ -378,6 +382,81 @@ déjà en base est regénérée dès qu'une source plus haute apparaît — mêm
 que celui qui faisait déjà remonter l'exposé vers le dispositif. Le seul mot qui
 change dans le prompt est le registre : le conditionnel dit « ce n'est qu'une
 proposition », ce qui serait faux d'un texte en vigueur.
+
+### Les documents du dossier (`app/domain/sources.py`, `app/ingestion/rapports.py`)
+
+§7.5 promet la réversibilité — atteindre la source brute en un tap. La fiche d'un
+dossier n'en offrait qu'une : la page du dossier législatif. **Mesuré : 313
+dossiers sur 328** n'avaient pas d'autre lien, soit 1,17 en moyenne.
+
+Ce n'était pas un manque de données mais de **restitution** : les URLs étaient
+déjà dans le payload, chacune enfermée dans la carte qui s'en sert.
+
+| Document | Où il vivait | Dossiers |
+|---|---|---|
+| Texte déposé | `exposeMotifs.source` / `dispositif.source` | 243 |
+| Compte rendu de séance | `resume.questions.desaccordSource` (Q2) | 211 |
+| Texte voté | `texteAdopte.source` (carte « La loi ») | 76 |
+| Texte en vigueur | `etat.urlLegifrance` (carte « La loi ») | 96 |
+
+`documents_du_dossier(dossier)` les rassemble, **sans rien télécharger**, dans
+l'ordre de la vie du texte : dossier législatif → texte déposé → rapports de
+commission → compte rendu → texte voté → texte en vigueur. La fonction est pure
+et **idempotente** — `Dossier.sources` est donc une **vue**, recomposée à chaque
+écriture (`_upsert_dossier`, `etats`, `lois`, `revalider`), jamais un
+accumulateur. Une URL n'y paraît qu'une fois (l'exposé et le dispositif sortent
+du même PDF : 176 dossiers), et un document absent laisse sa place vide (§2.5).
+
+⚠️ Cette liste est le **seul endroit lié** de la fiche. Les cartes qui citaient
+un document portaient chacune leur `SourceLink` (`ExposeMotifsCard`,
+`QuestionsCard` pour la Q2 et la Q4, `LoiCard` pour ses deux liens) : la même URL
+apparaissait jusqu'à trois fois sur une même page. Ces liens ont été retirés, et
+`sources_sans_le_lien_de_la_loi` supprimée avec eux. Ce qui reste dans les
+cartes, c'est ce qu'un lien ne dit pas — la **provenance en toutes lettres** :
+« Selon l'auteur du texte », « seuls les groupes qui se sont exprimés en séance »,
+et pour la Q4 le **nom** du document dont elle sort (« D'après : Texte voté par
+le Parlement »), parce que lequel des trois barreaux a servi change le sens de la
+phrase. Contrôlé en base : les URLs qu'affichaient les cartes sont **toutes**
+dans la liste, **zéro orpheline**.
+
+**Le rapport de commission** est le seul qu'il a fallu ingérer. Il était pourtant
+dans l'archive des dossiers déjà téléchargée : 584 documents `RAPPAN…` de
+provenance `Commission`, dont **534 de famille `RAPINIT`** — le rapport *sur
+l'initiative*, à distinguer des `RAPAUT` et `RAPTACOM` (50 documents), qui ne
+répondent pas à la même question et que rien ne permet de nommer sûrement.
+
+Son URL publique contient le slug de la commission
+(`/dyn/17/rapports/cion_lois/l17b0912_rapport-fond`) — et **aucun champ de
+l'archive ne le donne**. L'`organeRef` n'aide pas : 4 des 12 valeurs les plus
+fréquentes ne sont même pas des commissions (`due`, `ots`…), et il se crée une
+commission spéciale par texte. Une table de slugs codés en dur vieillirait mal.
+
+Mais le site **résout le slug lui-même** :
+
+```
+HEAD /dyn/docs/RAPPANR5L17B0912  → 302 → /dyn/17/rapports/cion_lois/l17b0912_rapport-fond
+HEAD /dyn/docs/RAPPANR5L17B1159  → 302 → /dyn/17/rapports/due/l17b1159_rapport-fond
+HEAD /dyn/docs/RAPPANR5L17B9999  → 404
+```
+
+C'est donc une **dérivation depuis l'`uid`**, comme partout ailleurs, et elle se
+vérifie : `verifier_rapports` fait un HEAD par uid et n'attache que ce qui répond
+(même doctrine que `attacher_portraits`). ⚠️ **Sans `.pdf`** — cette variante
+renvoie le fichier, l'autre la page lisible, qui est ce que §7.5 demande.
+Les rapports sont triés **par numéro croissant** (donc de la 1re lecture à la
+dernière ; 80 dossiers en portent plusieurs) et chacun affiche **son numéro** —
+c'est celui que citent les comptes rendus (« (n° 912) »).
+
+Préservés entre runs comme l'initiative ou l'état. Rattrapage :
+`python -m app.ingestion.sources` (archive de 10 Mo + HEAD, ni PDF ni LLM).
+
+Résultat mesuré : **287 rapports sur 205 dossiers, 0 non résolu** ; la fiche passe
+de **1,17 à 4,12 liens** par dossier, et de **313 à 36** dossiers réduits à une
+seule source. Le compte rendu est au passage retypé `debats` (211 dossiers) : son
+icône le distingue, là où six 📄 identiques ne distingueraient rien.
+
+Hors périmètre : le **rapport et le compte rendu du Sénat**, que nous n'ingérons
+pas (trou de source déjà documenté, pas un oubli de restitution).
 
 ### Qui porte le texte (`app/ingestion/initiative.py`)
 

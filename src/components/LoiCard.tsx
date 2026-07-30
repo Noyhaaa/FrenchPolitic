@@ -1,13 +1,11 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 import { colors, radius, spacing, typography } from '@/theme';
-import type { EtatTexte, TexteAdopte } from '@/types';
+import type { EtatTexte } from '@/types';
 import { formatDateLong } from '@/utils/format';
-import { SourceLink } from './SourceLink';
 
 interface Props {
   etat?: EtatTexte | null;
-  texteAdopte?: TexteAdopte | null;
 }
 
 /**
@@ -17,20 +15,20 @@ interface Props {
  * son auteur, ses articles d'origine, et « qu'est-ce que ça change ? » au
  * conditionnel. Sur un texte promulgué, cette version n'existe plus — la navette
  * et les amendements l'ont modifiée. Cette carte donne la loi telle qu'elle
- * existe, et les deux liens pour la lire.
+ * existe : son numéro, sa date, son *Journal officiel*.
  *
- * ⚠️ **Deux liens, parce que ce sont deux choses.** Le texte *voté* est celui
- * que le Parlement a adopté ; le texte *en vigueur* (Légifrance) est celui qui
- * s'applique aujourd'hui, et une loi peut avoir été modifiée depuis sa
- * promulgation. Les confondre sous un seul lien laisserait croire que l'un vaut
- * l'autre.
+ * ⚠️ **Pas de lien ici.** Le texte voté et le texte en vigueur sont deux
+ * documents distincts — ce que le Parlement a adopté, et ce qui s'applique
+ * aujourd'hui — et ils figurent tous deux dans « Les documents du dossier », en
+ * bas de fiche, avec le reste (§7.5). Les répéter ici afficherait les mêmes
+ * URLs deux fois sur une même page.
  *
- * Le lien du texte voté disparaît quand l'archive ne le désigne pas (mesuré :
- * 76 lois sur 96), plutôt qu'un lien mort ou un « indisponible » (§2.5). Le
- * **corps** de la loi, lui, n'est jamais affiché : du droit codifié brut est
- * illisible — même doctrine que le dispositif du texte déposé.
+ * La **référence écrite** reste, elle, indispensable : c'est elle qui permet de
+ * retrouver la loi même si un lien vieillit. Le **corps** de la loi n'est jamais
+ * affiché : du droit codifié brut est illisible — même doctrine que le
+ * dispositif du texte déposé.
  */
-export function LoiCard({ etat, texteAdopte }: Props) {
+export function LoiCard({ etat }: Props) {
   // La carte ne parle que d'une loi existante : sur un texte encore en navette,
   // il n'y a ni numéro, ni Journal officiel, ni texte définitif.
   if (etat?.etat !== 'promulgue') return null;
@@ -42,18 +40,7 @@ export function LoiCard({ etat, texteAdopte }: Props) {
   const journalOfficiel = etat.dateJournalOfficiel
     ? `Journal officiel du ${formatDateLong(etat.dateJournalOfficiel)}`
     : null;
-  const liens = [
-    texteAdopte?.source,
-    etat.urlLegifrance
-      ? {
-          type: 'texte' as const,
-          libelle: 'Texte en vigueur (Légifrance)',
-          url: etat.urlLegifrance,
-        }
-      : null,
-  ].filter((s): s is NonNullable<typeof s> => s != null);
-
-  if (!reference && !journalOfficiel && liens.length === 0) return null;
+  if (!reference && !journalOfficiel) return null;
 
   return (
     <View style={styles.card}>
@@ -61,13 +48,6 @@ export function LoiCard({ etat, texteAdopte }: Props) {
       {reference ? <Text style={styles.reference}>{reference}</Text> : null}
       {journalOfficiel ? (
         <Text style={typography.meta}>{journalOfficiel}</Text>
-      ) : null}
-      {liens.length > 0 ? (
-        <View style={styles.liens}>
-          {liens.map((source) => (
-            <SourceLink key={source.url} source={source} />
-          ))}
-        </View>
       ) : null}
     </View>
   );
@@ -90,10 +70,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 22,
     fontWeight: '700',
-  },
-  liens: {
-    marginTop: spacing.md,
-    gap: spacing.sm,
-    alignItems: 'flex-start',
   },
 });

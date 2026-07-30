@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, radius, spacing, typography } from '@/theme';
 import type { ExposeMotifs } from '@/types';
-import { SourceLink } from './SourceLink';
 
 interface Props {
   expose: ExposeMotifs;
@@ -17,8 +16,11 @@ const SEUIL_REPLI = 320;
  * ⚠️ Contenu NON neutre (§4.3) : présenté comme une **citation attribuée**
  * (pastille « Point de vue de l'auteur », texte en italique entre guillemets),
  * jamais confondu avec le résumé neutre. Un accent ambre + le libellé signalent
- * qu'il s'agit d'un point de vue, pas d'un fait. Source officielle en 1 tap
- * (réversibilité §7.5).
+ * qu'il s'agit d'un point de vue, pas d'un fait.
+ *
+ * Le lien vers le texte déposé n'est PAS ici : il vit dans « Les documents du
+ * dossier », en bas de fiche, avec tous les autres (§7.5). Le répéter à chaque
+ * carte qui cite un document donnait la même URL trois fois sur une même page.
  */
 export function ExposeMotifsCard({ expose }: Props) {
   const [deplie, setDeplie] = useState(false);
@@ -59,10 +61,6 @@ export function ExposeMotifsCard({ expose }: Props) {
           </Text>
         </Pressable>
       ) : null}
-
-      <View style={styles.source}>
-        <SourceLink source={expose.source} />
-      </View>
     </View>
   );
 }
@@ -101,9 +99,5 @@ const styles = StyleSheet.create({
     color: colors.brand,
     fontWeight: '600',
     paddingTop: spacing.md,
-  },
-  source: {
-    marginTop: spacing.lg,
-    alignSelf: 'flex-start',
   },
 });

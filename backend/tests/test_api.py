@@ -78,11 +78,14 @@ def test_dossier_dit_ou_en_est_le_texte(client):
     assert loi["etat"]["etat"] == "promulgue"
     assert loi["etat"]["numeroLoi"] == "2026-630"
     assert loi["etat"]["dateJournalOfficiel"] == "2026-07-14"
-    # Le lien vers le texte en vigueur : porté par l'état, affiché par la carte
-    # « La loi » à côté du texte voté. ⚠️ PAS dans `sources` — deux fois la même
-    # URL sous deux libellés laisserait croire à deux textes.
+    # Le lien vers le texte en vigueur : porté par l'état, et affiché dans la
+    # SEULE liste des documents du dossier. La carte « La loi » n'en montre que
+    # la référence écrite — un lien lui suffisait à faire doublon (§7.5).
     assert loi["etat"]["urlLegifrance"]
-    assert all(s["url"] != loi["etat"]["urlLegifrance"] for s in loi["sources"])
+    lien_en_vigueur = [
+        s for s in loi["sources"] if s["url"] == loi["etat"]["urlLegifrance"]
+    ]
+    assert [s["libelle"] for s in lien_en_vigueur] == ["Texte en vigueur (Légifrance)"]
 
     en_cours = client.get("/dossiers/dos-energie-2026").json()["etat"]
     assert en_cours["etat"] == "en_navette"
@@ -116,6 +119,37 @@ def test_loi_promulguee_porte_le_texte_vote(client):
 
     # Un texte encore en navette n'a pas de loi finale : le bloc disparaît (§2.5).
     assert client.get("/dossiers/dos-energie-2026").json()["texteAdopte"] is None
+
+
+def test_les_documents_du_dossier_sont_servis_dans_l_ordre(client):
+    """§7.5 : la fiche indexe TOUS les documents du dossier, pas seulement la
+    page du dossier législatif — et dans l'ordre de la vie du texte.
+
+    Le compte rendu est typé `debats` (l'app lui associe 💬) ; les autres sont
+    des textes. Chaque URL n'apparaît qu'une fois, même quand deux champs la
+    portent (l'exposé des motifs et le dispositif sortent du même PDF).
+    """
+    loi = client.get("/dossiers/dos-sante-2026").json()
+    assert [s["libelle"] for s in loi["sources"]] == [
+        "Dossier législatif",
+        "Texte déposé",
+        "Rapport de la commission (n° 902)",
+        "Rapport de la commission (n° 1450)",
+        "Compte rendu de la séance (Assemblée nationale)",
+        "Texte voté par le Parlement",
+        "Texte en vigueur (Légifrance)",
+    ]
+    urls = [s["url"] for s in loi["sources"]]
+    assert len(urls) == len(set(urls))
+    par_type = {s["libelle"]: s["type"] for s in loi["sources"]}
+    assert par_type["Compte rendu de la séance (Assemblée nationale)"] == "debats"
+
+    # Les rapports traversent aussi l'API en camelCase — ils nourrissent la
+    # liste, la fiche ne les rend pas à part.
+    assert [s["libelle"] for s in loi["rapportsCommission"]] == [
+        "Rapport de la commission (n° 902)",
+        "Rapport de la commission (n° 1450)",
+    ]
 
 
 def test_amendement_scrutin_accessible(client):

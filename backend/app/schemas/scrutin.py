@@ -435,7 +435,15 @@ class Dossier(CamelModel):
     mise_a_jour: MiseAJourDossier | None = None
     scrutins: list[ScrutinResume] = []
     amendements: list[Amendement] = []
+    # ⚠️ Liste **dérivée** : recomposée à chaque écriture par
+    # `app.domain.sources.documents_du_dossier` depuis les documents que le
+    # dossier porte déjà (texte déposé, rapports, compte rendu, loi). Ne rien y
+    # ajouter à la main — ce serait perdu au prochain run.
     sources: list[SourceOfficielle] = []
+    # Rapports de commission sur le texte (un par lecture), dont l'URL est
+    # vérifiée à l'ingestion. Ils alimentent `sources` ; la fiche ne les rend
+    # pas à part.
+    rapports_commission: list[SourceOfficielle] = []
     resume: ResumeScrutin
     # Exposé des motifs (point de vue de l'auteur, bloc attribué). Absent tant
     # qu'on n'a pas pu récupérer le PDF officiel du texte (§2.5 : pas comblé).

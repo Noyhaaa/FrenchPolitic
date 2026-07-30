@@ -105,16 +105,15 @@ Six écrans du cœur de valeur :
    navette · 21 résolutions · 7 au Conseil constitutionnel · 4 retirés) ; les
    74 sans actes (`TXT-…`, `SEN-…`) gardent le bloc masqué.
    Puis, pour une loi promulguée seulement, la carte **« La loi »**
-   (`LoiCard`) : « Loi n° 2025-379 du 28 avril 2025 », son *Journal officiel*, et
-   **deux liens** — le **texte voté par le Parlement** (`Dossier.texteAdopte`, la
-   « petite loi ») et le **texte en vigueur** (Légifrance, `etat.urlLegifrance`).
-   Deux liens parce que ce sont **deux choses** : ce que le Parlement a adopté, et
-   ce qui s'applique aujourd'hui — une loi peut avoir été modifiée depuis. Ils ne
-   sont donc **pas** dans « Sources officielles » : deux fois la même URL sous
-   deux libellés laisserait croire à deux textes (`sources_sans_le_lien_de_la_loi`
-   retire l'URL **exacte** de l'état, pas tout ce qui ressemble à du Légifrance).
-   Le lien du texte voté disparaît quand l'archive ne le désigne pas (76/96, §2.5)
-   et le **corps** de la loi n'est jamais affiché — droit codifié illisible, même
+   (`LoiCard`) : « Loi n° 2025-379 du 28 avril 2025 » et son *Journal officiel*.
+   ⚠️ **Aucun lien dans cette carte** : le **texte voté par le Parlement**
+   (`Dossier.texteAdopte`, la « petite loi ») et le **texte en vigueur**
+   (Légifrance, `etat.urlLegifrance`) sont deux documents distincts — ce que le
+   Parlement a adopté, et ce qui s'applique aujourd'hui, une loi ayant pu être
+   modifiée depuis — mais ils vivent tous deux dans « Les documents du dossier »
+   en bas de fiche, avec le reste (cf. plus bas). La **référence écrite** reste
+   ici, elle : c'est elle qui permet de retrouver la loi si un lien vieillit.
+   Le **corps** de la loi n'est jamais affiché — droit codifié illisible, même
    doctrine que le dispositif.
    Sous le titre, la carte **« À l'origine du texte »** (`InitiativeLigne`,
    `Dossier.initiative` servie par l'API) — **qui porte le texte**, la première
@@ -149,10 +148,26 @@ Six écrans du cœur de valeur :
    **Sous-amendements** (avec rappel de l'amendement parent). Chaque ligne ouvre
    la fiche vote. Un vote d'amendement n'apparaît **que** dans sa section (un
    sous-amendement que dans la sienne), et les listes longues sont repliées
-   au-delà de 4 éléments (« Voir les N autres… »). Les **Sources officielles**
-   de la fiche sont de **niveau dossier** uniquement (dossier législatif, et
-   **Légifrance** quand le texte est promulgué — le seul lien vers la loi en
-   vigueur) — la source de chaque vote vit sur sa propre fiche, pas de doublon.
+   au-delà de 4 éléments (« Voir les N autres… »). La fiche se clôt sur
+   **« Les documents du dossier »** (§7.5) — **tous** les documents officiels du
+   texte, dans l'**ordre de sa vie** : dossier législatif → texte déposé →
+   **rapports de commission** (un par lecture, chacun avec son numéro) → compte
+   rendu de séance → texte voté → texte en vigueur. La liste est **dérivée** de
+   ce que le dossier porte déjà (`app/domain/sources.py`, `documents_du_dossier`,
+   idempotente) : rien n'y est écrit à la main, une URL n'y paraît qu'une fois
+   (l'exposé et le dispositif sortent du même PDF), et un document absent laisse
+   sa place vide (§2.5). ⚠️ C'est le **seul endroit de la fiche** où un document
+   du dossier est lié : `ExposeMotifsCard`, `QuestionsCard` et `LoiCard` ne
+   portent plus de `SourceLink` — la même URL deux ou trois fois sur une page
+   n'ajoutait rien. Ce qui reste dans les cartes, c'est ce qu'un lien ne dit
+   pas : la **provenance en toutes lettres** (« Selon l'auteur du texte »,
+   « seuls les groupes qui se sont exprimés en séance », et pour la Q4 le **nom**
+   du document dont elle sort — « D'après : Texte voté par le Parlement » —, car
+   lequel des trois a servi change le sens de la phrase). Vérifié en base : les
+   URLs qu'affichaient les cartes sont **toutes** dans la liste, zéro orpheline.
+   Ce qui reste hors d'ici, c'est la source de chaque **vote** — elle vit sur sa
+   propre fiche. Mesuré : de **1,17 à 4,12 liens** par dossier, et de **313 à
+   36** dossiers réduits à une seule source.
 3. **Fiche vote** (`ScrutinDetailScreen` → `useScrutin`, `GET /scrutins/{id}`) :
    titre = type du vote en clair — **cliquable quand c'est un terme de
    procédure** (« Motion de rejet préalable », « Vote sur l'ensemble »…), il
@@ -353,9 +368,24 @@ sous-amendement est **rattaché à son amendement parent** (« … à l'amendeme
 n° X ») ; le scrutin du parent embarque ses sous-amendements pour la fiche vote.
 La fusion inter-runs pose le badge « mis à jour » quand un nouveau scrutin
 (texte, amendement ou sous-amendement) rejoint un dossier connu. Les **sources
-du dossier** sont de niveau dossier uniquement (la page du dossier législatif,
-plus **Légifrance** dès que l'état du texte est `promulgue`) —
-la source de chaque vote reste sur son scrutin, servie par sa fiche vote. Le
+du dossier** sont de niveau dossier uniquement — la source de chaque vote reste
+sur son scrutin, servie par sa fiche vote — mais elles les rassemblent **toutes**
+(§7.5) : `Dossier.sources` est une liste **dérivée**, recomposée à chaque
+écriture par `app/domain/sources.py` depuis les documents que le dossier porte
+déjà (page du dossier, texte déposé, `rapportsCommission`, compte rendu de la Q2,
+texte voté, Légifrance). ⚠️ Ne rien y ajouter à la main : ce serait perdu au run
+suivant. Le seul document qu'il a fallu **ingérer** pour ça est le **rapport de
+commission** (`app/ingestion/rapports.py`) — il était dans l'archive des dossiers
+téléchargée à chaque run, sous la famille `RAPINIT` (« rapport sur une
+initiative », à distinguer des `RAPAUT`/`RAPTACOM`). Son URL publique contient le
+slug de la commission, que **rien** dans l'archive ne donne (et 4 des 12 organes
+les plus fréquents ne sont même pas des commissions : `due`, `ots`…) ; on passe
+donc par le **résolveur du site**, `/dyn/docs/{uid}`, qui redirige vers la page
+canonique et répond 404 sur un uid inconnu — dérivation depuis l'`uid` comme
+partout, **vérifiée par HEAD** avant d'être attachée (doctrine
+`attacher_portraits`). Mesuré : 287 rapports sur 205 dossiers, **0 non résolu**.
+Le compte rendu de séance est typé `debats` (pas `texte`) : son icône le
+distingue dans la liste. Le
 **résumé neutre est généré à l'ingestion par un gabarit déterministe** (`app/ai/`
 — `faits` → `rag` → `gabarit` → garde-fous, dans `generer_resume`), ancré
 uniquement sur les faits des scrutins (nature, trajectoire, résultat du vote
@@ -666,6 +696,7 @@ python -m app.ingestion.divisions         # recalcule l'indice de division (rang
 python -m app.ingestion.initiatives       # renseigne « qui porte le texte » en base (archive 10 Mo, ni PDF ni LLM)
 python -m app.ingestion.etats             # renseigne « où en est le texte » en base (même archive de 10 Mo)
 python -m app.ingestion.lois              # attache la LOI FINALE (texte voté) + réécrit la Q4 à l'indicatif
+python -m app.ingestion.sources           # rapports de commission + recompose « les documents du dossier »
 uvicorn app.main:app --reload             # http://localhost:8000/docs (sert la base via .env)
 pytest                                     # suite de tests (forcés sur seed)
 ```
@@ -785,8 +816,11 @@ Défini dans `src/types/index.ts`. **Entité centrale `Dossier`** (un texte de l
 sort, `cible?` (article visé) + `dispositif?` (ce que l'amendement change) +
 `exposeSommaire?` (le « pourquoi » côté auteur, non neutre) tirés de l'open data
 AN quand disponibles, `scrutinId` vers la fiche vote, et `sousAmendements?` — les
-**sous-amendements rattachés** à cet amendement, même forme), `sources`,
-`statut`, `theme`, `dateDernierScrutin`, `trajectoire` (les étapes du texte au
+**sous-amendements rattachés** à cet amendement, même forme), `sources` (**les
+documents du dossier**, dans l'ordre de la vie du texte — liste **dérivée**, cf.
+plus haut), `rapportsCommission?` (les rapports de commission, un par lecture,
+URL vérifiée à l'ingestion : ils **alimentent** `sources`, la fiche ne les rend
+pas à part), `statut`, `theme`, `dateDernierScrutin`, `trajectoire` (les étapes du texte au
 Parlement, **les deux chambres**, calculées à l'ingestion — vide = frise
 masquée), `etat?` (**où en est le texte aujourd'hui**, la clôture de la frise :
 `etat` — `promulgue` | `resolution` | `retire` | `conseil_constitutionnel` |

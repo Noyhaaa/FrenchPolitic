@@ -35,7 +35,7 @@ import re
 
 from app.domain.enums import Chambre, StatutScrutin
 from app.ingestion.normalize import as_list
-from app.schemas import EtatTexte, PhaseScrutin, Scrutin, SourceOfficielle
+from app.schemas import EtatTexte, PhaseScrutin, Scrutin
 from app.utils.text import fold
 
 # ---------------------------------------------------------------------------
@@ -277,27 +277,6 @@ def etat_du_texte(
         chambre=_CHAMBRE_PAR_ACTE[derniere["codeActe"]],
         statut=statut_dernier,
     )
-
-
-def sources_sans_le_lien_de_la_loi(
-    sources: list[SourceOfficielle], etat: EtatTexte | None
-) -> list[SourceOfficielle]:
-    """Les sources du dossier, **privées du lien vers le texte en vigueur**.
-
-    Ce lien a d'abord été posé parmi les `sources`, avant que la carte « La loi »
-    ne l'affiche à côté du texte **voté** — les deux ensemble, parce qu'ils ne
-    disent pas la même chose. Il n'a plus rien à faire dans la liste : deux fois
-    la même URL sous deux libellés laisserait croire à deux textes.
-
-    ⚠️ On retire **exactement** l'URL que porte l'état, pas « tout ce qui
-    ressemble à du Légifrance » : une source légitime pourrait pointer là-bas
-    (le seed le fait), et un prédicat approximatif l'emporterait avec.
-    `EtatTexte.url_legifrance` reste la seule référence de ce lien.
-    """
-    url = etat.url_legifrance if etat else None
-    if not url:
-        return sources
-    return [s for s in sources if s.url != url]
 
 
 # ---------------------------------------------------------------------------

@@ -34,6 +34,7 @@ from app.ai.questions import generer_changement_loi
 from app.config import settings
 from app.db.models import DossierRow
 from app.db.session import make_engine, make_session_factory
+from app.domain.sources import documents_du_dossier
 from app.ingestion.assemblee import AssembleeOpenDataClient
 from app.ingestion.textes_adoptes import (
     construire_index_publications_ta,
@@ -160,6 +161,8 @@ async def _main(dry_run: bool, sans_llm: bool, legislature: int) -> None:
                     # est validée — mieux qu'un trou (§2.5).
                     res["Q4 rejetée par les garde-fous"] += 1
 
+            # Le texte voté est un document du dossier : la liste le reflète.
+            dossier.sources = documents_du_dossier(dossier)
             apres = dossier.model_dump(mode="json", by_alias=True)
             if apres == avant:
                 res["déjà à jour"] += 1

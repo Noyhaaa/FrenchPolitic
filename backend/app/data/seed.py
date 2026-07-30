@@ -8,12 +8,14 @@ from __future__ import annotations
 
 from app.domain.enums import Chambre, ObjetVote, PositionVote
 from app.ingestion.normalize import type_objet_vote
+from app.domain.sources import documents_du_dossier
 from app.schemas import (
     Amendement,
     ChangementTexte,
     Depute,
     Dossier,
     EtatTexte,
+    ExposeMotifs,
     GroupeListItem,
     Initiative,
     MiseAJourDossier,
@@ -614,9 +616,46 @@ SEED_DOSSIERS: list[Dossier] = [
         date_dernier_scrutin="2026-07-03T09:45:00Z",
         scrutins=[_resume_scrutin("scr-2026-0398")],
         amendements=[],
-        # Pas de source Légifrance dans la liste : le lien vers le texte en
-        # vigueur vit dans la carte « La loi », appairé au texte voté.
-        sources=_sources("texte", "debats"),
+        # Le dossier de démonstration des **six documents** (§7.5) : sa liste
+        # `sources` n'est pas écrite ici mais **composée** plus bas, exactement
+        # comme à l'ingestion. Ce qui est écrit, c'est la base — la page du
+        # dossier — et les documents eux-mêmes (exposé, rapports, compte rendu,
+        # texte voté, Légifrance), chacun à sa place dans le dossier.
+        sources=[
+            SourceOfficielle(
+                type="texte",
+                libelle="Dossier législatif",
+                url="https://www.assemblee-nationale.fr/dyn/17/dossiers/DLR5L17N99999",
+            )
+        ],
+        expose_motifs=ExposeMotifs(
+            texte=(
+                "Dans plusieurs départements, l'accès à un médecin traitant "
+                "s'est dégradé au point que des patients renoncent aux soins."
+            ),
+            source=SourceOfficielle(
+                type="texte",
+                libelle="Texte déposé",
+                url=(
+                    "https://www.assemblee-nationale.fr/dyn/17/textes/"
+                    "l17b0888_projet-loi"
+                ),
+            ),
+        ),
+        # Deux lectures, donc deux rapports : leur numéro les distingue, et
+        # c'est celui que citent les comptes rendus (« (n° 902) »).
+        rapports_commission=[
+            SourceOfficielle(
+                type="texte",
+                libelle="Rapport de la commission (n° 902)",
+                url="https://www.assemblee-nationale.fr/dyn/docs/RAPPANR5L17B0902",
+            ),
+            SourceOfficielle(
+                type="texte",
+                libelle="Rapport de la commission (n° 1450)",
+                url="https://www.assemblee-nationale.fr/dyn/docs/RAPPANR5L17B1450",
+            ),
+        ],
         resume=ResumeScrutin(
             titre_clair="Lutter contre les déserts médicaux",
             resume=[
@@ -648,6 +687,16 @@ SEED_DOSSIERS: list[Dossier] = [
                         "l17t0999_texte-adopte-seance"
                     ),
                 ),
+                # Le compte rendu qui a produit la Q2 : typé `debats`, pas
+                # `texte` — c'est un débat, et l'app lui associe 💬.
+                desaccord_source=SourceOfficielle(
+                    type="debats",
+                    libelle="Compte rendu de la séance (Assemblée nationale)",
+                    url=(
+                        "https://www.assemblee-nationale.fr/dyn/17/"
+                        "comptes-rendus/seance/CRSANR5L17S2026O1N999"
+                    ),
+                ),
             ),
             public_concerne=["Particuliers", "Collectivités"],
             confiance="haute",
@@ -656,6 +705,15 @@ SEED_DOSSIERS: list[Dossier] = [
         ),
     ),
 ]
+
+
+# Les documents du dossier (§7.5) sont **composés**, jamais écrits à la main :
+# c'est la même fonction qu'à l'ingestion (`app.domain.sources`), donc le seed
+# montre exactement ce que l'API sert — l'ordre, les libellés et le
+# dédoublonnage compris. Ce qui est déclaré plus haut dans chaque dossier n'est
+# que la **base** : la page du dossier, ou son repli sur les scrutins.
+for _dossier in SEED_DOSSIERS:
+    _dossier.sources = documents_du_dossier(_dossier)
 
 
 # ---------------------------------------------------------------------------

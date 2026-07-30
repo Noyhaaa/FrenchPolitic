@@ -992,3 +992,55 @@ def test_build_dossier_pose_le_titre_court():
     assert dossier.titre_clair == "Nationalisation d'ArcelorMittal France"
     assert dossier.titre_officiel.startswith("Proposition de loi")
     assert dossier.accroche is None
+
+
+def test_les_rapports_survivent_a_un_run_sans_archive():
+    """Un rapport déposé ne bouge plus, et son URL a été vérifiée une fois : un
+    run qui n'a pas pu lire l'archive ne doit pas le faire disparaître de la
+    liste des documents (§7.5), pas plus qu'il n'efface l'état ou l'initiative.
+    """
+    from app.schemas import SourceOfficielle
+
+    resolver = build_resolver_from_organes(ORGANES)
+    prev = build_dossier([_vote_texte(resolver, "VT1", "2026-07-02")])
+    prev.rapports_commission = [
+        SourceOfficielle(
+            type="texte",
+            libelle="Rapport de la commission (n° 912)",
+            url="https://www.assemblee-nationale.fr/dyn/docs/RAPPANR5L17B0912",
+        )
+    ]
+    incoming = build_dossier([_vote_texte(resolver, "VT2", "2026-07-05")])
+
+    merged = _merge_avec_existant(prev, incoming)
+    assert [s.libelle for s in merged.rapports_commission] == [
+        "Rapport de la commission (n° 912)"
+    ]
+
+
+def test_le_repli_sur_les_scrutins_n_accumule_pas_les_documents_composes():
+    """Un dossier sans page officielle (« TXT-… ») fusionne ses sources avec
+    l'existant pour ne pas perdre celles des runs passés. ⚠️ L'union se restreint
+    aux sources de scrutins : reprendre une entrée composée d'un run précédent la
+    ferait survivre à la disparition de son document, alors que `sources` est
+    précisément recomposée à chaque écriture.
+    """
+    from app.schemas import SourceOfficielle
+
+    resolver = build_resolver_from_organes(ORGANES)
+    prev = build_dossier([_vote_texte(resolver, "VT1", "2026-07-02")])
+    prev.sources = [
+        SourceOfficielle(type="scrutin", libelle="Scrutin", url="https://an.fr/s/1"),
+        SourceOfficielle(
+            type="texte",
+            libelle="Compte rendu de la séance (Assemblée nationale)",
+            url="https://an.fr/cr/1",
+        ),
+    ]
+    incoming = build_dossier([_vote_texte(resolver, "VT2", "2026-07-05")])
+    incoming.sources = [
+        SourceOfficielle(type="scrutin", libelle="Scrutin", url="https://an.fr/s/2")
+    ]
+
+    merged = _merge_avec_existant(prev, incoming)
+    assert [s.url for s in merged.sources] == ["https://an.fr/s/2", "https://an.fr/s/1"]

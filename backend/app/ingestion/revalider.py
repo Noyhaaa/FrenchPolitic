@@ -40,6 +40,7 @@ from app.ai.questions import (
 from app.db.models import DossierRow, ScrutinRow
 from app.db.session import make_engine, make_session_factory
 from app.domain.recherche import index_recherche
+from app.domain.sources import documents_du_dossier
 from app.ingestion.normalize import deposant
 from app.schemas import Dossier
 
@@ -229,6 +230,13 @@ async def _revalider_desaccord(session, bilan: Bilan) -> None:
 
         resume["questions"] = questions
         payload["resume"] = resume
+        # Un désaccord entièrement effacé emporte le lien du compte rendu qui
+        # l'avait produit : la liste des documents est donc recomposée, sinon
+        # elle continuerait d'annoncer une source que le dossier ne porte plus.
+        payload["sources"] = [
+            s.model_dump(mode="json", by_alias=True)
+            for s in documents_du_dossier(Dossier.model_validate(payload))
+        ]
         row.payload = payload
         flag_modified(row, "payload")
         # L'index de recherche ne couvre PAS la Q2 (cf. `domain/recherche.py`) et
