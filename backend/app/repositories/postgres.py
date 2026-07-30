@@ -98,6 +98,7 @@ def _to_list_item(row: DossierRow) -> DossierListItem:
     scrutins = [
         ScrutinResume.model_validate(s) for s in row.payload.get("scrutins", [])
     ]
+    dernier = DossierListItem._dernier_public(scrutins)
     return DossierListItem(
         id=row.id,
         date=row.date,
@@ -115,7 +116,11 @@ def _to_list_item(row: DossierRow) -> DossierListItem:
             else None
         ),
         chambres=DossierListItem._chambres(scrutins),
-        resultat_dernier_scrutin=DossierListItem._resultat_dernier(scrutins),
+        resultat_dernier_scrutin=dernier.resultat if dernier else None,
+        type_vote_dernier_scrutin=dernier.type_vote if dernier else None,
+        suffrages_requis_dernier_scrutin=(
+            dernier.suffrages_requis if dernier else None
+        ),
     )
 
 
@@ -304,6 +309,7 @@ class PostgresDossierRepository(DossierRepository):
                 scrutin.chambre,
                 objet=scrutin.objet,
                 scrutin_public=scrutin.scrutin_public,
+                type_vote=scrutin.type_vote,
             )
             if mesure is None:
                 continue

@@ -13,7 +13,9 @@ interface, sans changer ce contrat.
 from __future__ import annotations
 
 from app.ai.faits import FaitsDossier, date_fr
+from app.ai.questions import phrase_motion_censure
 from app.ai.rag import RagContext
+from app.domain.enums import TypeVote
 from app.schemas import PhraseSourcee, ResumeScrutin
 
 _STATUT_FR = {"adopte": "adopté", "rejete": "rejeté"}
@@ -41,6 +43,37 @@ def _liste_groupes(noms: list[str]) -> str:
 def _s(n: int) -> str:
     """Marque du pluriel (« s » si n > 1)."""
     return "s" if n > 1 else ""
+
+
+def phrase_vote_decisif(d) -> str | None:
+    """La phrase 3 du résumé : le résultat chiffré du vote décisif.
+
+    Extraite du gabarit pour être **rejouable seule** : quand la forme d'un
+    scrutin change en base (cf. `app.ingestion.types_vote`), c'est cette
+    phrase-là, et elle seule, qu'il faut recomposer — régénérer tout le résumé
+    emporterait les questions et les publics acquis par ailleurs.
+
+    None si le statut n'est pas tranché (§2.5).
+    """
+    statut = _STATUT_FR.get(d.statut.value)
+    if not statut:
+        return None
+    if d.type_vote is TypeVote.motion_censure:
+        # Une motion de censure ne se raconte pas pour/contre : l'article 49 ne
+        # fait recenser que les voix favorables, si bien que « contre » y vaut 0
+        # par construction. « adopté par 267 voix contre 0 » ferait lire une
+        # unanimité qui n'a jamais eu lieu.
+        return phrase_motion_censure(d)
+    sujet = (
+        "Le vote sur l'ensemble du texte"
+        if "ensemble" in d.objet.lower()
+        else "Le dernier scrutin sur le texte"
+    )
+    r = d.resultat
+    phrase = f"{sujet} a été {statut} par {r.pour} voix contre {r.contre}"
+    if r.abstention:
+        phrase += f", avec {r.abstention} abstention{_s(r.abstention)}"
+    return phrase + "."
 
 
 def composer_resume(faits: FaitsDossier, context: RagContext) -> ResumeScrutin:
@@ -73,18 +106,8 @@ def composer_resume(faits: FaitsDossier, context: RagContext) -> ResumeScrutin:
     # 3. Vote décisif : résultat chiffré officiel.
     d = faits.decisif
     if context.a("vote_ensemble") and d is not None:
-        sujet = (
-            "Le vote sur l'ensemble du texte"
-            if "ensemble" in d.objet.lower()
-            else "Le dernier scrutin sur le texte"
-        )
-        statut = _STATUT_FR.get(d.statut.value)
-        if statut:
-            r = d.resultat
-            p3 = f"{sujet} a été {statut} par {r.pour} voix contre {r.contre}"
-            if r.abstention:
-                p3 += f", avec {r.abstention} abstention{_s(r.abstention)}"
-            p3 += "."
+        p3 = phrase_vote_decisif(d)
+        if p3:
             phrases.append(PhraseSourcee(phrase=p3, source_id="vote_ensemble"))
 
     # 4. Positions des groupes sur le vote décisif (noms seulement, pas de

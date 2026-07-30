@@ -18,6 +18,7 @@ from app.domain.enums import (
     SortAmendement,
     StatutScrutin,
     TypeSource,
+    TypeVote,
 )
 # `normalize` ne dépend que de `domain` et `utils` : pas de cycle avec les schémas.
 from app.ingestion.normalize import nature_texte
@@ -270,6 +271,16 @@ class Scrutin(CamelModel):
     # deux assemblées, et « 214 pour » n'a pas le même sens selon l'hémicycle.
     chambre: Chambre = Chambre.assemblee
     scrutin_public: bool
+    # Forme du scrutin — ce qui explique le nombre de votants (§7.4). Absente
+    # au Sénat, dont la page ne nomme pas le type : l'app n'affiche alors pas
+    # de libellé plutôt que d'en deviner un (§2.5).
+    type_vote: TypeVote | None = None
+    # Voix nécessaires pour que le vote soit acquis (`nbrSuffragesRequis`).
+    # ⚠️ N'a d'intérêt que sur une **motion de censure** : partout ailleurs il
+    # vaut exactement `suffrages exprimés // 2 + 1` (mesuré : 100 % des 8 411
+    # autres scrutins), donc il n'apprend rien. Sur une motion il vaut 289,
+    # sans rapport avec le nombre de votants — et c'est lui qui décide.
+    suffrages_requis: int | None = None
     resultat: ResultatGlobal
     positions_groupes: list[PositionGroupe] = []
     # Pour un vote d'amendement/sous-amendement : son contenu enrichi (open data
@@ -296,6 +307,10 @@ class ScrutinResume(CamelModel):
     statut: StatutScrutin
     chambre: Chambre = Chambre.assemblee
     scrutin_public: bool
+    # Repris du scrutin complet : la fiche dossier met en avant le vote décisif,
+    # et une motion de censure ne s'y raconte pas comme un vote pour/contre.
+    type_vote: TypeVote | None = None
+    suffrages_requis: int | None = None
     resultat: ResultatGlobal
 
     @classmethod
@@ -307,6 +322,8 @@ class ScrutinResume(CamelModel):
             statut=s.statut,
             chambre=s.chambre,
             scrutin_public=s.scrutin_public,
+            type_vote=s.type_vote,
+            suffrages_requis=s.suffrages_requis,
             resultat=s.resultat,
         )
 
@@ -498,6 +515,11 @@ class DossierListItem(CamelModel):
     # Résultat du dernier scrutin **public** (voix pour/contre) pour la barre de
     # la carte. None si le dernier vote n'est pas nominatif (§5.2, §2.5).
     resultat_dernier_scrutin: ResultatGlobal | None = None
+    # Forme de ce même scrutin. Sans elle, une motion de censure se lirait
+    # « 267 pour, 0 contre » jusque dans le fil, alors que ses opposants ne
+    # sont pas recensés (art. 49) — cf. `TypeVote.motion_censure`.
+    type_vote_dernier_scrutin: TypeVote | None = None
+    suffrages_requis_dernier_scrutin: int | None = None
 
     @staticmethod
     def _chambres(scrutins: list[ScrutinResume]) -> list[Chambre]:
@@ -513,17 +535,20 @@ class DossierListItem(CamelModel):
         return ordre
 
     @staticmethod
-    def _resultat_dernier(scrutins: list[ScrutinResume]) -> ResultatGlobal | None:
+    def _dernier_public(scrutins: list[ScrutinResume]) -> ScrutinResume | None:
         # `scrutins` est ordonné du plus récent au plus ancien : on prend le
-        # résultat du premier vote nominatif (les votes à main levée n'ont pas de
-        # décompte affichable, §5.2).
+        # premier vote nominatif (les votes à main levée n'ont pas de décompte
+        # affichable, §5.2). On renvoie le scrutin entier et non son seul
+        # résultat : le décompte ne se lit pas sans savoir de quel scrutin il
+        # sort (cf. `type_vote_dernier_scrutin`).
         for s in scrutins:
             if s.scrutin_public:
-                return s.resultat
+                return s
         return None
 
     @classmethod
     def from_dossier(cls, d: Dossier) -> "DossierListItem":
+        dernier = cls._dernier_public(d.scrutins)
         return cls(
             id=d.id,
             date=d.date_dernier_scrutin,
@@ -536,7 +561,11 @@ class DossierListItem(CamelModel):
             nombre_scrutins=len(d.scrutins),
             mise_a_jour=d.mise_a_jour,
             chambres=cls._chambres(d.scrutins),
-            resultat_dernier_scrutin=cls._resultat_dernier(d.scrutins),
+            resultat_dernier_scrutin=dernier.resultat if dernier else None,
+            type_vote_dernier_scrutin=dernier.type_vote if dernier else None,
+            suffrages_requis_dernier_scrutin=(
+                dernier.suffrages_requis if dernier else None
+            ),
         )
 
 

@@ -368,3 +368,40 @@ def test_accueil_complet_en_une_reponse(client):
     for section in body["sections"]:
         assert 1 <= len(section["dossiers"]) <= 10
         assert all(d["theme"] == section["theme"] for d in section["dossiers"])
+
+
+def test_motion_de_censure_ne_se_lit_pas_comme_un_vote_pour_contre(client):
+    """« 267 voix contre 0 » : l'article 49 de la Constitution ne fait recenser
+    que les voix FAVORABLES à une motion de censure.
+
+    L'app disait donc, sur les fiches les plus lues du pays, « rejeté par 0 voix
+    contre 267 » — l'inverse du fait. La forme du scrutin traverse désormais
+    l'API en camelCase, avec le seul rapport qui décide : voix recueillies /
+    requises (§7.4).
+    """
+    dossier = client.get("/dossiers/dos-censure-2026").json()
+    assert dossier["estEvenementAutonome"] is True
+    q3 = dossier["resume"]["questions"]["resultat"]
+    assert "289 requises" in q3
+    assert "0 voix" not in q3
+
+    scrutin = client.get("/scrutins/scr-2026-0420").json()
+    assert scrutin["typeVote"] == "motion_censure"
+    assert scrutin["suffragesRequis"] == 289
+    # Le « contre » est à zéro **par construction** : c'est justement pour ça que
+    # l'app ne l'affiche pas comme un camp.
+    assert scrutin["resultat"]["contre"] == 0
+
+    # La carte du fil doit pouvoir en faire autant, sans charger la fiche.
+    fil = client.get("/dossiers?limit=100").json()
+    carte = next(d for d in fil if d["id"] == "dos-censure-2026")
+    assert carte["typeVoteDernierScrutin"] == "motion_censure"
+    assert carte["suffragesRequisDernierScrutin"] == 289
+
+
+def test_une_motion_de_censure_n_est_pas_un_vote_disputé(client):
+    """L'écart entre deux camps n'a pas de sens quand un seul est compté : la
+    rangée « votes les plus disputés » ne doit jamais la remonter."""
+    accueil = client.get("/accueil").json()
+    ids = {v["scrutinId"] for v in accueil["votesDisputes"]}
+    assert "scr-2026-0420" not in ids

@@ -44,7 +44,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.domain.enums import Chambre, PositionVote
+from app.domain.enums import Chambre, PositionVote, TypeVote
 from app.ingestion.normalize import est_vote_de_conduite_de_seance
 from app.schemas import PositionGroupe, ResultatGlobal
 
@@ -133,6 +133,7 @@ def division(
     *,
     objet: str = "",
     scrutin_public: bool = True,
+    type_vote: TypeVote | None = None,
 ) -> Division | None:
     """Division d'un scrutin, ou None s'il n'est pas classable (§2.5).
 
@@ -142,11 +143,19 @@ def division(
     - vote sur la **conduite de la séance** (suspension, prolongation au-delà de
       minuit, seconde délibération) : souvent très serré, mais il ne décide de
       rien. Le remonter à l'écran ferait passer une péripétie de séance pour un
-      moment de division politique.
+      moment de division politique ;
+    - **motion de censure** : l'article 49 ne fait recenser que les voix
+      favorables, si bien que `contre` y vaut 0 par construction. L'écart entre
+      deux camps n'a pas de sens quand un seul est compté — l'indice y sortirait
+      « quasi unanime » sur un vote qui a divisé l'hémicycle. Elle sortait déjà
+      du classement par ce score, mais **par accident arithmétique** ; ici c'est
+      une décision : l'arithmétique ne s'applique pas.
 
     On préfère l'absence au rang trompeur.
     """
     if not scrutin_public or est_vote_de_conduite_de_seance(objet):
+        return None
+    if type_vote is TypeVote.motion_censure:
         return None
     exprimes = resultat.pour + resultat.contre
     votants = exprimes + resultat.abstention

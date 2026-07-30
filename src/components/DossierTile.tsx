@@ -56,7 +56,12 @@ export function DossierTile({ dossier, onPress }: Props) {
           {dossier.titreClair}
         </Text>
         {dossier.resultatDernierScrutin ? (
-          <MiniResultat resultat={dossier.resultatDernierScrutin} height={4} />
+          <MiniResultat
+            resultat={dossier.resultatDernierScrutin}
+            height={4}
+            typeVote={dossier.typeVoteDernierScrutin}
+            suffragesRequis={dossier.suffragesRequisDernierScrutin}
+          />
         ) : null}
         <View style={styles.footer}>
           {/* Chambre(s) qui ont voté — pas « Assemblée nat. » en dur : un texte

@@ -45,6 +45,7 @@ async def _main(dry_run: bool) -> None:
                 scrutin.chambre,
                 objet=scrutin.objet,
                 scrutin_public=scrutin.scrutin_public,
+                type_vote=scrutin.type_vote,
             )
             indice = mesure.indice if mesure else None
             if mesure is None:

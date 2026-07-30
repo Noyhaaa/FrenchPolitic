@@ -54,7 +54,11 @@ export function DossierCard({ dossier, onPress }: Props) {
 
       {dossier.resultatDernierScrutin ? (
         <View style={styles.result}>
-          <MiniResultat resultat={dossier.resultatDernierScrutin} />
+          <MiniResultat
+            resultat={dossier.resultatDernierScrutin}
+            typeVote={dossier.typeVoteDernierScrutin}
+            suffragesRequis={dossier.suffragesRequisDernierScrutin}
+          />
         </View>
       ) : null}
 

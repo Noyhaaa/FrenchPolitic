@@ -53,6 +53,15 @@ class FaitsDossier:
     nb_amendements_rejetes: int
 
     @property
+    def suffrages_requis(self) -> int | None:
+        """Seuil officiel du vote décisif — admis par le garde-fou des chiffres.
+
+        Sur une motion de censure, c'est le seul nombre que la phrase de résultat
+        peut citer en plus des décomptes (« 267 voix sur les 289 requises »).
+        """
+        return self.decisif.suffrages_requis if self.decisif else None
+
+    @property
     def resultat_reference(self) -> ResultatGlobal:
         """Résultat servant au garde-fou des chiffres (§4.4) : celui du vote
         décisif, ou un décompte nul à défaut."""

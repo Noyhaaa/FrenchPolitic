@@ -33,6 +33,7 @@ from app.ingestion.normalize import (
     texte_de_rattachement,
     to_int,
     truncate,
+    type_vote,
 )
 from app.ingestion.dossiers_legislatifs import Reconciliation, signature_titre
 from app.ingestion.organes import GroupResolver
@@ -409,7 +410,8 @@ def parse_scrutin(
             # d'objet plutôt que d'annoncer une information manquante (§2.5).
             est_evenement_autonome = True
 
-    decompte = (s.get("syntheseVote") or {}).get("decompte") or {}
+    synthese = s.get("syntheseVote") or {}
+    decompte = synthese.get("decompte") or {}
     resultat = ResultatGlobal(
         pour=to_int(decompte.get("pour")),
         contre=to_int(decompte.get("contre")),
@@ -450,6 +452,8 @@ def parse_scrutin(
         objet=truncate(objet_libelle or dossier_titre, 120),
         statut=map_statut((s.get("sort") or {}).get("code", "")),
         scrutin_public=True,  # l'archive ne contient que des scrutins publics (§5.2)
+        type_vote=type_vote((s.get("typeVote") or {}).get("codeTypeVote")),
+        suffrages_requis=to_int(synthese.get("nbrSuffragesRequis")) or None,
         resultat=resultat,
         positions_groupes=positions,
         sources=[scrutin_source(legislature, numero)],

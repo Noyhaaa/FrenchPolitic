@@ -11,7 +11,7 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { termeGlossaire } from '@/constants/glossaire';
+import { termeGlossaire, termeTypeVote } from '@/constants/glossaire';
 import { colors, mono, radius, serif, spacing, typography } from '@/theme';
 import {
   DefinitionGlossaire,
@@ -122,9 +122,15 @@ export function ScrutinDetailScreen() {
   const { data: scrutin, loading, refreshing, offline, error, retry, refresh } =
     useScrutin(route.params.scrutinId);
   const [ouverts, setOuverts] = useState<ReadonlySet<string>>(new Set());
-  // Définition du type de vote (glossaire) : fermée par défaut, comme tout dépli
-  // de cette app — rien ne s'ouvre tant que le lecteur ne le demande.
-  const [definitionOuverte, setDefinitionOuverte] = useState(false);
+  // Aide en ligne du glossaire : **une seule définition ouverte à la fois**
+  // (celle du titre ou celle de la forme du scrutin), et fermée par défaut —
+  // rien ne s'ouvre tant que le lecteur ne le demande. Même règle que les
+  // pastilles de `TrajectoireNavette`.
+  const [definitionOuverte, setDefinitionOuverte] = useState<
+    'titre' | 'type' | null
+  >(null);
+  const basculerDefinition = (cle: 'titre' | 'type') =>
+    setDefinitionOuverte((o) => (o === cle ? null : cle));
   const goBack = () => navigation.goBack();
 
   const toggleGroupe = (groupeId: string) =>
@@ -199,6 +205,11 @@ export function ScrutinDetailScreen() {
   const quoi = estSous ? 'le sous-amendement' : "l'amendement";
   const totalVoix =
     resultat.pour + resultat.contre + resultat.abstention + resultat.nonVotants;
+  // Les VOTANTS (hors non-votants) : c'est ce nombre-là qui surprend le lecteur
+  // (« 42 sur 577 ? »), et la forme du scrutin l'explique.
+  const votants = resultat.pour + resultat.contre + resultat.abstention;
+  const estMotionCensure = scrutin.typeVote === 'motion_censure';
+  const termeType = termeTypeVote(scrutin.typeVote);
   // Fracture à montrer seulement si les groupes ne sont pas unanimes.
   const campsDistincts = new Set(
     scrutin.positionsGroupes.map((g) => g.positionMajoritaire),
@@ -231,9 +242,9 @@ export function ScrutinDetailScreen() {
             aucune explication devinée (§2.5). */}
         {termeTitre ? (
           <Pressable
-            onPress={() => setDefinitionOuverte((o) => !o)}
+            onPress={() => basculerDefinition('titre')}
             accessibilityRole="button"
-            accessibilityState={{ expanded: definitionOuverte }}
+            accessibilityState={{ expanded: definitionOuverte === 'titre' }}
             accessibilityLabel={`${lib.titre}. Définition de « ${termeTitre.libelle} »`}
             style={styles.titreAvecAide}
           >
@@ -245,7 +256,7 @@ export function ScrutinDetailScreen() {
         ) : (
           <Text style={[typography.title, styles.title]}>{lib.titre}</Text>
         )}
-        {termeTitre && definitionOuverte ? (
+        {termeTitre && definitionOuverte === 'titre' ? (
           <DefinitionGlossaire terme={termeTitre} />
         ) : null}
         {lib.titre !== scrutin.objet ? (
@@ -264,40 +275,121 @@ export function ScrutinDetailScreen() {
         </Text>
 
         {/* Résultat global EN TÊTE (§2.2 : voir le résultat tout de suite) —
-            sur toutes les fiches vote, quel que soit le type. Verdict, grille
-            des décomptes, barre combinée + échelle. Tout est factuel :
+            sur toutes les fiches vote, quel que soit le type. Tout est factuel :
             décomptes officiels. */}
         <SectionCard title="Résultat du vote" flat>
-          <VerdictCard statut={scrutin.statut} resultat={resultat} />
-
-          <View style={styles.tallyGrid}>
-            <TallyItem label="Pour" value={resultat.pour} total={totalVoix} color={colors.pour} />
-            <View style={styles.tallySep} />
-            <TallyItem label="Contre" value={resultat.contre} total={totalVoix} color={colors.contre} />
-            <View style={styles.tallySep} />
-            <TallyItem label="Abstention" value={resultat.abstention} total={totalVoix} color={colors.abstention} />
-          </View>
-
-          <View style={styles.barBlock}>
-            <ResultBar
-              height={6}
-              segments={[
-                { value: resultat.pour, color: colors.pour },
-                { value: resultat.abstention, color: colors.abstention },
-                { value: resultat.contre, color: colors.contre },
-                { value: resultat.nonVotants, color: colors.nonVotant },
-              ]}
-            />
-            <View style={styles.barScale}>
-              <Text style={styles.barScaleText}>0</Text>
-              {resultat.nonVotants > 0 ? (
-                <Text style={styles.barScaleText}>
-                  {resultat.nonVotants} non-votant{resultat.nonVotants > 1 ? 's' : ''}
-                </Text>
+          {estMotionCensure ? (
+            /* ⚠️ Une motion de censure ne se raconte PAS pour/contre : l'article
+               49 de la Constitution ne fait recenser que les voix FAVORABLES,
+               si bien que « contre » et « abstention » y valent 0 par
+               construction. Les afficher ferait lire une quasi-unanimité là où
+               les opposants ne sont simplement pas comptés (§7.4). Le seul
+               rapport qui décide est voix recueillies / requises — et c'est ce
+               que dit déjà la définition ouverte par le titre. */
+            <>
+              <VerdictCard statut={scrutin.statut} resultat={resultat} sansEcart />
+              <Text style={styles.censureChiffres}>
+                {resultat.pour} voix pour
+                {scrutin.suffragesRequis
+                  ? ` · ${scrutin.suffragesRequis} requises`
+                  : ''}
+              </Text>
+              {scrutin.suffragesRequis ? (
+                <View style={styles.barBlock}>
+                  {/* Barre mesurée contre le SEUIL, pas contre le total des
+                      votants : c'est le seuil qui décide, et une barre pleine
+                      dirait le contraire du résultat. */}
+                  <ResultBar
+                    height={6}
+                    segments={[
+                      { value: resultat.pour, color: colors.pour },
+                      {
+                        value: Math.max(
+                          0,
+                          scrutin.suffragesRequis - resultat.pour,
+                        ),
+                        color: colors.nonVotant,
+                      },
+                    ]}
+                  />
+                  <View style={styles.barScale}>
+                    <Text style={styles.barScaleText}>0</Text>
+                    <Text style={styles.barScaleText}>
+                      {scrutin.suffragesRequis} requises
+                    </Text>
+                  </View>
+                </View>
               ) : null}
-              <Text style={styles.barScaleText}>{totalVoix}</Text>
-            </View>
-          </View>
+              <Text style={styles.mentionProcedure}>
+                Seules les voix favorables à la motion sont recensées
+                (article 49 de la Constitution).
+              </Text>
+            </>
+          ) : (
+            <>
+              <VerdictCard statut={scrutin.statut} resultat={resultat} />
+
+              <View style={styles.tallyGrid}>
+                <TallyItem label="Pour" value={resultat.pour} total={totalVoix} color={colors.pour} />
+                <View style={styles.tallySep} />
+                <TallyItem label="Contre" value={resultat.contre} total={totalVoix} color={colors.contre} />
+                <View style={styles.tallySep} />
+                <TallyItem label="Abstention" value={resultat.abstention} total={totalVoix} color={colors.abstention} />
+              </View>
+
+              <View style={styles.barBlock}>
+                <ResultBar
+                  height={6}
+                  segments={[
+                    { value: resultat.pour, color: colors.pour },
+                    { value: resultat.abstention, color: colors.abstention },
+                    { value: resultat.contre, color: colors.contre },
+                    { value: resultat.nonVotants, color: colors.nonVotant },
+                  ]}
+                />
+                <View style={styles.barScale}>
+                  <Text style={styles.barScaleText}>0</Text>
+                  {resultat.nonVotants > 0 ? (
+                    <Text style={styles.barScaleText}>
+                      {resultat.nonVotants} non-votant{resultat.nonVotants > 1 ? 's' : ''}
+                    </Text>
+                  ) : null}
+                  <Text style={styles.barScaleText}>{totalVoix}</Text>
+                </View>
+              </View>
+
+              {/* « Pourquoi seulement 42 votants ? » — la réponse est la FORME
+                  du scrutin : un vote ordinaire se tient en séance parmi les
+                  députés alors présents (médiane 132), un vote solennel est
+                  annoncé à l'avance (médiane 528). La ligne déplie sa
+                  définition, comme le titre au-dessus (§8).
+                  ⚠️ Jamais de taux de participation : la source ne recense que
+                  les votants d'un scrutin public, un ratio se lirait comme un
+                  score d'absentéisme qu'elle ne soutient pas (§7.4).
+                  Type inconnu (Sénat) → le décompte seul, qui reste un fait. */}
+              {termeType ? (
+                <Pressable
+                  onPress={() => basculerDefinition('type')}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: definitionOuverte === 'type' }}
+                  accessibilityLabel={`${termeType.libelle}, ${votants} votants. Définition.`}
+                  style={styles.ligneTypeVote}
+                >
+                  <Text style={styles.typeVoteTexte}>
+                    {termeType.libelle} · {votants} votants
+                  </Text>
+                  <MarqueurGlossaire />
+                </Pressable>
+              ) : (
+                <Text style={[styles.typeVoteTexte, styles.ligneTypeVote]}>
+                  {votants} votants
+                </Text>
+              )}
+              {termeType && definitionOuverte === 'type' ? (
+                <DefinitionGlossaire terme={termeType} />
+              ) : null}
+            </>
+          )}
         </SectionCard>
 
         {/* Entrée de compréhension d'un vote d'amendement : ses 4 questions
@@ -520,9 +612,16 @@ export function ScrutinDetailScreen() {
 function VerdictCard({
   statut,
   resultat,
+  sansEcart = false,
 }: {
   statut: StatutScrutin;
   resultat: { pour: number; contre: number };
+  /**
+   * Masque l'écart pour/contre. Sur une motion de censure il n'a aucun sens :
+   * l'article 49 ne fait recenser que les voix favorables, donc « écart de
+   * 267 voix » y compare 267 à un zéro qui ne veut rien dire (§7.4).
+   */
+  sansEcart?: boolean;
 }) {
   const ui: Record<StatutScrutin, { fg: string; bg: string; icon: string }> = {
     adopte: { fg: colors.adopte, bg: colors.adopteSoft, icon: '✓' },
@@ -535,7 +634,11 @@ function VerdictCard({
     <View
       style={[styles.verdict, { backgroundColor: bg, borderColor: fg }]}
       accessibilityRole="text"
-      accessibilityLabel={`${statutLabel(statut)}, écart de ${ecart} voix.`}
+      accessibilityLabel={
+        sansEcart
+          ? statutLabel(statut)
+          : `${statutLabel(statut)}, écart de ${ecart} voix.`
+      }
     >
       <View style={[styles.verdictIconWrap, { backgroundColor: bg }]}>
         <Text style={[styles.verdictIcon, { color: fg }]}>{icon}</Text>
@@ -544,9 +647,11 @@ function VerdictCard({
         <Text style={[styles.verdictLabel, { color: fg }]}>
           {statutLabel(statut)}
         </Text>
-        <Text style={typography.bodySecondary}>
-          Écart de {ecart} voix entre pour et contre
-        </Text>
+        {sansEcart ? null : (
+          <Text style={typography.bodySecondary}>
+            Écart de {ecart} voix entre pour et contre
+          </Text>
+        )}
       </View>
     </View>
   );
@@ -687,6 +792,33 @@ const styles = StyleSheet.create({
   barScale: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+  },
+  // Ligne « Scrutin public ordinaire · 42 votants » sous la barre : elle répond
+  // à « pourquoi seulement 42 ? » et ouvre sa définition.
+  ligneTypeVote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: spacing.xs,
+    marginTop: spacing.md,
+  },
+  typeVoteTexte: {
+    ...typography.meta,
+    color: colors.textSecondary,
+  },
+  // Motion de censure : les voix recueillies face au seuil, seul rapport qui
+  // décide (l'article 49 ne recense pas les opposants).
+  censureChiffres: {
+    ...typography.readingBody,
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '700',
+    marginTop: spacing.md,
+  },
+  mentionProcedure: {
+    ...typography.meta,
+    color: colors.textTertiary,
+    marginTop: spacing.md,
   },
   barScaleText: {
     fontSize: 10,

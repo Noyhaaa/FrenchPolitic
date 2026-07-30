@@ -85,7 +85,12 @@ export function HeroDossier({ dossier, onPress, topInset }: Props) {
 
         {dossier.resultatDernierScrutin ? (
           <View style={styles.barWrap}>
-            <MiniResultat resultat={dossier.resultatDernierScrutin} height={5} />
+            <MiniResultat
+              resultat={dossier.resultatDernierScrutin}
+              height={5}
+              typeVote={dossier.typeVoteDernierScrutin}
+              suffragesRequis={dossier.suffragesRequisDernierScrutin}
+            />
           </View>
         ) : null}
 

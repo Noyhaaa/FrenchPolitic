@@ -226,6 +226,58 @@ def test_resultat_absent_si_statut_en_cours():
     assert phrase_resultat([]) is None
 
 
+def _motion_censure(
+    pour: int = 267, requis: int | None = 289, statut: str = "rejete"
+) -> ScrutinResume:
+    """Une motion de censure telle que l'archive la publie : SEULES les voix
+    favorables sont recensées (art. 49), donc contre et abstention à zéro."""
+    return ScrutinResume(
+        id="MOC",
+        date="2025-10-16",
+        objet=(
+            "la motion de censure déposée en application de l'article 49, "
+            "alinéa 2, de la Constitution"
+        ),
+        statut=statut,
+        scrutin_public=True,
+        type_vote="motion_censure",
+        suffrages_requis=requis,
+        resultat=ResultatGlobal(pour=pour, contre=0, abstention=0, non_votants=14),
+    )
+
+
+def test_resultat_motion_de_censure_ne_dit_jamais_zero_voix():
+    """Régression : la formule générale place le camp GAGNANT en premier, et sur
+    un rejet le gagnant est « contre ». Elle écrivait donc « rejeté par 0 voix
+    contre 267 » — l'inverse du fait, puisque 267 députés avaient voté POUR la
+    censure. C'était le cas de TOUTES les motions en base."""
+    p = phrase_resultat([_motion_censure()])
+    assert p == (
+        "La motion de censure a recueilli 267 voix sur les 289 requises ; "
+        "elle n'a pas été adoptée."
+    )
+    assert "0 voix" not in p
+    assert "contre" not in p
+
+
+def test_resultat_motion_adoptee_dit_ce_qu_elle_emporte():
+    p = phrase_resultat([_motion_censure(pour=289, statut="adopte")])
+    assert p is not None and "renversé" in p
+
+
+def test_resultat_motion_sans_seuil_ne_devine_pas():
+    """Seuil absent de la source → on s'en tient aux voix recueillies (§2.5)."""
+    p = phrase_resultat([_motion_censure(requis=None)])
+    assert p == "La motion de censure a recueilli 267 voix ; elle n'a pas été adoptée."
+
+
+def test_un_vote_ordinaire_garde_sa_phrase_mot_pour_mot():
+    """Non-régression : la branche « motion » ne doit toucher aucun des
+    8 400 autres scrutins."""
+    p = phrase_resultat([_scrutin("l'ensemble de la proposition de loi…")])
+    assert p == "Le texte a été adopté par 55 voix contre 0, avec 5 abstentions."
+
+
 # --- generer_questions : orchestration ---
 
 

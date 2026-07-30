@@ -7,7 +7,7 @@ d'un vote de conduite de séance, pas de rang sur un vote sans décompte.
 from __future__ import annotations
 
 from app.domain.division import division
-from app.domain.enums import Chambre, PositionVote
+from app.domain.enums import Chambre, PositionVote, TypeVote
 from app.repositories.base import limiter_par_dossier
 from app.schemas import PositionGroupe, ResultatGlobal, VoteDisputeItem
 
@@ -139,6 +139,24 @@ def test_vote_a_main_levee_non_classable():
 def test_vote_trop_peu_fourni_non_classable():
     # 20 votants : « serré » n'y veut rien dire.
     assert division(_resultat(10, 10), [], Chambre.assemblee) is None
+
+
+def test_motion_de_censure_non_classable():
+    """L'article 49 ne fait recenser que les voix FAVORABLES à la motion :
+    `contre` y vaut 0 par construction.
+
+    L'écart entre deux camps n'a donc aucun sens ici — l'indice sortirait
+    « quasi unanime » sur un vote qui a divisé l'hémicycle. La motion sortait
+    déjà du classement par ce score, mais **par accident arithmétique** ; on
+    l'écarte désormais parce que l'arithmétique ne s'y applique pas.
+    """
+    censure = _resultat(267, 0, 0, nv=12)
+    # Sans le garde-fou, le vote serait bel et bien classé (267 votants).
+    assert division(censure, [], Chambre.assemblee) is not None
+    assert (
+        division(censure, [], Chambre.assemblee, type_vote=TypeVote.motion_censure)
+        is None
+    )
 
 
 def test_vote_de_conduite_de_seance_non_classable():

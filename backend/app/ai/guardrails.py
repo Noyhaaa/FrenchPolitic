@@ -144,7 +144,11 @@ CONTEXTE_VOTE: frozenset[str] = frozenset(
 _FENETRE_CONTEXTE = 3
 
 
-def check_chiffres(resume: ResumeScrutin, resultat: ResultatGlobal) -> list[Violation]:
+def check_chiffres(
+    resume: ResumeScrutin,
+    resultat: ResultatGlobal,
+    suffrages_requis: int | None = None,
+) -> list[Violation]:
     """Tout décompte de vote cité dans le résumé doit correspondre au résultat
     officiel.
 
@@ -152,6 +156,12 @@ def check_chiffres(resume: ResumeScrutin, resultat: ResultatGlobal) -> list[Viol
     proches d'un mot de contexte de vote (« 231 contre », « 999 voix ») : un
     nombre isolé comme une année (« 2027 ») n'est pas un décompte et n'est pas
     contrôlé ici.
+
+    `suffrages_requis` est le seuil officiel du scrutin (`nbrSuffragesRequis`).
+    Il n'entre dans les chiffres admis que parce qu'il est **aussi** un décompte
+    de la source : sur une motion de censure, la seule phrase possible est
+    « … 267 voix sur les 289 requises », et 289 n'est dans aucun des décomptes
+    ci-dessous. Absent → l'ensemble ne bouge pas.
     """
     officiels = {
         resultat.pour,
@@ -160,6 +170,8 @@ def check_chiffres(resume: ResumeScrutin, resultat: ResultatGlobal) -> list[Viol
         resultat.non_votants,
         resultat.pour + resultat.contre + resultat.abstention + resultat.non_votants,
     }
+    if suffrages_requis:
+        officiels.add(suffrages_requis)
     violations: list[Violation] = []
     for phrase in resume.resume:
         # Tokens normalisés en conservant l'ordre (mots + nombres).
@@ -188,12 +200,13 @@ def run_guardrails(
     resume: ResumeScrutin,
     resultat: ResultatGlobal,
     sources_autorisees: set[str],
+    suffrages_requis: int | None = None,
 ) -> GuardrailReport:
     """Exécute tous les garde-fous et agrège les violations."""
     report = GuardrailReport()
     report.violations += check_ancrage(resume, sources_autorisees)
     report.violations += check_lexique(resume)
-    report.violations += check_chiffres(resume, resultat)
+    report.violations += check_chiffres(resume, resultat, suffrages_requis)
     return report
 
 

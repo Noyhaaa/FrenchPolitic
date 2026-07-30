@@ -1,3 +1,4 @@
+import type { TypeVote } from '@/types';
 import type { SectionGlossaire, TermeGlossaire } from '@/types/glossaire';
 import { plier } from '@/utils/format';
 
@@ -357,6 +358,51 @@ export const GLOSSAIRE: TermeGlossaire[] = [
     voisins: ['Vote à main levée', 'Abstention'],
   },
   {
+    id: 'scrutin-public-ordinaire',
+    libelle: 'Scrutin public ordinaire',
+    nature: 'n.m.',
+    categorie: 'vote',
+    definition:
+      'Le vote courant de l’Assemblée : il se tient pendant la séance, au moment où le texte est examiné, parmi les députés alors présents.',
+    etapes: [
+      {
+        titre: 'Un groupe ou le gouvernement le demande',
+        detail: 'Il peut être décidé à tout moment de l’examen.',
+      },
+      {
+        titre: 'Votent ceux qui sont là',
+        detail:
+          'Un débat peut durer des jours et des nuits : l’hémicycle n’est pas plein en permanence. Un député peut porter la voix d’un collègue absent (une seule délégation).',
+      },
+      {
+        titre: 'Le nombre de votants varie donc beaucoup',
+        detail:
+          'De quelques dizaines à plusieurs centaines selon le moment. Ce n’est pas une mesure de l’assiduité des députés.',
+      },
+    ],
+    voisins: ['Scrutin public solennel', 'Scrutin public'],
+  },
+  {
+    id: 'scrutin-public-solennel',
+    libelle: 'Scrutin public solennel',
+    nature: 'n.m.',
+    categorie: 'vote',
+    definition:
+      'Un vote annoncé à l’avance et fixé à un horaire dédié, en général sur l’ensemble d’un texte important.',
+    etapes: [
+      {
+        titre: 'La conférence des présidents le décide',
+        detail: 'La date et l’heure sont connues des députés à l’avance.',
+      },
+      {
+        titre: 'Le vote a lieu à l’heure dite',
+        detail:
+          'Les députés se déplacent pour l’occasion : c’est pourquoi ces scrutins réunissent beaucoup plus de votants que les votes ordinaires.',
+      },
+    ],
+    voisins: ['Scrutin public ordinaire', 'Vote sur l’ensemble'],
+  },
+  {
     id: 'seance-publique',
     libelle: 'Séance publique',
     nature: 'n.f.',
@@ -431,6 +477,28 @@ export function termeGlossaire(libelle: string): TermeGlossaire | undefined {
   const plie = plier(libelle);
   const regle = MOTIFS.find((r) => plie.includes(r.motif));
   return regle ? GLOSSAIRE_PAR_ID[regle.id] : undefined;
+}
+
+/**
+ * Le libellé et la définition de la forme d'un scrutin (§7.4) — ce qui explique
+ * le nombre de votants.
+ *
+ * ⚠️ Volontairement HORS de `MOTIFS` : cette table-là reconnaît des termes dans
+ * les libellés **de la source**, et son en-tête le dit. Ici le libellé vient
+ * d'une énumération fermée que nous écrivons nous-mêmes, donc la résolution est
+ * directe — pas de recherche de motif dans une chaîne, pas d'ambiguïté possible.
+ *
+ * `motion_censure` n'y figure pas : le titre de la fiche vote ouvre déjà sa
+ * définition (via `MOTIFS`), et on n'explique pas deux fois au même endroit.
+ */
+const TYPE_VOTE_GLOSSAIRE: Partial<Record<TypeVote, string>> = {
+  ordinaire: 'scrutin-public-ordinaire',
+  solennel: 'scrutin-public-solennel',
+};
+
+export function termeTypeVote(type?: TypeVote): TermeGlossaire | undefined {
+  const id = type ? TYPE_VOTE_GLOSSAIRE[type] : undefined;
+  return id ? GLOSSAIRE_PAR_ID[id] : undefined;
 }
 
 // --- Index alphabétique et mot du jour --------------------------------------

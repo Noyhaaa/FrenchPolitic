@@ -5,6 +5,7 @@ import {
   PositionVote,
   ScrutinResume,
   StatutScrutin,
+  TypeVote,
 } from '@/types';
 
 /** Libellé texte du statut (jamais la couleur seule — RGAA §8). */
@@ -62,8 +63,26 @@ export function formatTempsLecture(sec: number): string {
   return `~${min} min de lecture`;
 }
 
-/** « 312 pour · 220 contre » (micro-résultat des cartes, §3.1). */
-export function formatMicroResultat(pour: number, contre: number): string {
+/**
+ * « 312 pour · 220 contre » (micro-résultat des cartes, §3.1).
+ *
+ * ⚠️ **Motion de censure** : l'article 49 de la Constitution ne fait recenser
+ * que les voix FAVORABLES, donc `contre` y vaut 0 par construction. « 267 pour
+ * · 0 contre » se lirait comme une unanimité alors que les opposants ne sont
+ * pas comptés — on montre les voix recueillies face au seuil, seul rapport qui
+ * décide (§7.4). Sans seuil connu, on s'en tient aux voix (§2.5).
+ */
+export function formatMicroResultat(
+  pour: number,
+  contre: number,
+  typeVote?: TypeVote,
+  suffragesRequis?: number,
+): string {
+  if (typeVote === 'motion_censure') {
+    return suffragesRequis
+      ? `${pour} voix pour · ${suffragesRequis} requises`
+      : `${pour} voix pour`;
+  }
   return `${pour} pour · ${contre} contre`;
 }
 

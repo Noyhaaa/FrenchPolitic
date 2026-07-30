@@ -36,6 +36,13 @@ export function DossierChronoRow({ dossier, premier, dernier, onPress }: Props) 
   const couleur = COULEUR[dossier.statut];
   const resultat = dossier.resultatDernierScrutin;
   const chambre = dossier.chambres[dossier.chambres.length - 1];
+  // ⚠️ Motion de censure : l'article 49 ne fait recenser que les voix
+  // favorables, donc « 267 – 0 » se lirait comme une unanimité. On montre les
+  // voix recueillies face au seuil, seul rapport qui décide (§7.4).
+  const requises =
+    dossier.typeVoteDernierScrutin === 'motion_censure'
+      ? dossier.suffragesRequisDernierScrutin
+      : undefined;
 
   const mention =
     dossier.nombreScrutins === 0
@@ -53,7 +60,9 @@ export function DossierChronoRow({ dossier, premier, dernier, onPress }: Props) 
         formatDateRelative(dossier.date) +
         '. ' +
         (resultat
-          ? resultat.pour + ' pour, ' + resultat.contre + ' contre.'
+          ? requises
+            ? resultat.pour + ' voix pour, ' + requises + ' requises.'
+            : resultat.pour + ' pour, ' + resultat.contre + ' contre.'
           : mention + '.')
       }
     >
@@ -88,16 +97,26 @@ export function DossierChronoRow({ dossier, premier, dernier, onPress }: Props) 
             <View style={styles.barre}>
               <ResultBar
                 height={4}
-                segments={[
-                  { value: resultat.pour, color: colors.pour },
-                  { value: resultat.contre, color: colors.contre },
-                ]}
+                segments={
+                  requises
+                    ? [
+                        { value: resultat.pour, color: colors.pour },
+                        {
+                          value: Math.max(0, requises - resultat.pour),
+                          color: colors.nonVotant,
+                        },
+                      ]
+                    : [
+                        { value: resultat.pour, color: colors.pour },
+                        { value: resultat.contre, color: colors.contre },
+                      ]
+                }
               />
             </View>
             <Text style={styles.chiffres}>
               {resultat.pour}
-              <Text style={styles.tiret}> – </Text>
-              {resultat.contre}
+              <Text style={styles.tiret}>{requises ? ' / ' : ' – '}</Text>
+              {requises ?? resultat.contre}
             </Text>
           </View>
         ) : (

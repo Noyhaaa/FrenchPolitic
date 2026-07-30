@@ -1044,3 +1044,63 @@ def test_le_repli_sur_les_scrutins_n_accumule_pas_les_documents_composes():
 
     merged = _merge_avec_existant(prev, incoming)
     assert [s.url for s in merged.sources] == ["https://an.fr/s/2", "https://an.fr/s/1"]
+
+
+# --- Forme du scrutin : « 42 voix contre 0, pourquoi seulement 42 ? » --------
+
+
+def test_parse_scrutin_lit_la_forme_du_scrutin():
+    """`typeVote` et `nbrSuffragesRequis` sont dans l'archive depuis toujours ;
+    ils expliquent le nombre de votants, que rien n'expliquait jusqu'ici."""
+    import copy
+
+    from app.domain.enums import TypeVote
+
+    resolver = build_resolver_from_organes(ORGANES)
+    brut = copy.deepcopy(SCRUTIN)
+    brut["scrutin"]["typeVote"] = {"codeTypeVote": "SPS"}
+    brut["scrutin"]["syntheseVote"]["nbrSuffragesRequis"] = "33"
+
+    s = parse_scrutin(brut, resolver).scrutin
+    assert s.type_vote is TypeVote.solennel
+    assert s.suffrages_requis == 33
+    # Le résumé embarqué dans la fiche dossier la porte aussi : c'est lui qui
+    # alimente le vote décisif et les cartes du fil.
+    from app.schemas import ScrutinResume
+
+    assert ScrutinResume.from_scrutin(s).type_vote is TypeVote.solennel
+
+
+def test_un_code_de_scrutin_inconnu_ne_produit_pas_de_forme():
+    """Table fermée : un code nouveau ne se devine pas (§2.5). Le Sénat, dont la
+    page ne nomme pas le type, tombe dans le même cas."""
+    import copy
+
+    resolver = build_resolver_from_organes(ORGANES)
+    for code in (None, "", "XXX"):
+        brut = copy.deepcopy(SCRUTIN)
+        brut["scrutin"]["typeVote"] = {"codeTypeVote": code}
+        assert parse_scrutin(brut, resolver).scrutin.type_vote is None
+
+
+def test_la_forme_du_scrutin_remonte_jusqu_a_la_carte_du_fil():
+    """Sans elle, une motion de censure se lirait « 267 pour, 0 contre » jusque
+    dans le fil, alors que ses opposants ne sont pas recensés (art. 49)."""
+    import copy
+
+    from app.domain.enums import TypeVote
+    from app.schemas import DossierListItem
+
+    resolver = build_resolver_from_organes(ORGANES)
+    brut = copy.deepcopy(SCRUTIN)
+    # `titre` prime sur `objet.libelle` dans le parseur : les deux sont posés.
+    motion = "la motion de censure déposée en application de l'article 49"
+    brut["scrutin"]["titre"] = motion
+    brut["scrutin"]["objet"]["libelle"] = motion
+    brut["scrutin"]["typeVote"] = {"codeTypeVote": "MOC"}
+    brut["scrutin"]["syntheseVote"]["nbrSuffragesRequis"] = "289"
+
+    dossier = build_dossier([parse_scrutin(brut, resolver)])
+    item = DossierListItem.from_dossier(dossier)
+    assert item.type_vote_dernier_scrutin is TypeVote.motion_censure
+    assert item.suffrages_requis_dernier_scrutin == 289

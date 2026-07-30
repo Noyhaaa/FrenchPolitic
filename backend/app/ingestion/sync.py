@@ -681,6 +681,7 @@ async def _upsert_scrutin(session: AsyncSession, scrutin: Scrutin) -> None:
         scrutin.chambre,
         objet=scrutin.objet,
         scrutin_public=scrutin.scrutin_public,
+        type_vote=scrutin.type_vote,
     )
     values = {
         "id": scrutin.id,

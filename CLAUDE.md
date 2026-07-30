@@ -179,7 +179,24 @@ Six écrans du cœur de valeur :
    nationale » en dur), puis —
    **sur toutes les fiches, quel que soit le type de vote** — le **Résultat du
    vote EN TÊTE** (§2.2 : voir le résultat tout de suite ; verdict, décomptes
-   pour/contre/abstention, barre combinée + échelle, décomptes officiels).
+   pour/contre/abstention, barre combinée + échelle, décomptes officiels),
+   clos par la **forme du scrutin** : « Scrutin public ordinaire · 42 votants »,
+   **dépliable** sur sa définition (`termeTypeVote`, `constants/glossaire.ts`).
+   C'est la réponse à « 42 voix contre 0, pourquoi seulement 42 ? » — un scrutin
+   **ordinaire** se tient en séance parmi les députés alors présents (médiane
+   **132** votants), un scrutin **solennel** est annoncé à l'avance (médiane
+   **528**). ⚠️ **Jamais un taux de participation** : la source ne recense que
+   les votants d'un scrutin public, un ratio se lirait comme un score
+   d'absentéisme qu'elle ne soutient pas (§7.4, même règle que la fiche député).
+   Forme absente (Sénat, dont la page ne la nomme pas) → « 42 votants » seul.
+   ⚠️ **Une motion de censure ne se raconte PAS pour/contre** : l'article 49 de
+   la Constitution ne fait recenser que les voix **favorables**, si bien que
+   `contre` et `abstention` y valent 0 **par construction** (vérifié : les
+   23 motions de la législature). La fiche montre alors « 267 voix pour ·
+   289 requises », une barre mesurée **contre le seuil**, ni colonne « Contre »
+   ni écart — c'est ce 0-là qui trompait. Le glossaire le disait déjà
+   (`motion-de-censure` : « Seules les voix POUR sont comptées »), les chiffres
+   le contredisaient deux lignes plus bas.
    Ensuite, deux visages selon le vote :
    — **Vote sur le texte** : section **Vote par groupe**
    avec la **ligne de fracture** (`LigneFracture` : quels groupes ont
@@ -367,7 +384,23 @@ extraction du numéro et de l'auteur quand ils sont sans ambiguïté) et chaque
 sous-amendement est **rattaché à son amendement parent** (« … à l'amendement
 n° X ») ; le scrutin du parent embarque ses sous-amendements pour la fiche vote.
 La fusion inter-runs pose le badge « mis à jour » quand un nouveau scrutin
-(texte, amendement ou sous-amendement) rejoint un dossier connu. Les **sources
+(texte, amendement ou sous-amendement) rejoint un dossier connu.
+Chaque scrutin porte enfin sa **forme** (`Scrutin.typeVote`, table fermée
+`SPO`/`SPS`/`MOC` → `ordinaire` / `solennel` / `motion_censure` ; code inconnu →
+rien, §2.5) et ses **suffrages requis** (`nbrSuffragesRequis`) — deux champs que
+l'archive publiait depuis toujours et que l'ingestion ne lisait pas. Ils
+répondent à « pourquoi seulement 42 votants ? » (médiane **132** en scrutin
+ordinaire contre **528** en solennel) et corrigent surtout la **motion de
+censure** : l'article 49 n'y recense que les voix favorables, donc la formule
+générale « camp gagnant en premier » écrivait « **rejeté par 0 voix contre
+267** » sur les 23 motions de la base — l'inverse du fait. `phrase_motion_censure`
+(partagée par la Q3 et le résumé) dit désormais « recueilli 267 voix sur les
+289 requises », `division()` **écarte** les motions du classement des votes
+disputés (l'écart entre deux camps n'a pas de sens quand un seul est compté), et
+le garde-fou des chiffres admet le seuil parmi les décomptes officiels. Le
+`suffragesRequis` n'est **affiché que sur une motion** : ailleurs il vaut
+exactement `exprimés // 2 + 1` (mesuré : 100 % des 8 411 autres scrutins).
+Rattrapage : `python -m app.ingestion.types_vote`. Les **sources
 du dossier** sont de niveau dossier uniquement — la source de chaque vote reste
 sur son scrutin, servie par sa fiche vote — mais elles les rassemblent **toutes**
 (§7.5) : `Dossier.sources` est une liste **dérivée**, recomposée à chaque
@@ -697,6 +730,7 @@ python -m app.ingestion.initiatives       # renseigne « qui porte le texte » e
 python -m app.ingestion.etats             # renseigne « où en est le texte » en base (même archive de 10 Mo)
 python -m app.ingestion.lois              # attache la LOI FINALE (texte voté) + réécrit la Q4 à l'indicatif
 python -m app.ingestion.sources           # rapports de commission + recompose « les documents du dossier »
+python -m app.ingestion.types_vote        # forme des scrutins (ordinaire/solennel/motion) + recompose la Q3
 uvicorn app.main:app --reload             # http://localhost:8000/docs (sert la base via .env)
 pytest                                     # suite de tests (forcés sur seed)
 ```
@@ -855,7 +889,10 @@ texte / amendement / sous-amendement se fait à l'ingestion (`est_amendement`,
 Un `Scrutin` est **vote-niveau** : `dossierId`, `objet` (ce sur quoi on a voté),
 `statut`, `chambre` (`assemblee` | `senat` — un dossier agrège les votes des deux
 assemblées, et « 214 pour » n'a pas la même échelle selon l'hémicycle),
-`scrutinPublic`, `resultat`, `positionsGroupes` (avec `votantsPour` /
+`scrutinPublic`, `typeVote?` (`ordinaire` | `solennel` | `motion_censure` — la
+**forme** du scrutin, qui explique le nombre de votants ; absente au Sénat),
+`suffragesRequis?` (le seuil — **n'a d'intérêt que sur une motion de censure**),
+`resultat`, `positionsGroupes` (avec `votantsPour` /
 `votantsContre` / `votantsAbstention` optionnels — le **nominatif**, absent =
 masqué, §2.5 ; chaque `Votant` porte son `nom` et, **uniquement s'il siège
 encore**, son `deputeId`, seule clé qui rend le nom cliquable vers sa fiche),
@@ -869,7 +906,10 @@ compacte) ; le `Scrutin` complet est servi par `GET /scrutins/{id}`. Le fil et l
 recherche renvoient un `DossierListItem` allégé (dont `nombreScrutins`,
 `miseAJour`, `accroche?`, `natureTexte?` et `chambres` — les chambres qui ont
 voté le texte, sans quoi une carte du fil se lirait comme un vote de
-l'Assemblée ; il ne porte PAS `titreOfficiel`, d'où la nature calculée côté API).
+l'Assemblée ; il ne porte PAS `titreOfficiel`, d'où la nature calculée côté API ;
+il porte en revanche `typeVoteDernierScrutin?` / `suffragesRequisDernierScrutin?`,
+sans quoi une motion de censure se lirait « 267 pour, 0 contre » jusque dans le
+fil).
 Côté **parlementaires** : `Depute` (identité + `chambre` + groupe +
 circonscription + `commission?` + `depuis?` — le type garde son nom historique,
 `chambre` est le discriminant ; ⚠️ `commission` n'est servie qu'au **Sénat**
@@ -947,6 +987,13 @@ camelCase des schémas Pydantic backend, à répercuter des deux côtés).
   échappent (ceux « à la tribune »). Le chiffre existerait, il ne voudrait rien
   dire — c'est exactement le piège que §7.4 interdit. Même famille de raisonnement
   que le refus du taux de participation côté AN.
+- ⚠️ **Sur une motion de censure, `contre` et `abstention` valent 0 par
+  construction** (art. 49 de la Constitution : seules les voix favorables sont
+  recensées). Vérifié sur les 23 motions de la législature. Toute formule
+  générique « X voix contre Y », tout écart pour/contre, toute barre pour/contre
+  et tout indice de division y disent le contraire du fait — la comparer au
+  **seuil** (`suffragesRequis`) est la seule lecture juste. Vécu : la Q3
+  annonçait « rejeté par 0 voix contre 267 » sur les 23 motions.
 - ⚠️ **Pas d'Alembic** : ajouter une colonne à `db/models.py` ne suffit pas, la
   base existante ne la verra jamais (`create_all` ne modifie pas une table). Il
   faut un énoncé dans `app/db/migrations.py` (additif et idempotent).

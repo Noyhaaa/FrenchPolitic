@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-from app.domain.enums import ObjetVote, PositionVote
+from app.domain.enums import ObjetVote, PositionVote, TypeVote
 from app.utils.text import fold
 
 # Liste fermée des thèmes (source unique, miroir de `ThemeScrutin` côté front).
@@ -120,6 +120,26 @@ def guess_theme(*textes: str) -> str:
 def map_statut(sort_code: str) -> str:
     """« adopté » → adopte, sinon rejete (un scrutin a toujours un résultat)."""
     return "adopte" if "adopt" in fold(sort_code) else "rejete"
+
+
+# Les seuls `codeTypeVote` que l'archive produit (vérifié sur les 8 434 scrutins
+# de la 17e législature : SPO 8 339, SPS 72, MOC 23). Table **fermée** : un code
+# nouveau ne se devine pas, il ne produit simplement pas de type (§2.5).
+_TYPES_VOTE = {
+    "SPO": TypeVote.ordinaire,
+    "SPS": TypeVote.solennel,
+    "MOC": TypeVote.motion_censure,
+}
+
+
+def type_vote(code: str | None) -> TypeVote | None:
+    """Forme du scrutin public d'après son code officiel, sinon None.
+
+    C'est elle qui explique le nombre de votants : un scrutin **ordinaire** se
+    tient en séance parmi les députés alors présents (médiane 132), un scrutin
+    **solennel** est annoncé à l'avance (médiane 528). Cf. `TypeVote`.
+    """
+    return _TYPES_VOTE.get((code or "").strip().upper())
 
 
 def est_amendement(objet: str) -> bool:

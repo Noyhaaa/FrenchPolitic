@@ -105,6 +105,12 @@ python -m app.ingestion.lois                # --dry-run · --sans-llm
 # libellés de `app/domain/sources.py` changent — la composition est idempotente.
 python -m app.ingestion.sources             # --dry-run · --sans-rapports
 
+# Renseigne la FORME de chaque scrutin (ordinaire / solennel / motion de censure)
+# et ses suffrages requis, puis recompose la Q3 et la phrase 3 du résumé, qui
+# citaient le décompte. Seule l'archive des scrutins est téléchargée : ni
+# dossiers, ni PDF, ni LLM — tout ce qui est recomposé est déterministe.
+python -m app.ingestion.types_vote          # --dry-run pour voir la répartition
+
 # L'API sert alors la base ingérée (REPOSITORY_BACKEND=postgres via .env).
 uvicorn app.main:app --reload
 ```
@@ -457,6 +463,72 @@ icône le distingue, là où six 📄 identiques ne distingueraient rien.
 
 Hors périmètre : le **rapport et le compte rendu du Sénat**, que nous n'ingérons
 pas (trou de source déjà documenté, pas un oubli de restitution).
+
+### La forme du scrutin (`typeVote`, `suffragesRequis`)
+
+« 42 voix contre 0 » — pourquoi seulement 42, sur 577 députés ? L'app ne le disait
+nulle part. Mesuré sur notre base : **148 suffrages exprimés en moyenne** à
+l'Assemblée (minimum **16**), contre 338 au Sénat, où la délégation de vote par
+groupe fait voter tout le monde. Et **450 scrutins affichent « contre = 0 »**.
+
+Ce n'était pas un trou de données. L'archive des scrutins, téléchargée à chaque
+run, porte trois champs présents à **100 %** que l'ingestion ne lisait pas :
+
+| Champ | Valeurs mesurées |
+|---|---|
+| `typeVote.codeTypeVote` | `SPO` 8 339 · `SPS` 72 · `MOC` 23 |
+| `syntheseVote.nbrSuffragesRequis` | 8 434 / 8 434 |
+| `syntheseVote.nombreVotants` | déjà déductible (`pour+contre+abstention`) |
+
+Un **scrutin public ordinaire** se tient en séance, au moment où le texte est
+examiné, parmi les députés alors présents — **médiane : 132 votants**. Un
+**scrutin public solennel** est annoncé à l'avance et fixé à un horaire dédié —
+**médiane : 528**. Le rapport de 1 à 4 est là, et c'est un fait de procédure.
+
+⚠️ **Ce n'est jamais un taux de présence**, et on n'en dérive aucun : la source ne
+recense que les votants d'un scrutin public, un ratio se lirait comme un score
+d'absentéisme qu'elle ne soutient pas (§7.4). C'est exactement la règle qui écarte
+déjà la participation de la fiche député. La fiche vote affiche donc la forme et
+le nombre de votants, et **déplie la définition** du glossaire — jamais un
+pourcentage.
+
+#### La motion de censure : le décompte qui disait l'inverse du fait
+
+L'article 49 de la Constitution ne fait recenser que les voix **favorables** à une
+motion de censure. Vérifié : les **23 motions** de la législature ont `contre = 0`
+et `abstentions = 0`, structurellement.
+
+Or `_decompte` place « le camp gagnant en premier », et sur un vote rejeté le
+gagnant est *contre*. La base portait donc, en Q3, sur les fiches les plus lues du
+pays :
+
+> « Le dernier vote sur le texte a été **rejeté par 0 voix contre 267**. »
+
+267 députés avaient voté **pour** la censure ; elle est tombée parce qu'il en
+fallait 289. `VerdictCard` ajoutait « Écart de 267 voix entre pour et contre » et
+la barre s'affichait pleine — une quasi-unanimité là où les opposants ne sont
+simplement pas comptés. Le glossaire, lui, disait déjà la bonne chose (« Seules
+les voix POUR sont comptées »), à un tap de là.
+
+Corrigé partout, de façon déterministe :
+
+- `phrase_motion_censure` (partagée par la **Q3** et la **phrase 3 du résumé**,
+  via `phrase_vote_decisif`) : « La motion de censure a recueilli 267 voix sur les
+  289 requises ; elle n'a pas été adoptée. »
+- `division()` **écarte** les motions du classement des votes disputés : l'écart
+  entre deux camps n'a pas de sens quand un seul est compté. Elles en sortaient
+  déjà par leur score — mais par accident arithmétique, pas par décision.
+- `check_chiffres` admet le **seuil** parmi les décomptes officiels : c'est le
+  seul nombre que la phrase peut citer en plus des voix.
+- Côté app : ni colonne « Contre », ni écart, ni barre pour/contre — les voix
+  recueillies face au seuil, dans la fiche vote comme dans les cartes du fil.
+
+`suffragesRequis` n'est **affiché que là** : sur les 8 411 autres scrutins il vaut
+exactement `exprimés // 2 + 1` (mesuré : 100 %), donc il n'apprend rien.
+
+**Sénat** : sa page ne nomme pas le type de scrutin → `typeVote` reste `None` et
+l'app n'affiche que le nombre de votants (§2.5). La mention de délégation déjà en
+place y répond de toute façon à la même question.
 
 ### Qui porte le texte (`app/ingestion/initiative.py`)
 

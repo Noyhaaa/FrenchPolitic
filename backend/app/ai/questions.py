@@ -35,6 +35,7 @@ import re
 
 from app.ai.guardrails import LEXIQUE_ORIENTE
 from app.ai.llm import LLMClient
+from app.domain.enums import TypeVote
 from app.ingestion.normalize import deposant, truncate_mots
 from app.schemas import (
     ArgumentGroupe,
@@ -488,12 +489,45 @@ def phrase_resultat(scrutins: list[ScrutinResume]) -> str | None:
     )
     if not d.scrutin_public:
         return f"{sujet} {statut} à main levée (pas de décompte des voix)."
+    if d.type_vote is TypeVote.motion_censure:
+        return phrase_motion_censure(d)
     return _decompte(sujet, statut, d.statut.value, d.resultat)
+
+
+def phrase_motion_censure(s) -> str:
+    """Le résultat d'une motion de censure — qui ne se raconte PAS pour/contre.
+
+    L'article 49 de la Constitution ne fait recenser que les voix **favorables**
+    à la motion : `contre` et `abstention` valent 0 par construction (vérifié sur
+    les 23 motions de la législature). La formule générale, qui met « le camp
+    gagnant en premier », produisait donc sur un rejet « rejeté par **0 voix
+    contre 267** » — l'inverse exact du fait, puisque 267 députés avaient voté
+    POUR la censure. Le seul rapport qui décide est voix recueillies / requises.
+
+    Le seuil manquant (source muette) n'est pas deviné : on s'en tient alors aux
+    voix recueillies (§2.5).
+    """
+    voix = s.resultat.pour
+    requises = s.suffrages_requis
+    if requises:
+        recueil = f"La motion de censure a recueilli {voix} voix sur les {requises} requises"
+    else:
+        recueil = f"La motion de censure a recueilli {voix} voix"
+    issue = (
+        "elle a été adoptée et le gouvernement est renversé"
+        if s.statut.value == "adopte"
+        else "elle n'a pas été adoptée"
+    )
+    return f"{recueil} ; {issue}."
 
 
 def _decompte(sujet: str, statut: str, statut_brut: str, r) -> str:
     """« … par X voix contre Y » avec le camp GAGNANT en premier : « rejeté par
-    268 voix contre 188 » (et non l'inverse, trompeur quand pour < contre)."""
+    268 voix contre 188 » (et non l'inverse, trompeur quand pour < contre).
+
+    ⚠️ Ne convient PAS à une motion de censure, dont les opposants ne sont pas
+    recensés — voir `phrase_motion_censure`.
+    """
     gagnant, perdant = (
         (r.pour, r.contre) if statut_brut == "adopte" else (r.contre, r.pour)
     )
@@ -618,6 +652,8 @@ def phrase_resultat_amendement(scrutin: Scrutin) -> str | None:
     )
     if not scrutin.scrutin_public:
         return f"{sujet} {statut} à main levée (pas de décompte des voix)."
+    # Pas de branche « motion de censure » ici : un amendement n'en est jamais
+    # une (le type `MOC` ne porte que sur la motion elle-même).
     return _decompte(sujet, statut, scrutin.statut.value, scrutin.resultat)
 
 

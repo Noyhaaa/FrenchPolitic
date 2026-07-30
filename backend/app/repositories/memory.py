@@ -169,6 +169,7 @@ class InMemoryDossierRepository(DossierRepository):
                 scrutin.chambre,
                 objet=scrutin.objet,
                 scrutin_public=scrutin.scrutin_public,
+                type_vote=scrutin.type_vote,
             )
             if mesure is None:
                 continue

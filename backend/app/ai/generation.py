@@ -45,7 +45,12 @@ def generer_resume(faits: FaitsDossier) -> ResumeScrutin:
     préfère un résumé vide à un résumé douteux (jamais de comblement, §2.5)."""
     context = contexte_depuis_faits(faits)
     resume = composer_resume(faits, context)
-    report = run_guardrails(resume, faits.resultat_reference, context.source_ids)
+    report = run_guardrails(
+        resume,
+        faits.resultat_reference,
+        context.source_ids,
+        faits.suffrages_requis,
+    )
     if report.bloquant:
         return _resume_vide(faits.titre_clair)
     return resume
@@ -94,7 +99,12 @@ class ResumeGenerator:
         resume: ResumeScrutin,
         context: RagContext,
     ) -> GenerationResult:
-        report = run_guardrails(resume, faits.resultat_reference, context.source_ids)
+        report = run_guardrails(
+            resume,
+            faits.resultat_reference,
+            context.source_ids,
+            faits.suffrages_requis,
+        )
         if doit_passer_en_revue(report, resume.confiance):
             motifs = [v.message for v in report.violations]
             if resume.confiance.value == "faible":

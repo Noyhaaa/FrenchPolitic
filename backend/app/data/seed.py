@@ -64,7 +64,14 @@ _GROUPES_SENAT = {
 }
 
 
-def _grp(gid: str, position: str, pour: int, contre: int, abst: int, cohesion: float):
+def _grp(
+    gid: str,
+    position: str,
+    pour: int,
+    contre: int,
+    abst: int,
+    cohesion: float | None,
+):
     nom, couleur = _GROUPES[gid]
     return PositionGroupe(
         groupe_id=gid,
@@ -294,6 +301,34 @@ SEED_SCRUTINS: list[Scrutin] = [
                 url="https://www.senat.fr/scrutin-public/2025/scr2025-118.html",
             )
         ],
+    ),
+    # Motion de censure — le cas où « X voix contre 0 » ne veut PAS dire ce
+    # qu'il semble dire. L'article 49 de la Constitution ne fait recenser que
+    # les voix FAVORABLES : `contre` et `abstention` sont à 0 par construction,
+    # et seuls comptent les 267 voix face aux 289 requises. Les groupes qui ne
+    # l'ont pas votée n'apparaissent donc pas « contre » mais sans position.
+    Scrutin(
+        id="scr-2026-0420",
+        dossier_id="dos-censure-2026",
+        date="2026-07-09T17:00:00Z",
+        objet=(
+            "la motion de censure déposée en application de l'article 49, "
+            "alinéa 2, de la Constitution"
+        ),
+        statut="rejete",
+        scrutin_public=True,
+        type_vote="motion_censure",
+        suffrages_requis=289,
+        resultat=ResultatGlobal(pour=267, contre=0, abstention=0, non_votants=12),
+        positions_groupes=[
+            _grp("RN", "pour", 93, 0, 0, 1.0),
+            _grp("LFI", "pour", 71, 0, 0, 1.0),
+            _grp("SOC", "pour", 65, 0, 0, 1.0),
+            _grp("ECO", "pour", 38, 0, 0, 1.0),
+            _grp("RE", "non_votant", 0, 0, 0, None),
+            _grp("LR", "non_votant", 0, 0, 0, None),
+        ],
+        sources=_sources("scrutin"),
     ),
     Scrutin(
         id="scr-2026-0410",
@@ -575,6 +610,45 @@ SEED_DOSSIERS: list[Dossier] = [
             confiance="moyenne",
             relu_par_humain=False,
             champs_non_documentes=["historique"],
+        ),
+    ),
+    # Motion de censure : un ÉVÉNEMENT AUTONOME (ni texte, ni articles, ni
+    # trajectoire) et le cas où « 267 voix contre 0 » se lit à l'envers si on
+    # n'explique rien — l'article 49 ne recense que les voix favorables.
+    Dossier(
+        id="dos-censure-2026",
+        titre_officiel=(
+            "Motion de censure déposée en application de l'article 49, "
+            "alinéa 2, de la Constitution"
+        ),
+        titre_clair="Motion de censure",
+        statut="rejete",
+        theme="Vie parlementaire",
+        temps_lecture_sec=25,
+        date_dernier_scrutin="2026-07-09T17:00:00Z",
+        scrutins=[_resume_scrutin("scr-2026-0420")],
+        est_evenement_autonome=True,
+        sources=_sources("scrutin"),
+        resume=ResumeScrutin(
+            titre_clair="Motion de censure",
+            resume=[
+                PhraseSourcee(
+                    phrase=(
+                        "La motion de censure a recueilli 267 voix sur les "
+                        "289 requises ; elle n'a pas été adoptée."
+                    ),
+                    source_id="vote_ensemble",
+                ),
+            ],
+            questions=QuestionsCitoyennes(
+                resultat=(
+                    "La motion de censure a recueilli 267 voix sur les "
+                    "289 requises ; elle n'a pas été adoptée."
+                ),
+            ),
+            confiance="haute",
+            relu_par_humain=False,
+            champs_non_documentes=["contexte", "objectif", "historique"],
         ),
     ),
     Dossier(

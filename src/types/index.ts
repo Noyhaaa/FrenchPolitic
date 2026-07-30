@@ -48,6 +48,24 @@ export interface PhraseSourcee {
   sourceId: string;
 }
 
+/**
+ * Forme du scrutin public — ce qui explique le nombre de votants (§7.4).
+ *
+ * C'est la réponse à « 42 voix contre 0, pourquoi seulement 42 ? » : un vote
+ * `ordinaire` se tient en séance, au moment où le texte est examiné, parmi les
+ * députés alors présents ; un vote `solennel` est annoncé à l'avance. Mesuré :
+ * médiane de 132 votants contre 528.
+ *
+ * ⚠️ `motion_censure` : l'article 49 de la Constitution ne fait recenser que
+ * les voix FAVORABLES. `contre` et `abstention` y valent 0 **par construction**
+ * — les afficher ferait lire une quasi-unanimité. Seul compte le rapport voix
+ * recueillies / `suffragesRequis`.
+ *
+ * ⚠️ Jamais un taux de présence, et on n'en dérivera jamais un (§7.4) : la
+ * source ne recense que les votants d'un scrutin public.
+ */
+export type TypeVote = 'ordinaire' | 'solennel' | 'motion_censure';
+
 /** Résultat global d'un scrutin (§3.2 point 4). */
 export interface ResultatGlobal {
   pour: number;
@@ -292,6 +310,17 @@ export interface Scrutin {
   chambre: Chambre;
   /** true = scrutin public (vote nominatif dispo), false = à main levée (§5.2). */
   scrutinPublic: boolean;
+  /**
+   * Forme du scrutin — ce qui explique le nombre de votants. Absente au Sénat,
+   * dont la page ne nomme pas le type : on n'affiche alors aucun libellé (§2.5).
+   */
+  typeVote?: TypeVote;
+  /**
+   * Voix nécessaires pour que le vote soit acquis. ⚠️ N'a d'intérêt que sur une
+   * motion de censure : ailleurs il vaut `exprimés / 2 + 1` (mesuré : 100 % des
+   * cas), donc il n'apprend rien et n'est pas affiché.
+   */
+  suffragesRequis?: number;
   resultat: ResultatGlobal;
   positionsGroupes: PositionGroupe[];
   /** Pour un vote d'amendement : article visé (« Article 2 ») — factuel, neutre. */
@@ -328,6 +357,9 @@ export interface ScrutinResume {
   statut: StatutScrutin;
   chambre: Chambre;
   scrutinPublic: boolean;
+  /** Repris du scrutin complet : la fiche dossier met en avant le vote décisif. */
+  typeVote?: TypeVote;
+  suffragesRequis?: number;
   resultat: ResultatGlobal;
 }
 
@@ -537,6 +569,13 @@ export interface DossierListItem {
    * pas nominatif (à main levée) : on n'affiche alors pas de barre (§2.5, §5.2).
    */
   resultatDernierScrutin?: ResultatGlobal;
+  /**
+   * Forme de ce même scrutin. Sans elle, une motion de censure se lirait
+   * « 267 pour, 0 contre » jusque dans le fil, alors que ses opposants ne sont
+   * pas recensés (art. 49) — cf. `TypeVote`.
+   */
+  typeVoteDernierScrutin?: TypeVote;
+  suffragesRequisDernierScrutin?: number;
 }
 
 /** Une rangée thématique de l'accueil (façon « catégorie » Netflix). */

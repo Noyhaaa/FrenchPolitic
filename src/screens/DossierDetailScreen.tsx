@@ -100,6 +100,7 @@ function VoteDecisifCard({
 }) {
   const lib = libelleScrutin(scrutin.objet);
   const { resultat } = scrutin;
+  const estMotion = scrutin.typeVote === 'motion_censure';
   return (
     <Pressable
       onPress={onPress}
@@ -107,7 +108,12 @@ function VoteDecisifCard({
       accessibilityRole="button"
       accessibilityLabel={`Vote décisif : ${scrutin.objet}. ${statutLabel(
         scrutin.statut,
-      )}, ${resultat.pour} pour, ${resultat.contre} contre. Voir le détail du vote.`}
+      )}, ${formatMicroResultat(
+        resultat.pour,
+        resultat.contre,
+        scrutin.typeVote,
+        scrutin.suffragesRequis,
+      )}. Voir le détail du vote.`}
     >
       <Text style={styles.decisifLabel}>Vote décisif</Text>
       <Text style={styles.voteObjet}>{lib.titre}</Text>
@@ -119,16 +125,34 @@ function VoteDecisifCard({
         </Text>
       </View>
       <Text style={typography.meta}>
-        {formatMicroResultat(resultat.pour, resultat.contre)}
+        {formatMicroResultat(
+          resultat.pour,
+          resultat.contre,
+          scrutin.typeVote,
+          scrutin.suffragesRequis,
+        )}
       </Text>
+      {/* ⚠️ Sur une motion de censure, la barre pour/contre s'afficherait pleine
+          (l'article 49 ne recense pas les opposants) : on la mesure contre le
+          seuil, seul rapport qui décide. */}
       <ResultBar
         height={6}
-        segments={[
-          { value: resultat.pour, color: colors.pour },
-          { value: resultat.abstention, color: colors.abstention },
-          { value: resultat.contre, color: colors.contre },
-          { value: resultat.nonVotants, color: colors.nonVotant },
-        ]}
+        segments={
+          estMotion && scrutin.suffragesRequis
+            ? [
+                { value: resultat.pour, color: colors.pour },
+                {
+                  value: Math.max(0, scrutin.suffragesRequis - resultat.pour),
+                  color: colors.nonVotant,
+                },
+              ]
+            : [
+                { value: resultat.pour, color: colors.pour },
+                { value: resultat.abstention, color: colors.abstention },
+                { value: resultat.contre, color: colors.contre },
+                { value: resultat.nonVotants, color: colors.nonVotant },
+              ]
+        }
       />
       <Text style={[typography.meta, styles.decisifExplication]}>
         C'est ce vote, sur l'ensemble du texte, qui décide de son adoption ou
@@ -496,7 +520,12 @@ export function DossierDetailScreen() {
                     </Text>
                   </View>
                   <Text style={typography.meta}>
-                    {formatMicroResultat(s.resultat.pour, s.resultat.contre)}
+                    {formatMicroResultat(
+                      s.resultat.pour,
+                      s.resultat.contre,
+                      s.typeVote,
+                      s.suffragesRequis,
+                    )}
                   </Text>
                 </View>
                 <Text style={styles.voteChevron} importantForAccessibility="no">
