@@ -10,8 +10,9 @@ introduction ne le portent pas. Cette commande les rattrape sans réingérer :
 elle ne télécharge que l'archive des **dossiers législatifs** (~10 Mo). Ni
 scrutins, ni PDF, ni LLM — quelques secondes au lieu d'un run complet.
 
-Elle pose au passage la **source Légifrance** des lois promulguées : le seul
-lien de l'app vers le texte en vigueur (§7.5).
+Elle nettoie au passage le lien Légifrance des `sources` : il vit désormais dans
+la carte « La loi » de la fiche, appairé au **texte voté** (§7.5), et le laisser
+aussi dans la liste afficherait deux fois la même URL sous deux libellés.
 
 À rejouer quand les règles de `etat_du_texte` changent. Idempotent.
 """
@@ -28,7 +29,7 @@ from sqlalchemy import select
 from app.db.models import DossierRow
 from app.db.session import make_engine, make_session_factory
 from app.ingestion.assemblee import AssembleeOpenDataClient
-from app.ingestion.navette import etat_du_texte, source_legifrance
+from app.ingestion.navette import etat_du_texte, sources_sans_le_lien_de_la_loi
 from app.schemas import Dossier
 
 # Libellés d'affichage du récapitulatif, dans l'ordre où on les montre.
@@ -85,7 +86,7 @@ async def _main(dry_run: bool, legislature: int) -> None:
     session_factory = make_session_factory(engine)
     ecrits = inchanges = sans = 0
     repartition: Counter[str] = Counter()
-    sources_posees = 0
+    sources_retirees = 0
 
     async with session_factory() as session:
         for row in (await session.execute(select(DossierRow))).scalars().all():
@@ -104,10 +105,14 @@ async def _main(dry_run: bool, legislature: int) -> None:
             dossier = Dossier.model_validate(row.payload)
             avant = dossier.model_dump(mode="json", by_alias=True)
             dossier.etat = etat
-            loi = source_legifrance(etat)
-            if loi is not None and all(s.url != loi.url for s in dossier.sources):
-                dossier.sources = [*dossier.sources, loi]
-                sources_posees += 1
+            # Le lien Légifrance a d'abord vécu ici, avant que la carte « La loi »
+            # ne l'affiche appairé au texte voté. On le retire donc de la liste :
+            # deux fois la même URL sous deux libellés laisserait croire à deux
+            # textes. `etat.url_legifrance` en reste la seule référence.
+            restantes = sources_sans_le_lien_de_la_loi(dossier.sources, etat)
+            if len(restantes) != len(dossier.sources):
+                dossier.sources = restantes
+                sources_retirees += 1
             apres = dossier.model_dump(mode="json", by_alias=True)
             if apres == avant:
                 inchanges += 1
@@ -133,7 +138,8 @@ async def _main(dry_run: bool, legislature: int) -> None:
         for etat in _ORDRE:
             if repartition[etat]:
                 print(f"  {repartition[etat]:4d}  {etat}")
-        print(f"\n{sources_posees} source(s) Légifrance ajoutée(s).")
+        print(f"\n{sources_retirees} lien(s) Légifrance retiré(s) de la liste\n"
+              f"  (il vit désormais dans la carte « La loi »).")
 
 
 def main() -> None:

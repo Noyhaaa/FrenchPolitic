@@ -93,6 +93,12 @@ python -m app.ingestion.initiatives         # --dry-run pour voir la répartitio
 # `etat_du_texte` changent.
 python -m app.ingestion.etats               # --dry-run pour voir la répartition
 
+# Attache la LOI FINALE (Dossier.texteAdopte) aux lois promulguées et réécrit
+# leur Q4 depuis elle, à l'indicatif. Archive des dossiers (~10 Mo) + les PDF
+# des « petites lois ». --dry-run n'écrit rien et n'appelle pas le modèle,
+# --sans-llm récupère les textes sans toucher aux questions.
+python -m app.ingestion.lois                # --dry-run · --sans-llm
+
 # L'API sert alors la base ingérée (REPOSITORY_BACKEND=postgres via .env).
 uvicorn app.main:app --reload
 ```
@@ -294,13 +300,84 @@ Deux choix qui ne vont pas de soi :
 - **Un `RTRINI` ne compte que dans la dernière étape.** Un retrait suivi
   d'autres actes ne conclut rien.
 
-Le `PROM-PUB` donne en prime la **source Légifrance** (`source_legifrance`,
-partagée par l'ingestion et le rattrapage) : le premier lien de l'app vers le
-texte **en vigueur** (§7.5) — jusqu'ici on ne remontait qu'au dossier et aux
-scrutins. L'URL est celle que l'Assemblée publie dans `infoJO`, jamais une URL
-construite ici ; elle n'est pas vérifiée à l'ingestion (Légifrance répond 403 à
-tout script, challenge Cloudflare — ce n'est pas une preuve de lien mort), et la
-référence écrite (n° + date + JO) reste affichée à côté.
+Le `PROM-PUB` donne en prime le lien vers le texte **en vigueur**
+(`EtatTexte.url_legifrance`) : l'URL est celle que l'Assemblée publie dans
+`infoJO`, jamais une URL construite ici ; elle n'est pas vérifiée à l'ingestion
+(Légifrance répond 403 à tout script, challenge Cloudflare — ce n'est pas une
+preuve de lien mort), et la référence écrite (n° + date + JO) reste affichée à
+côté. ⚠️ Ce lien **ne figure pas** dans `Dossier.sources` : il vit dans la carte
+« La loi », appairé au texte voté (cf. ci-dessous). L'y laisser afficherait deux
+fois la même URL sous deux libellés — d'où `sources_sans_le_lien_de_la_loi`, qui
+retire l'URL **exacte** de l'état et non « tout ce qui ressemble à du
+Légifrance » (une source légitime peut y pointer).
+
+### La loi finale (`app/ingestion/textes_adoptes.py`)
+
+Tout ce que l'app décrivait d'un texte venait de son **dépôt** : l'exposé des
+motifs, le dispositif, et « qu'est-ce que ça change ? ». Sur une loi promulguée,
+cette version n'existe plus — la navette et les amendements l'ont modifiée. La
+fiche de la **loi n° 2025-379**, en vigueur, affichait donc :
+
+> « Selon l'auteur du texte, cette *proposition* de loi *permettrait* de
+> renforcer la coordination entre les forces de sécurité… »
+
+Le pitch de l'auteur, au conditionnel, sur une proposition. **Mesuré : 83 des
+96 lois promulguées** étaient dans cet état.
+
+L'archive désigne elle-même le bon texte : `PROM-PUB.texteLoiRef` pointe vers le
+document adopté (la « petite loi »), dont l'URL se dérive de l'`uid` comme celle
+du texte déposé :
+
+```
+PIONANR5L17BTA0075  → assemblee-nationale.fr/dyn/17/textes/l17t0075_texte-adopte-seance
+PRJLSNR5S459BTA0040 → senat.fr/leg/tas24-040
+```
+
+| | Mesuré |
+|---|---|
+| `texteLoiRef` présent → **lien** posé | **76 / 96** |
+| corps sous le cap `_MAX_DISPOSITIF` → **source de la Q4** | **45 / 76** |
+| Q4 réécrite à l'indicatif | **44** (1 rejetée par les garde-fous) |
+| sans `texteLoiRef` | 20 → rien (§2.5) |
+
+`TexteAdopte` dissocie **le lien et le corps** à dessein : le lien vaut dès que
+l'archive désigne le texte, le corps seulement s'il peut être lu *entièrement*
+par le modèle (au-delà — budget, PLFSS — on n'attache rien, jamais un tronçon).
+
+⚠️ **Côté Sénat, l'année de l'URL est celle de la session** (oct.→sept.), déduite
+de la date de publication du document via `session_pour`. Elle n'est jamais
+approchée : la numérotation redémarre à chaque session, si bien qu'un décalage
+d'un an attrape un texte **sans rapport** (vérifié : `tas24-159` est une
+résolution européenne sur la subsidiarité, là où `tas25-159` devait être une loi
+sur les maladies cardio-neuro-vasculaires). Un 404 ne donne rien, il ne déclenche
+aucun repli.
+
+⚠️ **Les 20 lois sans `texteLoiRef` ne sont pas devinées.** Leur dossier porte
+pourtant 2 à 4 textes adoptés (un par lecture, dans chaque chambre) — en élire un
+serait choisir à la place de la source, et le plus récent est parfois la version
+*modifiée par le Sénat*, qui n'est justement pas la loi.
+
+`decouper_loi` n'est pas `decouper_dispositif` : une petite loi n'a pas d'exposé
+des motifs, et son en-tête est administratif (« TEXTE ADOPTÉ n° 75 », « (Texte
+définitif) », « L'Assemblée nationale a adopté… », « Voir les numéros : … »). Le
+découpage part donc du **premier article**, repéré **sans** `IGNORECASE` : les
+titres d'article sont capitalisés, alors qu'une référence en prose ne l'est pas
+(« à l'article 45 de la Constitution »… qui figure justement dans l'en-tête).
+
+**La Q4 gagne un barreau au-dessus des deux existants** (`app/ai/questions.py`) :
+
+| Priorité | Source | Registre | Attribution |
+|---|---|---|---|
+| 1 | texte **voté** (la loi) | **indicatif** | aucune |
+| 2 | dispositif du texte déposé | conditionnel | aucune |
+| 3 | exposé des motifs | conditionnel | « Selon l'auteur du texte » |
+
+C'est le prolongement de la règle déjà en place (« le fait officiel prime sur la
+parole du déposant ») : **la loi votée prime sur le texte déposé**. Une réponse
+déjà en base est regénérée dès qu'une source plus haute apparaît — même mécanisme
+que celui qui faisait déjà remonter l'exposé vers le dispositif. Le seul mot qui
+change dans le prompt est le registre : le conditionnel dit « ce n'est qu'une
+proposition », ce qui serait faux d'un texte en vigueur.
 
 ### Qui porte le texte (`app/ingestion/initiative.py`)
 
@@ -550,6 +627,7 @@ app/
     debats.py        Comptes rendus (SyceronBrut) : explications de vote par groupe + liaison au vote
     amendements.py   Contenu des amendements (dispositif + exposé sommaire + article visé) : archive AN → index (dossierRef, numéro)
     textes_an.py     Exposé des motifs ET dispositif : uid → URL du PDF officiel → extraction (pypdf)
+    textes_adoptes.py La LOI FINALE (« petite loi ») : texteLoiRef → URL AN/Sénat → articles votés, source de la Q4
     textes_senat.py  Repli exposé/dispositif : texte de transmission Sénat → PDF senat.fr → extraction
     organes.py       Résolution des groupes (AMO) + couleurs + annuaire des députés
     deputes.py       Référentiel des députés + votes nominatifs (pur) + CLI autonome

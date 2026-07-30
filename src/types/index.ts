@@ -400,6 +400,22 @@ export interface EtatTexte {
   urlLegifrance?: string | null;
 }
 
+/**
+ * Le texte tel que le Parlement l'a **définitivement voté** (« petite loi »).
+ *
+ * Tout le reste de la fiche décrit le texte **déposé** — la version d'avant les
+ * amendements et la navette, qui n'existe plus sur une loi en vigueur.
+ *
+ * `source` et `texte` sont dissociés : le lien vaut pour toute loi dont
+ * l'archive désigne le texte, le corps seulement s'il tient sous le cap qui
+ * protège le modèle. Le corps n'est **jamais affiché** (du droit codifié brut
+ * est illisible) : il sert de source vérifiable à la Q4.
+ */
+export interface TexteAdopte {
+  source: SourceOfficielle;
+  texte?: string | null;
+}
+
 export interface Dossier {
   id: string;
   titreOfficiel: string;
@@ -454,6 +470,12 @@ export interface Dossier {
    * l'exposé. Source de la réponse Q4 ; jamais affiché brut.
    */
   dispositif?: DispositifTexte;
+  /**
+   * Le texte définitivement voté (« petite loi »), pour une loi promulguée.
+   * Prime sur `dispositif` comme source de la Q4 : celui-ci décrit le texte
+   * déposé, une version que la navette a modifiée et qui n'est plus en vigueur.
+   */
+  texteAdopte?: TexteAdopte | null;
   /**
    * Ce dossier n'est pas un texte de loi mais un **événement autonome** :
    * motion de censure, déclaration du Gouvernement. Il n'a ni articles, ni

@@ -43,6 +43,7 @@ from app.schemas import (
     QuestionsCitoyennes,
     Scrutin,
     ScrutinResume,
+    TexteAdopte,
 )
 from app.utils.text import fold
 
@@ -99,6 +100,18 @@ _SYS_CHANGEMENT_TEXTE = (
     "qu'une proposition tant qu'il n'est pas promulgué.\n"
     "N'attribue rien à personne : ce n'est pas un point de vue, c'est ce "
     "qu'écrit le texte.\n" + _CONSIGNES_COMMUNES
+)
+
+_SYS_CHANGEMENT_LOI = (
+    "Tu expliques à un citoyen ce que change une loi française déjà en vigueur, "
+    "uniquement à partir de son texte définitivement voté par le Parlement.\n"
+    # Le SEUL registre qui diffère des deux autres sources de la Q4, et c'est le
+    # cœur du sujet : le conditionnel dit « ce n'est qu'une proposition ». Sur un
+    # texte promulgué, ce serait faux — la loi s'applique.
+    "Utilise l'indicatif présent (« La loi interdit… », « Elle crée… ») : le "
+    "texte a été voté et promulgué, il s'applique.\n"
+    "N'attribue rien à personne : ce n'est pas un point de vue, c'est ce "
+    "qu'écrit la loi.\n" + _CONSIGNES_COMMUNES
 )
 
 _SYS_POURQUOI_AMENDEMENT = (
@@ -322,7 +335,10 @@ def valider_reponse(
     (cas réel : « l'exposition des jeunes utilisateurs aux contenus dangereux »,
     écrit dans l'article unique d'une proposition de résolution).
     """
-    reponse = reponse.strip()
+    # Espaces normalisés : les cartes rendent un paragraphe, et le modèle livre
+    # parfois une phrase par ligne — 23 réponses en base portaient déjà ces sauts
+    # de ligne. Purement cosmétique, aucun mot n'est touché.
+    reponse = re.sub(r"\s+", " ", reponse).strip()
     if not reponse or len(reponse) > max_chars:
         return None
     if _caracteres_hors_francais(reponse):
@@ -504,27 +520,59 @@ async def generer_changement_texte(
     return valider_reponse(reponse, sources, lexique_de_la_source_admis=True)
 
 
+async def generer_changement_loi(
+    titre_officiel: str, texte_loi: str, llm: LLMClient
+) -> str | None:
+    """Q4 d'une **loi en vigueur** : ce qu'elle change, depuis le texte voté.
+
+    Même contrat que `generer_changement_texte` — fait officiel, aucune
+    attribution, mêmes contrôles déterministes — à un mot près, décisif :
+    l'**indicatif**. Le dispositif du texte déposé décrit une proposition et se
+    dit au conditionnel ; la loi promulguée, elle, s'applique.
+    """
+    sources = f"{titre_officiel}\n{texte_loi}"
+    user = f"TITRE : {titre_officiel}\n\nTEXTE DE LOI VOTÉ :\n{texte_loi}"
+    reponse = await llm.generate_text(_SYS_CHANGEMENT_LOI, user)
+    return valider_reponse(reponse, sources, lexique_de_la_source_admis=True)
+
+
 async def generer_questions(
     titre_officiel: str,
     scrutins: list[ScrutinResume],
     expose_texte: str | None,
     llm: LLMClient | None,
     dispositif: DispositifTexte | None = None,
+    texte_adopte: TexteAdopte | None = None,
 ) -> QuestionsCitoyennes:
     """Compose les 4 réponses. Sans LLM (ni exposé ni dispositif), seule la Q3
     (déterministe) est renseignée — les autres restent « information non
     disponible » (§2.5).
 
-    Q4 « qu'est-ce que ça change » a deux sources possibles, dans cet ordre :
-    le **dispositif officiel** (fait — réponse sans attribution, la source est
-    posée par l'appelant) puis, à défaut, l'**exposé des motifs** (point de vue
-    de l'auteur — réponse obligatoirement préfixée « Selon l'auteur du texte »).
+    Q4 « qu'est-ce que ça change » a **trois** sources, dans cet ordre — chacune
+    plus proche de ce qui s'applique réellement que la suivante :
+
+    1. le **texte définitivement voté** (la loi elle-même) : fait, sans
+       attribution, à l'**indicatif** ;
+    2. le **dispositif du texte déposé** : fait aussi, mais d'une version que la
+       navette a modifiée — d'où le conditionnel ;
+    3. l'**exposé des motifs** : point de vue de l'auteur, obligatoirement
+       préfixé « Selon l'auteur du texte ».
+
+    C'est le prolongement de la règle déjà en place (« le fait officiel prime sur
+    la parole du déposant ») : la loi votée prime sur le texte déposé.
     """
     questions = QuestionsCitoyennes(resultat=phrase_resultat(scrutins))
     if llm is None:
         return questions
 
-    if dispositif:
+    if texte_adopte and texte_adopte.texte:
+        questions.changement = await generer_changement_loi(
+            titre_officiel, texte_adopte.texte, llm
+        )
+        if questions.changement:
+            questions.changement_source = texte_adopte.source
+
+    if dispositif and not questions.changement:
         questions.changement = await generer_changement_texte(
             titre_officiel, dispositif.texte, llm
         )

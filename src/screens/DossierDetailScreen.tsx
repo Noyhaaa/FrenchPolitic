@@ -17,6 +17,7 @@ import {
   AmendementsSection,
   ExposeMotifsCard,
   InitiativeLigne,
+  LoiCard,
   QuestionsCard,
   ErrorView,
   LoadingView,
@@ -362,6 +363,11 @@ export function DossierDetailScreen() {
         {phases.length > 0 || dossier.etat ? (
           <TrajectoireNavette phases={phases} etat={dossier.etat} />
         ) : null}
+
+        {/* 1ter. La loi finale — sa référence et où la lire (§7.5). Tout le
+            reste de la fiche décrit le texte DÉPOSÉ ; sur un texte promulgué,
+            cette version n'existe plus. Masquée hors promulgation. */}
+        <LoiCard etat={dossier.etat} texteAdopte={dossier.texteAdopte} />
 
         {/* 2. Le vote en questions — l'entrée de compréhension (§2.2) :
             pourquoi / désaccord / résultat / changement, en langage simple.

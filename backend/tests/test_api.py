@@ -78,8 +78,11 @@ def test_dossier_dit_ou_en_est_le_texte(client):
     assert loi["etat"]["etat"] == "promulgue"
     assert loi["etat"]["numeroLoi"] == "2026-630"
     assert loi["etat"]["dateJournalOfficiel"] == "2026-07-14"
-    # Le seul lien de l'app vers le texte tel qu'il est entré en vigueur.
-    assert any(s["url"] == loi["etat"]["urlLegifrance"] for s in loi["sources"])
+    # Le lien vers le texte en vigueur : porté par l'état, affiché par la carte
+    # « La loi » à côté du texte voté. ⚠️ PAS dans `sources` — deux fois la même
+    # URL sous deux libellés laisserait croire à deux textes.
+    assert loi["etat"]["urlLegifrance"]
+    assert all(s["url"] != loi["etat"]["urlLegifrance"] for s in loi["sources"])
 
     en_cours = client.get("/dossiers/dos-energie-2026").json()["etat"]
     assert en_cours["etat"] == "en_navette"
@@ -88,6 +91,31 @@ def test_dossier_dit_ou_en_est_le_texte(client):
     assert en_cours["numeroLoi"] is None
 
     assert client.get("/dossiers/dos-ecoles-2026").json()["etat"] is None
+
+
+def test_loi_promulguee_porte_le_texte_vote(client):
+    """La loi finale traverse l'API en camelCase — et c'est elle, non le texte
+    déposé, qui fait foi sur un texte en vigueur.
+
+    Le lien et le corps sont dissociés : le premier vaut pour toute loi dont
+    l'archive désigne le texte, le second seulement s'il tient sous le cap.
+    """
+    loi = client.get("/dossiers/dos-sante-2026").json()
+    assert loi["texteAdopte"]["source"]["libelle"] == "Texte voté par le Parlement"
+    assert loi["texteAdopte"]["texte"] is not None
+
+    # La Q4 en découle : aucune attribution (c'est un fait), à l'indicatif (le
+    # texte s'applique), et sa source est la loi votée — pas le dépôt (§7.5).
+    q4 = loi["resume"]["questions"]["changement"]
+    assert not q4.startswith("Selon")
+    assert q4.startswith("La loi punit")
+    assert (
+        loi["resume"]["questions"]["changementSource"]["url"]
+        == loi["texteAdopte"]["source"]["url"]
+    )
+
+    # Un texte encore en navette n'a pas de loi finale : le bloc disparaît (§2.5).
+    assert client.get("/dossiers/dos-energie-2026").json()["texteAdopte"] is None
 
 
 def test_amendement_scrutin_accessible(client):

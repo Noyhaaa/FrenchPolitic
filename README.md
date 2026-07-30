@@ -21,7 +21,8 @@ Tout ce qu'affiche l'app vient de sources publiques officielles. Rien n'est sais
 |---|---|
 | **Open data Assemblée nationale** — scrutins publics (17e législature) | Le vote lui-même : objet, date, résultat, ventilation par groupe, **nominatif** |
 | **Archive AMO** (acteurs & organes) | L'annuaire des députés, leur groupe, leur circonscription, leur photo |
-| **Archive « Dossiers législatifs »** | Le rattachement d'un vote à son **dossier**, le lien officiel, la **trajectoire** du texte dans les deux chambres, **où il en est aujourd'hui** (n° de la loi promulguée, JO, Légifrance), et **qui le porte** |
+| **Archive « Dossiers législatifs »** | Le rattachement d'un vote à son **dossier**, le lien officiel, la **trajectoire** du texte dans les deux chambres, **où il en est aujourd'hui** (n° de la loi promulguée, JO, Légifrance), **qui le porte**, et la référence du **texte définitivement voté** |
+| **PDF des « petites lois »** (AN, Sénat) | La **loi finale** : les articles tels que le Parlement les a votés — source de « qu'est-ce que ça change ? » sur un texte en vigueur |
 | **PDF des textes déposés** (AN, repli senat.fr) | L'**exposé des motifs** (parole de l'auteur) et le **dispositif** (les articles) |
 | **Archive « amendements »** (AN) | Le contenu réel d'un amendement : article visé, dispositif, exposé sommaire |
 | **Comptes rendus des débats** (« SyceronBrut ») | Les **explications de vote** des groupes en séance |
@@ -112,9 +113,12 @@ arithmétiquement depuis le vote décisif.
 - **Fiche dossier** : **qui porte le texte** (le Gouvernement, le parlementaire
   auteur — cliquable vers sa fiche —, ou le Sénat), la frise **« Trajectoire au
   Parlement »** (les deux chambres, chaque étape de jargon ouvrant sa
-  définition) close par **« Où en est le texte ? »** — « C'est la loi » avec son
-  numéro et son lien Légifrance, ou la dernière étape enregistrée, **jamais
-  l'étape suivante**, qui serait une prédiction —, le résumé, **le vote en
+  définition) close par **« Où en est le texte ? »** — « C'est la loi », ou la
+  dernière étape enregistrée, **jamais l'étape suivante**, qui serait une
+  prédiction. Pour une loi promulguée, la carte **« La loi »** donne son numéro,
+  son *Journal officiel* et **deux liens** : le texte **voté par le Parlement** et
+  le texte **en vigueur** (Légifrance) — ce ne sont pas les mêmes, une loi pouvant
+  avoir été modifiée depuis. Puis le résumé, **le vote en
   4 questions**, puis trois sections — les
   votes sur le texte avec le **vote décisif** mis en avant, les **amendements**,
   les **sous-amendements**. L'exposé des motifs y est cité et attribué.
@@ -151,6 +155,7 @@ Mesuré sur la base de développement au **29 juillet 2026** (dernier run comple
 | Parlementaires | **925** (577 députés + 348 sénateurs), **1,39 M** de votes nominatifs |
 | Trajectoire au Parlement | 262 / 328 dossiers |
 | Où en est le texte (état actuel) | **254 / 328** — 96 promulgués · 126 en navette · 21 résolutions · 7 au Conseil constitutionnel · 4 retirés |
+| Loi finale (texte voté) | **76 / 96 lois** ont leur lien, **45** leur contenu — d'où une Q4 à l'indicatif au lieu du pitch de l'auteur au conditionnel |
 | Initiative (qui porte le texte) | **242 / 255 dossiers officiels** — 49 Gouvernement · 124 parlementaires (110 nommés) · 69 Sénat |
 | Accroche (le but du texte en une phrase) | 241 / 328 |
 | Exposé des motifs | 242 / 328 · dispositif : 176 |
@@ -204,7 +209,8 @@ python -m app.ingestion.deputes            # annuaire + votes nominatifs seuls
 python -m app.ingestion.revalider          # repasse les garde-fous sur les réponses en base
 python -m app.ingestion.divisions          # recalcule l'indice des « votes disputés »
 python -m app.ingestion.initiatives        # renseigne « qui porte le texte » en base
-python -m app.ingestion.etats              # renseigne « où en est le texte » + source Légifrance
+python -m app.ingestion.etats              # renseigne « où en est le texte » en base
+python -m app.ingestion.lois               # attache la loi finale + réécrit la Q4 à l'indicatif
 pytest                                     # suite de tests
 ```
 

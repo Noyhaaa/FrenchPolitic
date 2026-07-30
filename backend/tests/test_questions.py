@@ -19,6 +19,7 @@ from app.schemas import (
     Scrutin,
     ScrutinResume,
     SourceOfficielle,
+    TexteAdopte,
 )
 
 
@@ -330,6 +331,94 @@ async def test_q4_sans_expose_mais_avec_dispositif():
     assert q.changement is not None
     assert q.changement_source is not None
     assert q.pourquoi is None  # pas d'exposé → pas de Q1 (§2.5)
+
+
+_TEXTE_ADOPTE = TexteAdopte(
+    texte=(
+        "Article unique Le procureur informe par écrit la victime dont la "
+        "plainte est classée sans suite des motifs de sa décision."
+    ),
+    source=SourceOfficielle(
+        type="texte",
+        libelle="Texte voté par le Parlement",
+        url=(
+            "https://www.assemblee-nationale.fr/dyn/17/textes/"
+            "l17t0075_texte-adopte-seance"
+        ),
+    ),
+)
+
+
+async def test_q4_prend_la_loi_votee_avant_le_texte_depose():
+    """Le dispositif déposé décrit une version que la navette a modifiée : sur une
+    loi en vigueur, c'est le texte VOTÉ qui fait foi. Un seul appel au modèle —
+    le dispositif n'est pas même essayé."""
+    llm = _FakeLLM(
+        "La loi oblige le procureur à informer par écrit la victime dont la "
+        "plainte est classée sans suite.",
+        "Les députés ont examiné une proposition de loi sur les droits des victimes.",
+    )
+    q = await generer_questions(
+        _TITRE,
+        [_scrutin("l'ensemble…")],
+        _EXPOSE,
+        llm,
+        dispositif=_DISPOSITIF_TEXTE,
+        texte_adopte=_TEXTE_ADOPTE,
+    )
+    assert q.changement is not None
+    # Un fait, donc aucune attribution — et à l'indicatif, puisque ça s'applique.
+    assert not q.changement.startswith(PREFIXE_AUTEUR)
+    assert q.changement.startswith("La loi oblige")
+    # La source est la loi votée, pas le texte déposé (§7.5).
+    assert q.changement_source == _TEXTE_ADOPTE.source
+    assert not llm._reponses
+
+
+async def test_q4_redescend_sur_le_texte_depose_si_la_loi_est_rejetee():
+    """Chiffre absent de la loi votée → réponse rejetée, on redescend d'un
+    barreau. L'échelle ne casse pas, elle se dégrade proprement (§2.5)."""
+    llm = _FakeLLM(
+        "La loi concerne 12 000 victimes par an.",
+        "Le texte obligerait à informer par écrit la victime.",
+        "Les députés ont examiné une proposition de loi sur les droits des victimes.",
+    )
+    q = await generer_questions(
+        _TITRE,
+        [_scrutin("l'ensemble…")],
+        _EXPOSE,
+        llm,
+        dispositif=_DISPOSITIF_TEXTE,
+        texte_adopte=_TEXTE_ADOPTE,
+    )
+    assert q.changement is not None
+    assert q.changement_source == _DISPOSITIF_TEXTE.source
+
+
+async def test_un_texte_adopte_sans_corps_ne_sert_pas_de_source():
+    """31 lois sur 76 n'ont que le lien (corps hors cap) : la Q4 reste celle du
+    texte déposé, le lien vers la loi votée existe quand même."""
+    sans_corps = TexteAdopte(source=_TEXTE_ADOPTE.source)
+    llm = _FakeLLM(
+        "Le texte obligerait à informer par écrit la victime.",
+        "Les députés ont examiné une proposition de loi sur les droits des victimes.",
+    )
+    q = await generer_questions(
+        _TITRE,
+        [_scrutin("l'ensemble…")],
+        _EXPOSE,
+        llm,
+        dispositif=_DISPOSITIF_TEXTE,
+        texte_adopte=sans_corps,
+    )
+    assert q.changement_source == _DISPOSITIF_TEXTE.source
+
+
+def test_les_sauts_de_ligne_sont_normalises():
+    """Le modèle livre parfois une phrase par ligne ; les cartes rendent un
+    paragraphe. Purement cosmétique — aucun mot n'est touché."""
+    valide = valider_reponse("La loi interdit ceci.\nElle crée cela.", _SOURCES)
+    assert valide == "La loi interdit ceci. Elle crée cela."
 
 
 # --- questions d'un vote d'amendement (fiche vote) ---

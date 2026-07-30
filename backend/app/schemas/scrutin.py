@@ -361,6 +361,28 @@ class DispositifTexte(CamelModel):
     source: SourceOfficielle
 
 
+class TexteAdopte(CamelModel):
+    """Le texte tel que le Parlement l'a **définitivement voté** (§5.1).
+
+    La « petite loi » : le texte adopté en dernière lecture, celui que le
+    Président promulgue. Tout le reste de la fiche décrit le texte **déposé** —
+    c'est-à-dire la version d'avant les amendements et la navette ; sur une loi
+    en vigueur, cette version n'existe plus.
+
+    `source` et `texte` sont **dissociés à dessein** : le lien vaut pour toute
+    loi dont l'archive désigne le texte (§7.5), alors que le corps n'a de sens
+    que s'il tient sous le cap de `textes_an._MAX_DISPOSITIF` — au-delà (budget,
+    PLFSS) il n'est pas stocké, pour que le modèle ne présente jamais un tronçon
+    de loi comme le tout (§2.5).
+
+    Comme le dispositif, le corps n'est **jamais affiché brut** : du droit
+    codifié est illisible. Il sert de source vérifiable à la Q4.
+    """
+
+    source: SourceOfficielle
+    texte: str | None = None
+
+
 class Initiative(CamelModel):
     """Qui porte le texte, d'après son document de dépôt officiel (§5.1).
 
@@ -421,6 +443,10 @@ class Dossier(CamelModel):
     # Dispositif du texte déposé (fait officiel), extrait du même PDF. Sert de
     # source à la réponse « qu'est-ce que ça change » ; jamais affiché brut.
     dispositif: DispositifTexte | None = None
+    # Le texte définitivement voté (« petite loi »), pour une loi promulguée.
+    # Prime sur `dispositif` comme source de la Q4 : celui-ci décrit le texte
+    # déposé, une version que la navette a modifiée et qui n'est plus en vigueur.
+    texte_adopte: TexteAdopte | None = None
     # Qui porte le texte (Gouvernement, un parlementaire nommé, le Sénat).
     # Absente pour les dossiers sans document de dépôt à l'Assemblée (dossiers
     # reconstitués « TXT-… », d'origine sénatoriale « SEN-… », motions) → la

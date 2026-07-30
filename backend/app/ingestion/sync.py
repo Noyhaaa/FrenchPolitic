@@ -56,7 +56,11 @@ from app.ingestion.initiative import (
     construire_index_initiatives,
     resoudre_initiative,
 )
-from app.ingestion.navette import etat_du_texte, source_legifrance, trajectoire
+from app.ingestion.navette import (
+    etat_du_texte,
+    sources_sans_le_lien_de_la_loi,
+    trajectoire,
+)
 from app.ingestion.senat import (
     URL_TEXTE_PDF as SENAT_URL_TEXTE_PDF,
     SenatOpenDataClient,
@@ -76,6 +80,12 @@ from app.ingestion.textes_an import (
     construire_index_textes,
     lire_pdf,
     url_page_texte,
+)
+from app.ingestion.textes_adoptes import (
+    construire_index_publications_ta,
+    construire_texte_adopte,
+    ref_texte_loi,
+    urls_texte_adopte,
 )
 from app.ingestion.textes_senat import (
     construire_dispositif_senat,
@@ -125,6 +135,7 @@ from app.schemas import (
     Scrutin,
     ScrutinResume,
     SourceOfficielle,
+    TexteAdopte,
 )
 from app.utils.text import fold
 
@@ -163,6 +174,10 @@ class SyncReport:
     # Dossiers dont on sait dire où en est le texte aujourd'hui (promulgué,
     # devant le Conseil constitutionnel, dernière étape connue…).
     etats: int = 0
+    # Lois promulguées dont on a le texte définitivement voté (lien), et
+    # sous-ensemble dont le corps est exploitable (source de la Q4 factuelle).
+    textes_adoptes: int = 0
+    lois_lues: int = 0
     # Dossiers supprimés car vidés de leurs scrutins (ex. TXT- migrés vers un
     # dossier officiel après amélioration de la réconciliation).
     dossiers_orphelins_supprimes: int = 0
@@ -566,6 +581,10 @@ def _merge_avec_existant(prev: Dossier, incoming: Dossier) -> Dossier:
     # l'état connu plutôt que de faire disparaître le bloc de la fiche.
     if incoming.etat is None and prev.etat is not None:
         incoming.etat = prev.etat
+    # Le texte voté ne bouge plus une fois la loi promulguée : un run qui n'a pas
+    # pu joindre le PDF ne doit pas faire disparaître le lien ni sa source de Q4.
+    if incoming.texte_adopte is None and prev.texte_adopte is not None:
+        incoming.texte_adopte = prev.texte_adopte
     # Publics concernés : acquis d'un run avec LLM, préservés sur un run sans.
     if not incoming.resume.public_concerne and prev.resume.public_concerne:
         incoming.resume.public_concerne = prev.resume.public_concerne
@@ -734,6 +753,9 @@ class SyncJob:
         # dossierRef → `procedureParlementaire` : distingue une résolution (dont
         # la lecture unique est l'aboutissement) d'un texte de loi.
         self._procedure_par_ref: dict[str, object] = {}
+        # uid d'un texte adopté → sa date de publication : c'est elle qui donne
+        # l'année de session des URLs du Sénat (cf. `textes_adoptes`).
+        self._publication_ta: dict[str, str] = {}
         # dossierRef → qui porte le texte (lu sur son document de dépôt).
         self._initiatives_par_ref: dict[str, InitiativeBrute] = {}
         # acteurRef → identité du parlementaire (nom, groupe, photo), pour
@@ -827,6 +849,54 @@ class SyncJob:
                     await self._enrichir_senat(dossier, pdf, report)
             if dossier.expose_motifs is not None and dossier.dispositif is not None:
                 return
+
+    async def _enrichir_texte_adopte(
+        self,
+        session: AsyncSession,
+        dossier: Dossier,
+        dossier_ref: str | None,
+        report: SyncReport,
+    ) -> None:
+        """Attache le texte **définitivement voté** d'une loi promulguée.
+
+        Tout le reste de la fiche décrit le texte **déposé** — la version d'avant
+        les amendements. Sur une loi en vigueur, elle n'existe plus : c'est ce
+        texte-ci qui fait foi, et qui devient la source de la Q4.
+
+        Une loi promulguée ne change plus : ce qui est en base est réutilisé
+        **sans réseau**. L'archive désigne elle-même le document (`texteLoiRef`)
+        — on ne le choisit jamais. Best-effort et silencieux (§2.5).
+        """
+        if dossier.etat is None or dossier.etat.etat != "promulgue":
+            return
+        prev = await self._texte_adopte_en_base(session, dossier.id)
+        if prev is not None:
+            dossier.texte_adopte = prev
+            return
+        uid = ref_texte_loi(self._actes_par_ref.get(dossier_ref or ""))
+        if not uid:
+            return
+        urls = urls_texte_adopte(uid, self._publication_ta.get(uid))
+        if urls is None:
+            return
+        url_page, url_pdf = urls
+        # Un PDF injoignable ne fait pas disparaître le lien : le lecteur peut
+        # atteindre la loi votée même quand nous ne savons pas la lire (§7.5).
+        pdf = await self._client.download_texte_pdf(url_pdf)
+        dossier.texte_adopte = construire_texte_adopte(url_page, pdf)
+        report.textes_adoptes += 1
+        if dossier.texte_adopte.texte:
+            report.lois_lues += 1
+
+    async def _texte_adopte_en_base(
+        self, session: AsyncSession, dossier_id: str
+    ) -> TexteAdopte | None:
+        """Le texte adopté déjà persisté pour ce dossier (une loi ne bouge plus)."""
+        row = await session.get(DossierRow, dossier_id)
+        if row is None:
+            return None
+        brut = (row.payload or {}).get("texteAdopte")
+        return TexteAdopte.model_validate(brut) if brut else None
 
     async def _enrichir_senat(
         self, dossier: Dossier, pdf_transmission: bytes, report: SyncReport
@@ -1193,19 +1263,31 @@ class SyncJob:
         nouveaux votes. Q1/Q4 (LLM depuis le texte) et Q2 (LLM depuis les débats)
         déjà en base sont réutilisées : on ne rappelle pas le modèle pour rien.
 
-        Exception : une Q4 tirée de l'**exposé** (donc attribuée à l'auteur, sans
-        `changement_source`) est **regénérée** dès qu'un dispositif est
-        disponible — le fait officiel prime sur la parole du déposant.
+        Exception : la Q4 est **regénérée** dès qu'une source **meilleure** que
+        la sienne apparaît, en remontant l'échelle exposé → dispositif déposé →
+        texte définitivement voté. Le fait officiel prime sur la parole du
+        déposant, et la loi votée prime sur le texte déposé — celui-ci décrit une
+        version que la navette a modifiée et qui n'est plus en vigueur.
 
         Renvoie les extraits de compte rendu ayant produit la Q2 quand ce run l'a
         générée (à persister par l'appelant), sinon None — un désaccord repris de
         la base garde la source déjà stockée.
         """
         prev = await self._questions_en_base(session, dossier.id)
+        # La Q4 remonte l'échelle de ses sources dès qu'une meilleure apparaît —
+        # exposé → dispositif déposé → texte voté. Chaque barreau décrit quelque
+        # chose de plus proche de ce qui s'applique vraiment.
+        source_attendue = (
+            dossier.texte_adopte.source
+            if dossier.texte_adopte and dossier.texte_adopte.texte
+            else dossier.dispositif.source
+            if dossier.dispositif
+            else None
+        )
         peut_mieux_faire = (
-            dossier.dispositif is not None
+            source_attendue is not None
             and prev is not None
-            and prev.changement_source is None
+            and prev.changement_source != source_attendue
         )
         deja_completes = (
             prev is not None
@@ -1220,6 +1302,7 @@ class SyncJob:
             expose,
             None if deja_completes else self._llm,
             dispositif=dossier.dispositif,
+            texte_adopte=dossier.texte_adopte,
         )
         if questions.pourquoi or questions.changement:
             report.questions_generees += 1
@@ -1466,6 +1549,10 @@ class SyncJob:
         # Index dossierRef → texte AN déposé, pour récupérer l'exposé des motifs
         # (PDF officiel) au niveau du dossier — bloc attribué, option (a).
         index_textes = construire_index_textes(documents, legislatures)
+        # Dates de publication des textes ADOPTÉS, dans les mêmes documents :
+        # côté Sénat, c'est elle qui donne l'année de session de l'URL. Aucune
+        # archive de plus (cf. `textes_adoptes`).
+        self._publication_ta = construire_index_publications_ta(documents)
         # Index dossierRef → qui porte le texte, lu sur le même document de dépôt.
         self._initiatives_par_ref = construire_index_initiatives(
             documents, legislatures
@@ -1566,9 +1653,14 @@ class SyncJob:
                     self._actes_par_ref.get(ref_dossier),
                     self._procedure_par_ref.get(ref_dossier),
                 )
-                source_loi = source_legifrance(dossier.etat)
-                if source_loi is not None:
-                    dossier.sources = _dedupe_sources([*dossier.sources, source_loi])
+                # ⚠️ Le lien Légifrance n'est PAS ajouté aux `sources` : il vit
+                # dans la carte « La loi » de la fiche, appairé au texte voté —
+                # « ce qui s'applique » à côté de « ce qui a été voté ». Le
+                # remettre ici afficherait deux fois la même URL sous deux
+                # libellés différents, ce qui laisserait croire à deux textes.
+                dossier.sources = sources_sans_le_lien_de_la_loi(
+                    dossier.sources, dossier.etat
+                )
                 # Qui porte le texte — même archive, même document de dépôt que
                 # l'exposé des motifs. Absente pour un dossier sans `dossierRef`
                 # (« TXT-… », « SEN-… », motion) : la ligne disparaît (§2.5).
@@ -1578,6 +1670,12 @@ class SyncJob:
                 )
                 await self._enrichir_texte_depose(
                     session, dossier, parses[0].dossier_ref, index_textes, report
+                )
+                # Le texte définitivement voté, quand le texte EST devenu la loi.
+                # Il devient la source de la Q4 : le dispositif déposé décrit une
+                # version que la navette a modifiée et qui n'est plus en vigueur.
+                await self._enrichir_texte_adopte(
+                    session, dossier, parses[0].dossier_ref, report
                 )
                 # Texte d'origine sénatoriale : son PDF vit sur senat.fr (le PDF
                 # AN n'existe pas, ou n'est qu'une transmission sans exposé).

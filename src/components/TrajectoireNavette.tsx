@@ -37,18 +37,15 @@ interface ContenuEtat {
 function contenuEtat(etat: EtatTexte): ContenuEtat | null {
   const date = etat.date ? formatDateLong(etat.date) : null;
   switch (etat.etat) {
-    case 'promulgue': {
+    case 'promulgue':
       // Le terme « Promulgation » est déjà expliqué par sa pastille dans la
       // frise juste au-dessus : pas de seconde aide au même endroit.
-      const jo = etat.dateJournalOfficiel
-        ? `, publiée au Journal officiel du ${formatDateLong(etat.dateJournalOfficiel)}`
-        : '';
-      const reference =
-        etat.numeroLoi && date
-          ? `Loi n° ${etat.numeroLoi} du ${date}${jo}.`
-          : undefined;
-      return { forte: "C'est la loi", statut: 'adopte', precision: reference };
-    }
+      //
+      // Et pas de précision non plus : le numéro de la loi, sa date et son
+      // Journal officiel vivent dans la carte « La loi », juste en dessous. Les
+      // répéter ici ferait dire deux fois la même chose à deux centimètres
+      // d'intervalle.
+      return { forte: "C'est la loi", statut: 'adopte' };
     case 'resolution':
       return {
         forte:

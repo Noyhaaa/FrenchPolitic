@@ -85,9 +85,9 @@ Six écrans du cœur de valeur :
    La frise **se clôt sur « Où en est le texte ? »** (`Dossier.etat` servi par
    l'API) : à elle seule elle ne raconte que le passé et laissait sans réponse
    la question suivante. Cinq états, chacun un fait des mêmes actes officiels —
-   **« C'est la loi »** (+ « Loi n° 2026-630 du 13 juillet 2026, publiée au
-   *Journal officiel* du 14 juillet », et la **source Légifrance** ajoutée à la
-   fiche : le seul lien de l'app vers le texte **en vigueur**), « Résolution
+   **« C'est la loi »** (sans autre précision : le numéro, la date et le
+   *Journal officiel* vivent dans la carte « La loi » juste en dessous, et les
+   répéter ici dirait deux fois la même chose à deux centimètres), « Résolution
    adoptée », « Texte retiré par son auteur », « Devant le Conseil
    constitutionnel », ou « En cours d'examen » suivi de la **dernière étape
    enregistrée**. ⚠️ **Jamais l'étape suivante** : le calendrier parlementaire
@@ -104,6 +104,18 @@ Six écrans du cœur de valeur :
    encore en chemin). Mesuré : **254/328 dossiers** (96 promulgués · 126 en
    navette · 21 résolutions · 7 au Conseil constitutionnel · 4 retirés) ; les
    74 sans actes (`TXT-…`, `SEN-…`) gardent le bloc masqué.
+   Puis, pour une loi promulguée seulement, la carte **« La loi »**
+   (`LoiCard`) : « Loi n° 2025-379 du 28 avril 2025 », son *Journal officiel*, et
+   **deux liens** — le **texte voté par le Parlement** (`Dossier.texteAdopte`, la
+   « petite loi ») et le **texte en vigueur** (Légifrance, `etat.urlLegifrance`).
+   Deux liens parce que ce sont **deux choses** : ce que le Parlement a adopté, et
+   ce qui s'applique aujourd'hui — une loi peut avoir été modifiée depuis. Ils ne
+   sont donc **pas** dans « Sources officielles » : deux fois la même URL sous
+   deux libellés laisserait croire à deux textes (`sources_sans_le_lien_de_la_loi`
+   retire l'URL **exacte** de l'état, pas tout ce qui ressemble à du Légifrance).
+   Le lien du texte voté disparaît quand l'archive ne le désigne pas (76/96, §2.5)
+   et le **corps** de la loi n'est jamais affiché — droit codifié illisible, même
+   doctrine que le dispositif.
    Sous le titre, la carte **« À l'origine du texte »** (`InitiativeLigne`,
    `Dossier.initiative` servie par l'API) — **qui porte le texte**, la première
    question qu'on se pose devant un vote : le **Gouvernement** (tout projet de
@@ -421,11 +433,21 @@ contradictoires donnent `None`, donc aucun contrôle §2.5). Contrôle
 amorce « Les députés ont examiné ce texte… ». Les réponses validées étant
 réutilisées entre runs, tout nouveau garde-fou s'applique au passé via
 `python -m app.ingestion.revalider` (175 réponses fautives effacées à
-l'introduction de ces deux-là). **Q4 a deux sources, dans
-cet ordre** : le **dispositif officiel** (fait — réponse *sans* attribution, qui
-porte son `changementSource` vers le texte déposé) puis, à défaut seulement,
-l'**exposé** (parole du déposant — réponse obligatoirement préfixée « Selon
-l'auteur du texte »). Quand la source est un texte officiel (dispositif de texte
+l'introduction de ces deux-là). **Q4 a trois sources, dans
+cet ordre** — chacune plus proche de ce qui s'applique réellement que la
+suivante : (1) le **texte définitivement voté** (`Dossier.texteAdopte`, la
+« petite loi ») — fait, *sans* attribution et à l'**indicatif** (« La loi
+interdit… »), car le texte s'applique ; (2) le **dispositif du texte déposé**
+(fait aussi, mais d'une version que la navette a modifiée, d'où le
+**conditionnel**) ; (3) l'**exposé** (parole du déposant — réponse
+obligatoirement préfixée « Selon l'auteur du texte »). C'est le prolongement de
+la règle « le fait officiel prime sur la parole du déposant » : **la loi votée
+prime sur le texte déposé**. Une réponse déjà en base **remonte** l'échelle dès
+qu'une source plus haute apparaît (`peut_mieux_faire` compare la
+`changementSource` stockée à la meilleure disponible). Sans cette échelle, la
+fiche d'une loi en vigueur affichait le pitch de son auteur au conditionnel sur
+une *proposition* — mesuré, 83 des 96 lois promulguées. Quand la source est un
+texte officiel (loi votée, dispositif de texte
 ou d'amendement), un mot du lexique évaluatif est admis **s'il figure tel quel
 dans la source** (`lexique_de_la_source_admis`) : on interdit au modèle
 d'**ajouter** un jugement, pas de reprendre les mots de la loi (cas réel :
@@ -587,6 +609,28 @@ libellé de l'étape. ⚠️ **Aucun champ ne décrit une étape à venir** — 
 vérifie sur la liste des champs elle-même. Préservé entre runs comme
 l'initiative, et rattrapable seul par `python -m app.ingestion.etats`.
 
+**La loi finale** (`app/ingestion/textes_adoptes.py`) — tout ce qui précède
+décrit le texte **déposé** (exposé, dispositif, Q4) ; sur une loi promulguée,
+cette version n'existe plus. `PROM-PUB.texteLoiRef` désigne le **texte
+définitivement voté** (la « petite loi »), dont l'URL se dérive de l'`uid` comme
+celle du texte déposé : `PIONANR5L17BTA0075` → `…/l17t0075_texte-adopte-seance`,
+`PRJLSNR5S459BTA0040` → `senat.fr/leg/tas24-040`. `TexteAdopte` dissocie le
+**lien** (posé dès que l'archive désigne le texte : 76/96) et le **corps** (stocké
+seulement sous `_MAX_DISPOSITIF`, 45/76, car il sert de source à la Q4 et doit
+être lu *entièrement* par le modèle). Q4 réécrite sur 44 (1 rejetée par les
+garde-fous). ⚠️ Côté Sénat l'année de l'URL est celle de la **session**, jamais
+approchée : la numérotation redémarre à chaque session, et un décalage d'un an
+attrape un texte sans rapport (vérifié : `tas24-159` est une résolution
+européenne sur la subsidiarité). ⚠️ Les **20 lois sans `texteLoiRef`** ne sont
+pas devinées — leur dossier porte 2 à 4 textes adoptés (un par lecture), et le
+plus récent est parfois la version *modifiée par le Sénat*, qui n'est pas la loi.
+`decouper_loi` n'est pas `decouper_dispositif` : une petite loi n'a pas d'exposé,
+son en-tête est administratif, et le découpage part du **premier article** —
+repéré **sans** `IGNORECASE`, car les titres d'article sont capitalisés là où une
+référence en prose ne l'est pas (« à l'article 45 de la Constitution », qui figure
+justement dans cet en-tête). Préservé entre runs, rattrapable par
+`python -m app.ingestion.lois`.
+
 ⚠️ **Pas d'Alembic** dans le dépôt (`init_models` = `create_all`, qui ne touche
 jamais une table existante). Les colonnes ajoutées au modèle s'appliquent via
 `python -m app.db.migrations` — DDL **additives et idempotentes**, à jouer après
@@ -620,7 +664,8 @@ python -m app.ingestion.reformater        # recalcule titre court + accroche en 
 python -m app.ingestion.revalider         # repasse les garde-fous sur les réponses en base, efface les fautives
 python -m app.ingestion.divisions         # recalcule l'indice de division (rangée « votes les plus disputés »)
 python -m app.ingestion.initiatives       # renseigne « qui porte le texte » en base (archive 10 Mo, ni PDF ni LLM)
-python -m app.ingestion.etats             # renseigne « où en est le texte » + source Légifrance (même archive)
+python -m app.ingestion.etats             # renseigne « où en est le texte » en base (même archive de 10 Mo)
+python -m app.ingestion.lois              # attache la LOI FINALE (texte voté) + réécrit la Q4 à l'indicatif
 uvicorn app.main:app --reload             # http://localhost:8000/docs (sert la base via .env)
 pytest                                     # suite de tests (forcés sur seed)
 ```
@@ -750,7 +795,11 @@ masquée), `etat?` (**où en est le texte aujourd'hui**, la clôture de la frise
 décrit une étape à venir** : n'en ajoutez pas, et ne composez pas de phrase au
 futur à partir de ceux-là), `miseAJour?` (badge §7.7),
 `exposeMotifs?` (parole de l'auteur, bloc attribué), `dispositif?` (les
-articles du texte — fait officiel, jamais affiché brut, source de la Q4),
+articles du texte **déposé** — fait officiel, jamais affiché brut, source de la
+Q4), `texteAdopte?` (la **loi finale**, « petite loi » : `source` **toujours** —
+le lien vers ce que le Parlement a voté — et `texte?` seulement sous le cap ;
+prime sur `dispositif` comme source de la Q4, car celui-ci décrit une version que
+la navette a modifiée. Jamais affiché brut non plus),
 `initiative?` (**qui porte le texte** : `origine` — `gouvernement` |
 `parlementaire` | `senat` — plus `nom` / `deputeId` / `groupeNom` /
 `groupeCouleur` / `portraitUrl` quand l'auteur est un parlementaire identifié ;

@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import re
 
-from app.domain.enums import Chambre, StatutScrutin, TypeSource
+from app.domain.enums import Chambre, StatutScrutin
 from app.ingestion.normalize import as_list
 from app.schemas import EtatTexte, PhaseScrutin, Scrutin, SourceOfficielle
 from app.utils.text import fold
@@ -279,22 +279,25 @@ def etat_du_texte(
     )
 
 
-def source_legifrance(etat: EtatTexte | None) -> SourceOfficielle | None:
-    """La loi telle qu'elle est entrée en vigueur (§7.5), quand il y en a une.
+def sources_sans_le_lien_de_la_loi(
+    sources: list[SourceOfficielle], etat: EtatTexte | None
+) -> list[SourceOfficielle]:
+    """Les sources du dossier, **privées du lien vers le texte en vigueur**.
 
-    C'est le premier lien de l'app vers le **texte en vigueur** — jusqu'ici on
-    ne pouvait remonter qu'au dossier et aux scrutins. L'URL est celle que
-    l'Assemblée publie elle-même dans `infoJO`, jamais une URL construite ici.
+    Ce lien a d'abord été posé parmi les `sources`, avant que la carte « La loi »
+    ne l'affiche à côté du texte **voté** — les deux ensemble, parce qu'ils ne
+    disent pas la même chose. Il n'a plus rien à faire dans la liste : deux fois
+    la même URL sous deux libellés laisserait croire à deux textes.
 
-    Partagée par l'ingestion et la commande de rattrapage, pour que les deux
-    posent exactement la même source."""
-    if etat is None or etat.etat != "promulgue" or not etat.url_legifrance:
-        return None
-    return SourceOfficielle(
-        type=TypeSource.texte,
-        libelle="Loi publiée au Journal officiel (Légifrance)",
-        url=etat.url_legifrance,
-    )
+    ⚠️ On retire **exactement** l'URL que porte l'état, pas « tout ce qui
+    ressemble à du Légifrance » : une source légitime pourrait pointer là-bas
+    (le seed le fait), et un prédicat approximatif l'emporterait avec.
+    `EtatTexte.url_legifrance` reste la seule référence de ce lien.
+    """
+    url = etat.url_legifrance if etat else None
+    if not url:
+        return sources
+    return [s for s in sources if s.url != url]
 
 
 # ---------------------------------------------------------------------------

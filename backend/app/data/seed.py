@@ -27,6 +27,7 @@ from app.schemas import (
     Scrutin,
     ScrutinResume,
     SourceOfficielle,
+    TexteAdopte,
     VoteDepute,
 )
 
@@ -590,19 +591,32 @@ SEED_DOSSIERS: list[Dossier] = [
             date_journal_officiel="2026-07-14",
             url_legifrance="https://www.legifrance.gouv.fr/jorf/id/JORFTEXT_SEED",
         ),
+        # Le texte tel que le Parlement l'a voté — pas celui qui a été déposé.
+        # C'est lui qui fait foi sur une loi en vigueur, et c'est la source de la
+        # Q4 (d'où son registre à l'indicatif dans le résumé ci-dessous).
+        texte_adopte=TexteAdopte(
+            texte=(
+                "Article 1er Les violences commises sur un professionnel de "
+                "santé dans l'exercice de ses fonctions sont punies des peines "
+                "prévues à l'article 222-13 du code pénal."
+            ),
+            source=SourceOfficielle(
+                type="texte",
+                libelle="Texte voté par le Parlement",
+                url=(
+                    "https://www.assemblee-nationale.fr/dyn/17/textes/"
+                    "l17t0999_texte-adopte-seance"
+                ),
+            ),
+        ),
         theme="Santé",
         temps_lecture_sec=35,
         date_dernier_scrutin="2026-07-03T09:45:00Z",
         scrutins=[_resume_scrutin("scr-2026-0398")],
         amendements=[],
-        sources=[
-            *_sources("texte", "debats"),
-            SourceOfficielle(
-                type="texte",
-                libelle="Loi publiée au Journal officiel (Légifrance)",
-                url="https://www.legifrance.gouv.fr/jorf/id/JORFTEXT_SEED",
-            ),
-        ],
+        # Pas de source Légifrance dans la liste : le lien vers le texte en
+        # vigueur vit dans la carte « La loi », appairé au texte voté.
+        sources=_sources("texte", "debats"),
         resume=ResumeScrutin(
             titre_clair="Lutter contre les déserts médicaux",
             resume=[
@@ -617,6 +631,24 @@ SEED_DOSSIERS: list[Dossier] = [
             ],
             contexte="L'accès à un médecin traitant s'est dégradé dans plusieurs départements.",
             objectif="Améliorer l'accès aux soins de proximité.",
+            questions=QuestionsCitoyennes(
+                # Q4 d'une loi en vigueur : à l'**indicatif** et sans
+                # attribution, parce que sa source est le texte voté et non le
+                # texte déposé (que la navette a modifié). Sa `changementSource`
+                # renvoie donc à la petite loi, pas au dépôt.
+                changement=(
+                    "La loi punit les violences commises sur un professionnel "
+                    "de santé dans l'exercice de ses fonctions."
+                ),
+                changement_source=SourceOfficielle(
+                    type="texte",
+                    libelle="Texte voté par le Parlement",
+                    url=(
+                        "https://www.assemblee-nationale.fr/dyn/17/textes/"
+                        "l17t0999_texte-adopte-seance"
+                    ),
+                ),
+            ),
             public_concerne=["Particuliers", "Collectivités"],
             confiance="haute",
             relu_par_humain=True,
