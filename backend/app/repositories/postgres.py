@@ -322,6 +322,7 @@ class PostgresDossierRepository(DossierRepository):
                     date=scrutin.date,
                     chambre=scrutin.chambre,
                     statut=scrutin.statut,
+                    type_motion=scrutin.type_motion,
                     resultat=scrutin.resultat,
                     ecart=mesure.ecart,
                     camps=mesure.camps,
@@ -444,6 +445,10 @@ class PostgresDossierRepository(DossierRepository):
                 VoteDeputeRow.contre_son_groupe,
                 ScrutinRow.dossier_id,
                 ScrutinRow.payload["objet"].astext,
+                # ⚠️ Lu dans le payload, JAMAIS reclassé depuis `objet` : celui-ci
+                # est tronqué à 120 caractères, et la clause qui distingue une
+                # motion du Sénat arrive au-delà (cf. `senat.parse_scrutin`).
+                ScrutinRow.payload["typeMotion"].astext,
                 DossierRow.titre_clair,
             )
             .join(ScrutinRow, ScrutinRow.id == VoteDeputeRow.scrutin_id)
@@ -455,7 +460,16 @@ class PostgresDossierRepository(DossierRepository):
         )
         lignes = (await session.execute(stmt)).all()
         votes: list[VoteDepute] = []
-        for scrutin_id, date_vote, position, contre, dossier_id, objet, titre in lignes:
+        for (
+            scrutin_id,
+            date_vote,
+            position,
+            contre,
+            dossier_id,
+            objet,
+            motion,
+            titre,
+        ) in lignes:
             objet = objet or ""
             objet_type = type_objet_vote(objet)
             # Vote sur le texte → titre clair du dossier ; vote d'amendement →
@@ -472,6 +486,7 @@ class PostgresDossierRepository(DossierRepository):
                     # Pas de dossier en base → pas de lien proposé (§2.5).
                     dossier_id=dossier_id if titre is not None else None,
                     position=position,  # type: ignore[arg-type]  (str -> enum coercé)
+                    type_motion=motion,  # type: ignore[arg-type]  (str -> enum coercé)
                     contre_son_groupe=contre,
                 )
             )

@@ -66,6 +66,31 @@ export interface PhraseSourcee {
  */
 export type TypeVote = 'ordinaire' | 'solennel' | 'motion_censure';
 
+/**
+ * Motion dont l'adoption **inverse** la lecture du résultat.
+ *
+ * Sur ces votes-là, le vocabulaire du scrutin dit le contraire de ce qui arrive
+ * au texte : voter *pour* une motion de rejet préalable, c'est demander sa mort,
+ * et l'*adopter*, c'est le rejeter. Sans mention, le verdict (« Adopté »),
+ * l'écart de voix et la ligne de fracture (« Ont voté pour ») se lisent donc
+ * tous à l'envers — vécu : 8 dossiers annonçaient « Adopté » sur un texte que
+ * la motion venait de rejeter.
+ *
+ * Liste fermée, posée à l'ingestion : la conséquence de chaque forme est écrite
+ * une seule fois, dans `src/constants/motions.ts`. Absente = vote ordinaire,
+ * aucune mention affichée (§2.5).
+ *
+ * ⚠️ La **motion de censure** n'en fait pas partie : elle ne rejette pas un
+ * texte, elle renverse un gouvernement (cf. `TypeVote`).
+ */
+export type TypeMotion =
+  | 'rejet_prealable'
+  | 'question_prealable'
+  | 'exception_irrecevabilite'
+  | 'renvoi_en_commission'
+  | 'referendaire'
+  | 'ajournement';
+
 /** Résultat global d'un scrutin (§3.2 point 4). */
 export interface ResultatGlobal {
   pour: number;
@@ -304,6 +329,12 @@ export interface Scrutin {
   objet: string;
   statut: StatutScrutin;
   /**
+   * Motion dont l'adoption rejette, suspend ou reporte l'examen du texte. La
+   * fiche vote porte alors la mention qui dit ce que le résultat emporte —
+   * sans elle, « Adopté » se lit comme l'adoption du texte (§7.4).
+   */
+  typeMotion?: TypeMotion;
+  /**
    * Chambre où le vote a eu lieu. À afficher : un dossier agrège les votes des
    * deux assemblées, et « 214 pour » n'a pas le même sens selon l'hémicycle.
    */
@@ -360,6 +391,11 @@ export interface ScrutinResume {
   /** Repris du scrutin complet : la fiche dossier met en avant le vote décisif. */
   typeVote?: TypeVote;
   suffragesRequis?: number;
+  /**
+   * Motion dont l'adoption rejette l'examen du texte : la liste compacte des
+   * votes nomme alors le vote au lieu de restituer l'objet officiel tronqué.
+   */
+  typeMotion?: TypeMotion;
   resultat: ResultatGlobal;
 }
 
@@ -462,6 +498,14 @@ export interface Dossier {
    */
   accroche?: string;
   statut: StatutScrutin;
+  /**
+   * Le vote qui a fixé `statut` est une MOTION de ce type. `statut` vaut le
+   * sort du dernier vote du dossier ; sur une motion, ce sort dit l'inverse de
+   * ce qui arrive au texte — une motion de rejet préalable adoptée le rejette.
+   * Le badge nomme alors le vote (« Motion adoptée ») au lieu d'affirmer un
+   * sort du texte que ce seul vote ne décide pas (§7.4, `badgeDossier`).
+   */
+  statutMotion?: TypeMotion;
   phase?: PhaseScrutin;
   /**
    * Trajectoire du texte au Parlement, dans l'ordre chronologique (frise de la
@@ -552,6 +596,14 @@ export interface DossierListItem {
    */
   natureTexte?: string;
   statut: StatutScrutin;
+  /**
+   * Le vote qui a fixé `statut` est une MOTION de ce type. `statut` vaut le
+   * sort du dernier vote du dossier ; sur une motion, ce sort dit l'inverse de
+   * ce qui arrive au texte — une motion de rejet préalable adoptée le rejette.
+   * Le badge nomme alors le vote (« Motion adoptée ») au lieu d'affirmer un
+   * sort du texte que ce seul vote ne décide pas (§7.4, `badgeDossier`).
+   */
+  statutMotion?: TypeMotion;
   theme: ThemeScrutin;
   tempsLectureSec: number;
   /** Nombre de scrutins rattachés (affiché sur la carte). */
@@ -576,6 +628,11 @@ export interface DossierListItem {
    */
   typeVoteDernierScrutin?: TypeVote;
   suffragesRequisDernierScrutin?: number;
+  /**
+   * Motion du même scrutin — le fil et la recherche nomment ainsi un vote dont
+   * l'objet officiel est tronqué (tous ceux du Sénat le sont).
+   */
+  typeMotionDernierScrutin?: TypeMotion;
 }
 
 /** Une rangée thématique de l'accueil (façon « catégorie » Netflix). */
@@ -622,6 +679,11 @@ export interface VoteDisputeItem {
   date: string;
   chambre: Chambre;
   statut: StatutScrutin;
+  /**
+   * Motion dont l'adoption rejette le texte : la tuile nomme alors le vote,
+   * sans quoi « Adopté » se lirait comme l'adoption du texte.
+   */
+  typeMotion?: TypeMotion;
   resultat: ResultatGlobal;
   /** Écart de voix entre le pour et le contre. */
   ecart: number;
@@ -747,6 +809,14 @@ export interface VoteDepute {
   /** Dossier à ouvrir au tap (absent si le vote n'en a pas). */
   dossierId?: string;
   position: PositionVote;
+  /**
+   * Motion dont l'adoption rejette / suspend l'examen du texte.
+   * ⚠️ Sans elle, une pastille « Pour » à côté du titre d'un texte se lit comme
+   * un soutien, alors que le parlementaire en demandait le REJET — mesuré :
+   * 15 264 votes nominatifs portent sur une motion de rejet préalable. Le fil
+   * nomme donc le vote ; la position, elle, reste le fait brut (§7.4).
+   */
+  typeMotion?: TypeMotion;
   /**
    * True si la position diffère de la majorité de son groupe sur ce scrutin.
    * Absent quand le groupe n'a pas de position majoritaire documentée (§2.5),

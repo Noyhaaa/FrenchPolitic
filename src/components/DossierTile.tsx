@@ -3,7 +3,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { colors, radius, spacing, typography } from '@/theme';
 import { DossierListItem } from '@/types';
 import { themeEmoji, themeTintDark } from '@/constants/themes';
-import { formatDateRelative, libelleChambreCourt } from '@/utils/format';
+import {
+  badgeDossier,
+  formatDateRelative,
+  libelleChambreCourt,
+} from '@/utils/format';
 import { StatusBadge } from './StatusBadge';
 import { MiniResultat } from './MiniResultat';
 
@@ -22,6 +26,8 @@ export const TILE_WIDTH = 200;
  * Contenu factuel : statut, titre, résultat du dernier vote nominatif, date.
  */
 export function DossierTile({ dossier, onPress }: Props) {
+  // Cf. `badgeDossier` : sur une motion, le badge nomme le vote.
+  const badge = badgeDossier(dossier);
   return (
     <Pressable
       onPress={() => onPress(dossier)}
@@ -44,7 +50,7 @@ export function DossierTile({ dossier, onPress }: Props) {
           style={styles.fade}
         />
         <View style={styles.badgeStatut}>
-          <StatusBadge statut={dossier.statut} />
+          <StatusBadge statut={badge.statut} label={badge.label} />
         </View>
         <View style={styles.badgeTheme} accessibilityElementsHidden>
           <Text style={styles.badgeThemeText}>{dossier.theme}</Text>

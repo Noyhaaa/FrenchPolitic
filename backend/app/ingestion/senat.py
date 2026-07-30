@@ -51,6 +51,7 @@ from app.ingestion.normalize import (
     guess_theme,
     texte_de_rattachement,
     truncate,
+    type_motion,
 )
 from app.ingestion.senateurs import (
     InfoSenateur,
@@ -485,6 +486,13 @@ def parse_scrutin_senat(
         date=page.date,
         objet=truncate(page.objet, 120),
         statut=page.statut,
+        # ⚠️ Classé sur l'objet ENTIER, avant la troncature ci-dessus. Un objet
+        # du Sénat s'ouvre sur le numéro et l'auteur de la motion (« la motion
+        # n° 278, présentée par Mme… ») et ne dit qu'ensuite ce qu'elle est
+        # (« tendant à opposer la question préalable ») — vers le 135e
+        # caractère. Classer après troncature ne verrait donc jamais rien, et
+        # ces votes resteraient sans nom ni mention à l'écran.
+        type_motion=type_motion(page.objet),
         chambre=Chambre.senat,
         # Le Sénat ne publie en ligne que ses scrutins publics (§5.2).
         scrutin_public=True,

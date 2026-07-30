@@ -140,6 +140,27 @@ export const GLOSSAIRE: TermeGlossaire[] = [
     voisins: ['Navette', 'Première lecture'],
   },
   {
+    id: 'exception-d-irrecevabilite',
+    libelle: 'Exception d’irrecevabilité',
+    nature: 'n.f.',
+    categorie: 'procedure',
+    definition:
+      'Une proposition de rejeter le texte au motif qu’il serait contraire à la Constitution ou aux règles d’examen.',
+    etapes: [
+      { titre: 'Un groupe la dépose avant la discussion' },
+      {
+        titre: 'Adoptée, le texte est rejeté',
+        detail:
+          'Sur cette motion, « adopté » veut donc dire que le texte, lui, ne passe pas.',
+      },
+      {
+        titre: 'Rejetée, la discussion se poursuit',
+        detail: 'Les articles sont examinés normalement.',
+      },
+    ],
+    voisins: ['Question préalable', 'Motion de rejet préalable'],
+  },
+  {
     id: 'groupe-politique',
     libelle: 'Groupe politique',
     nature: 'n.m.',
@@ -321,6 +342,48 @@ export const GLOSSAIRE: TermeGlossaire[] = [
     voisins: ['Projet de loi'],
   },
   {
+    id: 'question-prealable',
+    libelle: 'Question préalable',
+    nature: 'n.f.',
+    categorie: 'procedure',
+    definition:
+      'Au Sénat, une proposition de rejeter le texte sans discuter ses articles.',
+    etapes: [
+      { titre: 'Un groupe la dépose avant la discussion' },
+      {
+        titre: 'Adoptée, le texte est rejeté',
+        detail:
+          'Comme la motion de rejet préalable à l’Assemblée : sur cette motion, « adopté » veut dire que le texte, lui, ne passe pas.',
+      },
+      {
+        titre: 'Rejetée, la discussion se poursuit',
+        detail: 'Les articles sont examinés normalement.',
+      },
+    ],
+    voisins: ['Motion de rejet préalable', 'Renvoi en commission'],
+  },
+  {
+    id: 'renvoi-en-commission',
+    libelle: 'Renvoi en commission',
+    nature: 'n.m.',
+    categorie: 'procedure',
+    definition:
+      'Une proposition de renvoyer le texte en commission plutôt que de le voter en séance.',
+    etapes: [
+      { titre: 'Un groupe le demande pendant la discussion' },
+      {
+        titre: 'Adopté, l’examen en séance s’arrête',
+        detail:
+          'Le texte retourne en commission : il n’est ni adopté ni rejeté ce jour-là.',
+      },
+      {
+        titre: 'Rejeté, la discussion se poursuit',
+        detail: 'Les articles sont examinés normalement.',
+      },
+    ],
+    voisins: ['Question préalable', 'Motion de rejet préalable'],
+  },
+  {
     id: 'resolution',
     libelle: 'Résolution',
     nature: 'n.f.',
@@ -464,6 +527,9 @@ const MOTIFS: readonly { motif: string; id: string }[] = [
   { motif: 'motion de censure', id: 'motion-de-censure' },
   { motif: 'motion referendaire', id: 'motion-referendaire' },
   { motif: "motion d'ajournement", id: 'motion-ajournement' },
+  { motif: 'question prealable', id: 'question-prealable' },
+  { motif: "exception d'irrecevabilite", id: 'exception-d-irrecevabilite' },
+  { motif: 'renvoi en commission', id: 'renvoi-en-commission' },
   { motif: "vote sur l'ensemble", id: 'vote-sur-l-ensemble' },
   { motif: 'article unique', id: 'article-unique' },
 ];

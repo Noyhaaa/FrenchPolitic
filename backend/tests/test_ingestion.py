@@ -1104,3 +1104,113 @@ def test_la_forme_du_scrutin_remonte_jusqu_a_la_carte_du_fil():
     item = DossierListItem.from_dossier(dossier)
     assert item.type_vote_dernier_scrutin is TypeVote.motion_censure
     assert item.suffrages_requis_dernier_scrutin == 289
+
+
+# --- Motions : dire l'inversion de sens (§7.4) -------------------------------
+
+
+def test_type_motion_classe_les_formes_qui_inversent_le_sens():
+    """Une motion inverse la lecture de son résultat : l'adopter rejette,
+    suspend ou reporte le texte. Le classement est la condition pour le dire."""
+    from app.domain.enums import TypeMotion
+    from app.ingestion.normalize import type_motion
+
+    assert (
+        type_motion("la motion de rejet préalable, déposée par Mme Panot, du projet")
+        is TypeMotion.rejet_prealable
+    )
+    assert (
+        type_motion(
+            "la motion n° 278, présentée par Mme Cukierman et les membres du "
+            "groupe CRCE, tendant à opposer la question préalable au projet de loi"
+        )
+        is TypeMotion.question_prealable
+    )
+    assert (
+        type_motion(
+            "la motion n° 13, présentée par Mme Vogel, tendant à opposer "
+            "l'exception d'irrecevabilité au projet de loi constitutionnelle"
+        )
+        is TypeMotion.exception_irrecevabilite
+    )
+    assert (
+        type_motion("la motion n° 6, tendant au renvoi en commission de la PPL")
+        is TypeMotion.renvoi_en_commission
+    )
+    # Coquille relevée telle quelle dans la source (« rejet péalable ») : la
+    # graphie ne peut désigner que la motion de rejet préalable.
+    assert (
+        type_motion("la motion de rejet péalable, déposée par M. Hetzel, de la PPL")
+        is TypeMotion.rejet_prealable
+    )
+    assert type_motion("la motion référendaire présentée par M. W") is (
+        TypeMotion.referendaire
+    )
+    # L'apostrophe courbe est courante dans l'open data comme sur senat.fr.
+    assert type_motion("la motion d’ajournement présentée par M. Z") is (
+        TypeMotion.ajournement
+    )
+
+
+def test_type_motion_ecarte_la_censure_et_les_amendements():
+    """Une motion de CENSURE ne rejette pas un texte : elle renverse un
+    gouvernement, et elle a son propre traitement (`TypeVote.motion_censure`).
+    Un amendement n'est jamais une motion, même si son objet en cite une."""
+    from app.ingestion.normalize import type_motion
+
+    assert type_motion("la motion de censure déposée en application de l'art. 49") is None
+    assert (
+        type_motion("l'amendement n° 12 de M. X tendant à opposer la question préalable")
+        is None
+    )
+    assert type_motion("l'ensemble du projet de loi de finances pour 2026") is None
+
+
+def test_la_motion_du_senat_est_classee_avant_la_troncature():
+    """⚠️ Le nœud du Sénat. L'objet stocké est tronqué à 120 caractères, et la
+    clause qui dit ce qu'est la motion arrive au-delà : classer après troncature
+    ne verrait jamais rien, et ces votes resteraient sans nom à l'écran."""
+    from app.domain.enums import TypeMotion
+    from app.ingestion.normalize import truncate, type_motion
+
+    objet = (
+        "la motion n° 278, présentée par Mme Cécile Cukierman et les membres du "
+        "groupe Communiste Républicain Citoyen et Écologiste - Kanaky, tendant à "
+        "opposer la question préalable au projet de loi de finances"
+    )
+    assert type_motion(objet) is TypeMotion.question_prealable
+    # La preuve par l'absurde : sur l'objet tronqué, plus rien n'est reconnaissable.
+    assert type_motion(truncate(objet, 120)) is None
+
+
+def test_la_motion_remonte_du_scrutin_jusqu_a_la_carte_du_fil():
+    """8 dossiers annonçaient « Adopté » sur un texte que la motion venait de
+    rejeter — dont un dont c'était le seul vote. Le drapeau doit voyager du
+    scrutin au dossier ET à sa carte, sinon le fil garde le contresens."""
+    import copy
+
+    from app.domain.enums import TypeMotion
+    from app.schemas import DossierListItem
+
+    resolver = build_resolver_from_organes(ORGANES)
+    brut = copy.deepcopy(SCRUTIN)
+    motion = (
+        "la motion de rejet préalable, déposée par Mme Panot, du projet de loi "
+        "d'approbation des comptes de la sécurité sociale"
+    )
+    brut["scrutin"]["titre"] = motion
+    brut["scrutin"]["objet"]["libelle"] = motion
+    brut["scrutin"]["sort"] = {"code": "adopté"}
+
+    parse = parse_scrutin(brut, resolver)
+    assert parse.scrutin.type_motion is TypeMotion.rejet_prealable
+
+    dossier = build_dossier([parse])
+    # Le vote qui a fixé `statut` est la motion : le badge doit la nommer.
+    assert dossier.statut.value == "adopte"
+    assert dossier.statut_motion is TypeMotion.rejet_prealable
+    assert dossier.scrutins[0].type_motion is TypeMotion.rejet_prealable
+
+    item = DossierListItem.from_dossier(dossier)
+    assert item.statut_motion is TypeMotion.rejet_prealable
+    assert item.type_motion_dernier_scrutin is TypeMotion.rejet_prealable

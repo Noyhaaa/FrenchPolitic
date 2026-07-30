@@ -406,7 +406,18 @@ def build_dossier(
     un lien vers leur scrutin) — ils n'apparaissent donc pas deux fois. Le détail
     complet de chaque vote (groupes, nominatif) vit dans la table `scrutin`.
     """
-    tous = sorted((p.scrutin for p in parses), key=lambda s: s.date, reverse=True)
+    # Du plus récent au plus ancien — et, à date égale, un vote sur le TEXTE
+    # avant une motion. Le statut du dossier vient de `tous[0]` : quand une
+    # motion et le vote sur l'ensemble tombent le même jour, laisser l'ordre
+    # d'arrivée trancher donnait un badge arbitraire (vécu : « Rejeté » sur une
+    # loi promulguée, parce que la motion de rejet — rejetée — était passée
+    # devant l'adoption du texte le même 17 juin). Une motion ne décide jamais
+    # du sort du texte : elle ne le fixe que faute de mieux (§7.4).
+    tous = sorted(
+        (p.scrutin for p in parses),
+        key=lambda s: (s.date, s.type_motion is None),
+        reverse=True,
+    )
     # Métadonnées de dossier partagées. On privilégie un vote de l'ASSEMBLÉE :
     # le titre y est mieux casé, et surtout la « législature » d'un vote
     # sénatorial est en réalité une **session** (le Sénat ne numérote pas par
@@ -450,6 +461,12 @@ def build_dossier(
         accroche=None,
         # Statut / date du dossier = scrutin le plus récent, amendements compris.
         statut=tous[0].statut,
+        # …et c'est bien le problème quand ce vote est une MOTION : son sort dit
+        # l'inverse de ce qui arrive au texte (une motion de rejet adoptée le
+        # rejette). On retient le type de motion pour que le badge nomme le vote
+        # au lieu d'affirmer un sort du texte (§7.4). Lu sur l'objet du scrutin,
+        # qui porte déjà le classement fait à l'ingestion.
+        statut_motion=tous[0].type_motion,
         phase=None,
         theme=ref.theme,
         temps_lecture_sec=30,
@@ -544,6 +561,10 @@ def _merge_avec_existant(prev: Dossier, incoming: Dossier) -> Dossier:
     if prev.date_dernier_scrutin > incoming.date_dernier_scrutin:
         incoming.date_dernier_scrutin = prev.date_dernier_scrutin
         incoming.statut = prev.statut
+        # `statut_motion` qualifie le vote qui a fixé `statut` : il voyage avec
+        # lui, sinon un run qui garde l'ancien statut lui collerait le libellé
+        # de l'arrivant.
+        incoming.statut_motion = prev.statut_motion
     # Sources : on ne fusionne ici que la **base** (la page du dossier), pas la
     # liste servie — celle-ci est recomposée en fin d'upsert par
     # `documents_du_dossier`. La page du dossier législatif (type « texte ») est

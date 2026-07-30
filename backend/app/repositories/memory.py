@@ -184,6 +184,7 @@ class InMemoryDossierRepository(DossierRepository):
                         date=scrutin.date,
                         chambre=scrutin.chambre,
                         statut=scrutin.statut,
+                        type_motion=scrutin.type_motion,
                         resultat=scrutin.resultat,
                         ecart=mesure.ecart,
                         camps=mesure.camps,

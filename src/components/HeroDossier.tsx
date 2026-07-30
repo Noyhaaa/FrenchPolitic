@@ -3,8 +3,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { colors, mono, radius, serif, spacing, typography } from '@/theme';
 import { DossierListItem, StatutScrutin } from '@/types';
 import { themeEmoji, themeTintDark } from '@/constants/themes';
-import { formatDateRelative, libelleChambreCourt } from '@/utils/format';
-import { statutLabel } from '@/utils/format';
+import {
+  badgeDossier,
+  formatDateRelative,
+  libelleChambreCourt,
+} from '@/utils/format';
 import { MiniResultat } from './MiniResultat';
 
 interface Props {
@@ -29,7 +32,10 @@ const STATUT_FG: Record<StatutScrutin, string> = {
 export function HeroDossier({ dossier, onPress, topInset }: Props) {
   // Nature servie par l'API : le titre court ne la porte plus.
   const nature = dossier.natureTexte;
-  const statutFg = STATUT_FG[dossier.statut];
+  // Cf. `badgeDossier` : sur une motion, le surtitre nomme le vote — « Adopté »
+  // y dirait le contraire du sort du texte.
+  const badge = badgeDossier(dossier);
+  const statutFg = STATUT_FG[badge.statut];
 
   return (
     <Pressable
@@ -42,9 +48,7 @@ export function HeroDossier({ dossier, onPress, topInset }: Props) {
         },
       ]}
       accessibilityRole="button"
-      accessibilityLabel={`À la une : ${dossier.titreClair}. ${statutLabel(
-        dossier.statut,
-      )}. Ouvrir le dossier.`}
+      accessibilityLabel={`À la une : ${dossier.titreClair}. ${badge.label}. Ouvrir le dossier.`}
     >
       <Text style={styles.watermark} importantForAccessibility="no">
         {themeEmoji[dossier.theme] ?? themeEmoji.Autre}
@@ -60,7 +64,7 @@ export function HeroDossier({ dossier, onPress, topInset }: Props) {
         <View style={styles.overlineRow}>
           <View style={[styles.statutDot, { backgroundColor: statutFg }]} />
           <Text style={[styles.overlineStatut, { color: statutFg }]}>
-            {statutLabel(dossier.statut)}
+            {badge.label}
           </Text>
           {/* Nature du texte si le titre officiel la porte, sinon la ou les
               chambres qui l'ont voté — jamais une institution supposée (§2.5). */}

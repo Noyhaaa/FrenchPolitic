@@ -18,6 +18,7 @@ from app.domain.enums import (
     SortAmendement,
     StatutScrutin,
     TypeSource,
+    TypeMotion,
     TypeVote,
 )
 # `normalize` ne dépend que de `domain` et `utils` : pas de cycle avec les schémas.
@@ -281,6 +282,11 @@ class Scrutin(CamelModel):
     # autres scrutins), donc il n'apprend rien. Sur une motion il vaut 289,
     # sans rapport avec le nombre de votants — et c'est lui qui décide.
     suffrages_requis: int | None = None
+    # Motion dont l'adoption REJETTE, suspend ou reporte l'examen du texte
+    # (`TypeMotion`). Sur ces votes, « Adopté » et « Ont voté pour » se lisent à
+    # l'envers : la fiche vote porte alors la mention qui dit ce que le résultat
+    # emporte. Absente = vote ordinaire, aucune mention (§2.5).
+    type_motion: TypeMotion | None = None
     resultat: ResultatGlobal
     positions_groupes: list[PositionGroupe] = []
     # Pour un vote d'amendement/sous-amendement : son contenu enrichi (open data
@@ -311,6 +317,10 @@ class ScrutinResume(CamelModel):
     # et une motion de censure ne s'y raconte pas comme un vote pour/contre.
     type_vote: TypeVote | None = None
     suffrages_requis: int | None = None
+    # Motion dont l'adoption rejette / suspend l'examen du texte : la liste
+    # compacte des votes nomme alors le vote (« Motion de rejet préalable »)
+    # au lieu de restituer l'objet officiel tronqué.
+    type_motion: TypeMotion | None = None
     resultat: ResultatGlobal
 
     @classmethod
@@ -324,6 +334,7 @@ class ScrutinResume(CamelModel):
             scrutin_public=s.scrutin_public,
             type_vote=s.type_vote,
             suffrages_requis=s.suffrages_requis,
+            type_motion=s.type_motion,
             resultat=s.resultat,
         )
 
@@ -438,6 +449,12 @@ class Dossier(CamelModel):
     # débattu ? »). Absente tant que la Q1 ne l'est pas — on ne comble pas (§2.5).
     accroche: str | None = None
     statut: StatutScrutin
+    # Le vote qui a fixé `statut` est une MOTION de ce type. `statut` vaut le
+    # sort du dernier vote du dossier ; sur une motion, ce sort dit l'inverse de
+    # ce qui arrive au texte — une motion de rejet préalable adoptée le rejette.
+    # Le badge nomme alors le vote (« Motion adoptée ») plutôt que d'affirmer un
+    # sort du texte que ce seul vote ne décide pas (§7.4). None = badge normal.
+    statut_motion: TypeMotion | None = None
     phase: PhaseScrutin | None = None
     # Trajectoire du texte au Parlement, dans l'ordre chronologique (frise de la
     # fiche). Vide quand aucune étape n'est documentée — la frise est alors
@@ -504,6 +521,12 @@ class DossierListItem(CamelModel):
     # court ne la porte plus. None quand le titre officiel ne la porte pas (§2.5).
     nature_texte: str | None = None
     statut: StatutScrutin
+    # Le vote qui a fixé `statut` est une MOTION de ce type. `statut` vaut le
+    # sort du dernier vote du dossier ; sur une motion, ce sort dit l'inverse de
+    # ce qui arrive au texte — une motion de rejet préalable adoptée le rejette.
+    # Le badge nomme alors le vote (« Motion adoptée ») plutôt que d'affirmer un
+    # sort du texte que ce seul vote ne décide pas (§7.4). None = badge normal.
+    statut_motion: TypeMotion | None = None
     theme: str
     temps_lecture_sec: int
     nombre_scrutins: int
@@ -520,6 +543,9 @@ class DossierListItem(CamelModel):
     # sont pas recensés (art. 49) — cf. `TypeVote.motion_censure`.
     type_vote_dernier_scrutin: TypeVote | None = None
     suffrages_requis_dernier_scrutin: int | None = None
+    # Motion du même scrutin — le fil et la recherche nomment ainsi un vote dont
+    # l'objet officiel est tronqué (tous ceux du Sénat le sont).
+    type_motion_dernier_scrutin: TypeMotion | None = None
 
     @staticmethod
     def _chambres(scrutins: list[ScrutinResume]) -> list[Chambre]:
@@ -556,6 +582,7 @@ class DossierListItem(CamelModel):
             accroche=d.accroche or None,
             nature_texte=nature_texte(d.titre_officiel),
             statut=d.statut,
+            statut_motion=d.statut_motion,
             theme=d.theme,
             temps_lecture_sec=d.temps_lecture_sec,
             nombre_scrutins=len(d.scrutins),
@@ -566,6 +593,7 @@ class DossierListItem(CamelModel):
             suffrages_requis_dernier_scrutin=(
                 dernier.suffrages_requis if dernier else None
             ),
+            type_motion_dernier_scrutin=dernier.type_motion if dernier else None,
         )
 
 
@@ -608,6 +636,9 @@ class VoteDisputeItem(CamelModel):
     date: str
     chambre: Chambre
     statut: StatutScrutin
+    # Motion dont l'adoption rejette le texte : la tuile nomme alors le vote,
+    # sans quoi « Adopté » sur une motion se lirait comme l'adoption du texte.
+    type_motion: TypeMotion | None = None
     resultat: ResultatGlobal
     # Écart de voix entre le pour et le contre — le fait le plus parlant.
     ecart: int

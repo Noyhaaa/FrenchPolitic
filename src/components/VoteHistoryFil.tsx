@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { motion } from '@/constants/motions';
 import { colors, radius, spacing, typography } from '@/theme';
 import type { PositionVote, VoteDepute } from '@/types';
 import {
@@ -46,6 +47,12 @@ function Entree({
 }) {
   const couleur = COULEUR_POSITION[vote.position];
   const sens = libellePositionVotee(vote.position);
+  // ⚠️ Une MOTION inverse la lecture de la pastille : « Pour » sur une motion de
+  // rejet préalable, c'est avoir demandé le REJET du texte dont le titre suit.
+  // Mesuré : 15 264 votes nominatifs sont dans ce cas, et le fil les affichait
+  // comme un soutien. On NOMME donc le vote — la position, elle, reste le fait
+  // brut du scrutin (§7.4). Pas de motion → rien de plus (§2.5).
+  const laMotion = motion(vote.typeMotion);
 
   const contenu = (
     <View style={styles.entree}>
@@ -62,6 +69,11 @@ function Entree({
           {/* Fait déduit : la position du député diffère de celle de la
               majorité de son groupe sur ce même scrutin. Descriptif, jamais
               évaluatif (§7.4). */}
+          {laMotion ? (
+            <View style={styles.pastilleMotion}>
+              <Text style={styles.pastilleMotionTexte}>{laMotion.libelle}</Text>
+            </View>
+          ) : null}
           {vote.contreSonGroupe ? (
             <View style={styles.pastilleEcart}>
               <Text style={styles.pastilleEcartTexte}>⚡ Contre son groupe</Text>
@@ -87,8 +99,8 @@ function Entree({
       style={({ pressed }) => pressed && { opacity: 0.7 }}
       accessibilityRole="button"
       accessibilityLabel={`${sens}. ${vote.titre}. ${
-        vote.contreSonGroupe ? 'Contre son groupe. ' : ''
-      }Ouvrir le dossier.`}
+        laMotion ? `${laMotion.libelle}. ` : ''
+      }${vote.contreSonGroupe ? 'Contre son groupe. ' : ''}Ouvrir le dossier.`}
     >
       {contenu}
     </Pressable>
@@ -184,6 +196,19 @@ const styles = StyleSheet.create({
   },
   pastilleTexte: {
     ...typography.badge,
+  },
+  // Pastille neutre : elle NOMME le vote, elle ne signale pas un écart. D'où un
+  // gabarit sourd, distinct de l'ambre de « contre son groupe », qui est un
+  // fait déduit (§7.4).
+  pastilleMotion: {
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.pill,
+    paddingVertical: 2,
+    paddingHorizontal: spacing.sm,
+  },
+  pastilleMotionTexte: {
+    ...typography.badge,
+    color: colors.textSecondary,
   },
   pastilleEcart: {
     backgroundColor: colors.accentWarmSoft,

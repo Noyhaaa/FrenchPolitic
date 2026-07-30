@@ -33,6 +33,7 @@ from app.ingestion.normalize import (
     texte_de_rattachement,
     to_int,
     truncate,
+    type_motion,
     type_vote,
 )
 from app.ingestion.dossiers_legislatifs import Reconciliation, signature_titre
@@ -453,6 +454,9 @@ def parse_scrutin(
         statut=map_statut((s.get("sort") or {}).get("code", "")),
         scrutin_public=True,  # l'archive ne contient que des scrutins publics (§5.2)
         type_vote=type_vote((s.get("typeVote") or {}).get("codeTypeVote")),
+        # Classé sur l'objet ENTIER, avant la troncature à 120 : la mention qui
+        # distingue une motion arrive parfois au-delà (voir `senat.py`).
+        type_motion=type_motion(objet_libelle or dossier_titre),
         suffrages_requis=to_int(synthese.get("nbrSuffragesRequis")) or None,
         resultat=resultat,
         positions_groupes=positions,

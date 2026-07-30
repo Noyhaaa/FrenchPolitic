@@ -33,6 +33,7 @@ import type { ScrutinResume } from '@/types';
 import {
   formatDateLong,
   formatMicroResultat,
+  badgeDossier,
   formatTempsLecture,
   libelleChambre,
   libelleScrutin,
@@ -98,7 +99,7 @@ function VoteDecisifCard({
   scrutin: ScrutinResume;
   onPress: () => void;
 }) {
-  const lib = libelleScrutin(scrutin.objet);
+  const lib = libelleScrutin(scrutin.objet, scrutin.typeMotion);
   const { resultat } = scrutin;
   const estMotion = scrutin.typeVote === 'motion_censure';
   return (
@@ -250,19 +251,11 @@ export function DossierDetailScreen() {
   }
 
   const { resume } = dossier;
-  // Badge de tête : la phase précise si elle est documentée, sinon le statut du
-  // dossier. Une phase peut être connue sans statut (étape en cours) — on
-  // retombe alors sur celui du dossier plutôt que d'afficher un badge vide.
-  // Une loi promulguée passe devant tout le reste : « Adopté » (le résultat du
-  // dernier vote) est exact mais laisse croire que le texte est encore en
-  // chemin, alors que la source dit qu'il est arrivé au bout.
-  const badge =
-    dossier.etat?.etat === 'promulgue'
-      ? { label: 'Promulguée', statut: 'adopte' as const }
-      : {
-          label: dossier.phase?.label,
-          statut: dossier.phase?.statut ?? dossier.statut,
-        };
+  // Badge de tête — la règle vit dans `badgeDossier` (utils/format), partagée
+  // avec la carte, la tuile et le hero pour que les quatre ne divergent pas :
+  // loi promulguée, puis motion (dont le sort dit l'inverse de celui du texte),
+  // puis la phase documentée, sinon le statut.
+  const badge = badgeDossier(dossier);
   // Le vote décisif (sur l'ensemble du texte) sort de la liste : mis en avant
   // en tête de section pour que l'utilisateur voie quel vote a tranché — les
   // autres votes (articles, motions…) restent en liste compacte.
@@ -490,7 +483,7 @@ export function DossierDetailScreen() {
             // Titre = type du vote en clair (« Vote sur l'ensemble », « Motion
             // de censure »…) — le sujet, c'est le dossier lui-même ; l'objet
             // officiel complet reste sur la fiche vote (§7.5).
-            const lib = libelleScrutin(s.objet);
+            const lib = libelleScrutin(s.objet, s.typeMotion);
             return (
               <Pressable
                 key={s.id}

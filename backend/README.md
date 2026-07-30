@@ -111,6 +111,14 @@ python -m app.ingestion.sources             # --dry-run · --sans-rapports
 # dossiers, ni PDF, ni LLM — tout ce qui est recomposé est déterministe.
 python -m app.ingestion.types_vote          # --dry-run pour voir la répartition
 
+# Classe les MOTIONS (rejet préalable, question préalable, exception
+# d'irrecevabilité, renvoi en commission…) : une motion inverse la lecture de son
+# résultat, l'adopter rejette le texte. Ni réseau ni LLM ; elle ne DÉCLASSE
+# jamais (l'objet stocké est tronqué) et imprime les objets non classés.
+# ⚠️ Les motions du Sénat se rattrapent par `app.ingestion.senat`, qui relit les
+# pages : leur clause discriminante n'est pas dans l'objet stocké.
+python -m app.ingestion.motions             # --dry-run pour voir la répartition
+
 # L'API sert alors la base ingérée (REPOSITORY_BACKEND=postgres via .env).
 uvicorn app.main:app --reload
 ```
@@ -529,6 +537,80 @@ exactement `exprimés // 2 + 1` (mesuré : 100 %), donc il n'apprend rien.
 **Sénat** : sa page ne nomme pas le type de scrutin → `typeVote` reste `None` et
 l'app n'affiche que le nombre de votants (§2.5). La mention de délégation déjà en
 place y répond de toute façon à la même question.
+
+### Les motions et leur inversion de sens (`typeMotion`)
+
+Une **motion de rejet préalable** propose de rejeter le texte sans discuter ses
+articles. Voter *pour*, c'est demander sa mort ; l'*adopter*, c'est le rejeter.
+L'app affichait le résultat de ces votes avec exactement le même vocabulaire que
+le vote sur un texte — donc à l'envers, sans jamais le dire.
+
+Ce n'était pas un trou de données : l'objet officiel nomme la motion, et le
+glossaire disait déjà la bonne chose (« Adoptée, le texte est rejeté »), à un tap
+de là. C'est de la **restitution** qui manquait. Mesuré :
+
+| Surface | Ce qui s'affichait | Ce que c'était | Volume |
+|---|---|---|---|
+| Badge du dossier | « Adopté » | motion adoptée → texte **rejeté** | **8 dossiers** |
+| Badge du dossier | « Rejeté » | motion rejetée **passée devant** l'adoption du texte le même jour | **16 dossiers**, dont **14 lois promulguées** |
+| Fiche vote — verdict, écart, fracture | « Adopté · Écart de 13 voix · Ont voté pour » | l'adoption tue le texte | 58 AN |
+| Fiche député — fil de vote | pastille verte « Pour » + titre du texte | il en demandait le rejet | **23 350 votes** |
+| Sénat — partout | objet brut tronqué (« …tendant à opposer la que… ») | motion du Sénat, **même pas nommée** | 23 scrutins |
+
+Le cas d'école : `DLR5L17N50173`, « approbation des comptes de la sécurité
+sociale ». Un **seul** vote au dossier — une motion de rejet préalable adoptée.
+Le badge disait « Adopté ». Deux centimètres plus bas sur la même fiche, la frise
+disait « 1ère lecture — **Rejeté** » : l'app se contredisait à l'écran.
+
+**Six formes**, liste fermée (`TypeMotion`), toutes constatées sur pièces :
+
+| Forme | Règle | Adoptée, elle… | Mesuré |
+|---|---|---|---|
+| `rejet_prealable` | art. 91 RAN | rejette le texte sans examen des articles | 58 |
+| `question_prealable` | art. 44 RS | entraîne le rejet du texte | 11 |
+| `exception_irrecevabilite` | art. 44 RS | entraîne le rejet du texte | 7 |
+| `renvoi_en_commission` | — | renvoie le texte en commission | 5 |
+| `referendaire` | art. 122 RAN | propose le texte au référendum | 0 |
+| `ajournement` | — | reporte l'examen | 0 |
+
+⚠️ La **motion de censure** n'en fait pas partie : elle ne rejette aucun texte,
+elle renverse un gouvernement (cf. section précédente).
+
+⚠️ **La classification se fait sur l'objet ENTIER, avant la troncature à
+120 caractères.** Un objet du Sénat s'ouvre sur le numéro et l'auteur (« la
+motion n° 278, présentée par Mme Cukierman et les membres du groupe… ») et ne dit
+qu'au 135e caractère ce qu'elle est. Classer après troncature ne voit jamais
+rien : c'est pourquoi ces 23 votes s'affichaient sous forme de chaîne coupée,
+sans nom ni définition.
+
+Ce que le drapeau change :
+
+- **le badge du dossier nomme le vote** — « Motion adoptée » / « Motion
+  rejetée » — au lieu d'affirmer un sort du texte que ce seul vote ne décide pas
+  (un rejet en 1re lecture n'empêche pas la navette de continuer) ;
+- `build_dossier` trie **à date égale un vote sur le texte AVANT une motion** :
+  `statut` vaut `tous[0].statut`, et laisser l'ordre d'arrivée trancher donnait
+  un badge arbitraire — vécu, « Rejeté » sur une loi promulguée parce que la
+  motion de rejet, elle-même rejetée, était passée devant l'adoption du texte le
+  même 17 juin ;
+- la **fiche vote** porte une mention factuelle sous le verdict et une phrase de
+  sens au-dessus des groupes (le verdict et l'écart, eux, restent le fait brut) ;
+- le **fil d'un parlementaire** nomme le vote par une pastille sourde, la
+  position restant le fait brut ;
+- `libelleScrutin(objet, typeMotion)` **nomme** enfin les votes du Sénat.
+
+**Rattrapage** : `python -m app.ingestion.motions` (ni réseau ni LLM, `--dry-run`,
+idempotente). Elle **ne déclasse jamais** — un classement posé à l'ingestion sur
+l'objet entier ne se relit pas depuis la base tronquée, donc il est préservé,
+même doctrine que l'exposé et l'initiative entre runs — et elle **imprime les
+objets non classés** commençant par « la motion », pour compléter la liste fermée
+sur pièces. C'est ainsi qu'`exception_irrecevabilite` a été ajoutée : les 7 objets
+restants ont été vérifiés un à un sur senat.fr. Les motions du **Sénat** se
+rattrapent, elles, par `python -m app.ingestion.senat`, qui relit les pages.
+
+Une **coquille de la source** est admise explicitement : « la motion de rejet
+**péalable** » (un scrutin de l'Assemblée). Ce n'est pas deviner — cette graphie
+ne peut désigner que la motion de rejet préalable.
 
 ### Qui porte le texte (`app/ingestion/initiative.py`)
 

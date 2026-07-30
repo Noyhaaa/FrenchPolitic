@@ -18,7 +18,7 @@ des faits que la source ne soutient pas (§7.4).
 """
 from __future__ import annotations
 
-from app.domain.enums import Chambre, ObjetVote, PositionVote
+from app.domain.enums import Chambre, ObjetVote, PositionVote, TypeMotion
 from app.schemas.scrutin import CamelModel
 
 
@@ -98,6 +98,12 @@ class VoteDepute(CamelModel):
     titre: str  # titre clair du dossier / objet du vote d'amendement
     dossier_id: str | None = None
     position: PositionVote
+    # Motion dont l'adoption rejette / suspend l'examen du texte (`TypeMotion`).
+    # ⚠️ Sans elle, une pastille « Pour » à côté du titre d'un texte se lit comme
+    # un soutien, alors que le parlementaire en demandait le REJET — mesuré :
+    # 15 264 votes nominatifs portent sur une motion de rejet préalable. Le fil
+    # nomme donc le vote ; la position, elle, reste le fait brut (§7.4).
+    type_motion: TypeMotion | None = None
     # True si la position diffère de la majorité de son groupe sur ce scrutin.
     # None quand le groupe n'a pas de position majoritaire documentée (§2.5),
     # et TOUJOURS None au Sénat (délégation de vote, cf. en-tête du module).

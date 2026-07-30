@@ -30,7 +30,7 @@ export const DISPUTE_TILE_WIDTH = 240;
  */
 export function VoteDisputeTile({ vote, onPress }: Props) {
   const { pour, contre, abstention } = vote.resultat;
-  const { titre } = libelleScrutin(vote.objet);
+  const { titre } = libelleScrutin(vote.objet, vote.typeMotion);
   // Écrit en toutes lettres : le chiffre seul (« 10 ») ne se lit pas.
   const ecart = `${vote.ecart} voix d'écart`;
   // Absent au Sénat : la délégation de vote par groupe y rend le fait

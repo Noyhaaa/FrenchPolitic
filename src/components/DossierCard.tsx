@@ -1,7 +1,11 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, radius, spacing, typography } from '@/theme';
 import { DossierListItem } from '@/types';
-import { formatDateRelative, formatTempsLecture } from '@/utils/format';
+import {
+  badgeDossier,
+  formatDateRelative,
+  formatTempsLecture,
+} from '@/utils/format';
 import { StatusBadge } from './StatusBadge';
 import { ThemeAvatar } from './ThemeAvatar';
 import { MiniResultat } from './MiniResultat';
@@ -17,6 +21,9 @@ export function DossierCard({ dossier, onPress }: Props) {
     dossier.nombreScrutins > 1
       ? `${dossier.nombreScrutins} votes`
       : `${dossier.nombreScrutins} vote`;
+  // Le badge nomme le vote quand c'est une motion : « Adopté » y dirait le
+  // contraire du sort du texte (cf. `badgeDossier`).
+  const badge = badgeDossier(dossier);
 
   return (
     <Pressable
@@ -29,7 +36,7 @@ export function DossierCard({ dossier, onPress }: Props) {
     >
       <View style={styles.header}>
         <ThemeAvatar theme={dossier.theme} />
-        <StatusBadge statut={dossier.statut} />
+        <StatusBadge statut={badge.statut} label={badge.label} />
         {dossier.miseAJour ? (
           <View style={styles.updateBadge} accessibilityElementsHidden>
             <Text style={styles.updateText}>🔄 Mis à jour</Text>

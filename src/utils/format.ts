@@ -5,8 +5,10 @@ import {
   PositionVote,
   ScrutinResume,
   StatutScrutin,
+  TypeMotion,
   TypeVote,
 } from '@/types';
+import { MOTIONS } from '@/constants/motions';
 
 /** Libellé texte du statut (jamais la couleur seule — RGAA §8). */
 export function statutLabel(statut: StatutScrutin): string {
@@ -18,6 +20,48 @@ export function statutLabel(statut: StatutScrutin): string {
     case 'en_cours':
       return 'En discussion';
   }
+}
+
+/**
+ * Le badge d'un dossier : son libellé et le statut qui lui donne sa couleur.
+ *
+ * `statut` est le sort du **dernier vote** du dossier. Trois cas, dans cet
+ * ordre :
+ *
+ * 1. **loi promulguée** → « Promulguée ». « Adopté » est exact mais laisse
+ *    croire que le texte est encore en chemin, alors que la source dit qu'il
+ *    est arrivé au bout. (`etat` n'est servi que sur la fiche : dans le fil,
+ *    `DossierListItem` ne le porte pas, et le badge reste celui du vote.)
+ * 2. **le dernier vote est une MOTION** → « Motion adoptée » / « Motion
+ *    rejetée ». Une motion inverse la lecture de son résultat : une motion de
+ *    rejet préalable adoptée **rejette** le texte. Mesuré : 8 dossiers
+ *    annonçaient « Adopté » sur un texte que la motion venait de rejeter, dont
+ *    un dont c'était le seul vote — et la frise de la même fiche disait
+ *    « 1ère lecture · Rejeté » deux centimètres plus bas. On **nomme le vote**
+ *    plutôt que d'affirmer un sort du texte que ce seul vote ne décide pas :
+ *    un rejet en 1re lecture n'empêche pas la navette de continuer (§7.4).
+ * 3. sinon le statut, tel quel.
+ *
+ * Un seul endroit décide, pour les quatre surfaces qui affichent ce badge
+ * (carte du fil, tuile, hero, tête de fiche) — sinon elles divergeraient.
+ */
+export function badgeDossier(dossier: {
+  statut: StatutScrutin;
+  statutMotion?: TypeMotion;
+  phase?: { label?: string; statut?: StatutScrutin } | null;
+  etat?: { etat?: string } | null;
+}): { statut: StatutScrutin; label: string } {
+  if (dossier.etat?.etat === 'promulgue') {
+    return { statut: 'adopte', label: 'Promulguée' };
+  }
+  if (dossier.statutMotion) {
+    return {
+      statut: dossier.statut,
+      label: dossier.statut === 'adopte' ? 'Motion adoptée' : 'Motion rejetée',
+    };
+  }
+  const statut = dossier.phase?.statut ?? dossier.statut;
+  return { statut, label: dossier.phase?.label ?? statutLabel(statut) };
 }
 
 export function positionLabel(position: PositionVote): string {
@@ -125,12 +169,24 @@ const MENTIONS_SCRUTIN: ReadonlyArray<[RegExp, string]> = [
  * simple). Reformule uniquement des tournures officielles connues ; tout objet
  * non reconnu est restitué tel quel — on n'invente rien (§2.5).
  */
-export function libelleScrutin(objet: string): LibelleScrutin {
+export function libelleScrutin(
+  objet: string,
+  typeMotion?: TypeMotion,
+): LibelleScrutin {
   const t = plier(objet);
   const numero = (re: RegExp) => t.match(re)?.[1];
 
-  let titre: string | undefined;
-  if (t.includes('sous-amendement')) {
+  // Le classement fait à l'ingestion PRIME sur l'heuristique de texte : il a lu
+  // l'objet ENTIER, là où celui qu'on reçoit est tronqué à 120 caractères. Un
+  // objet du Sénat s'ouvre sur le numéro et l'auteur de la motion et ne dit
+  // qu'au 135e caractère ce qu'elle est — sans ce raccourci, ces 23 votes
+  // resteraient affichés sous forme de chaîne coupée, sans nom ni définition.
+  let titre: string | undefined = typeMotion
+    ? MOTIONS[typeMotion].libelle
+    : undefined;
+  if (titre) {
+    // rien à deviner : le titre est déjà connu
+  } else if (t.includes('sous-amendement')) {
     const n = numero(/sous-amendements?[^,]*?n[°o]\s*(\d+)/);
     titre = n ? `Sous-amendement n° ${n}` : undefined;
   } else if (t.includes('amendement')) {

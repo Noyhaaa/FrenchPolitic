@@ -12,6 +12,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { termeGlossaire, termeTypeVote } from '@/constants/glossaire';
+import { consequenceMotion, motion } from '@/constants/motions';
 import { colors, mono, radius, serif, spacing, typography } from '@/theme';
 import {
   DefinitionGlossaire,
@@ -192,7 +193,7 @@ export function ScrutinDetailScreen() {
   const { resultat } = scrutin;
   // Titre = type du vote en clair ; l'objet officiel complet (le sujet exact)
   // reste affiché dessous — rien n'est perdu, tout reste sourcé (§2.5).
-  const lib = libelleScrutin(scrutin.objet);
+  const lib = libelleScrutin(scrutin.objet, scrutin.typeMotion);
   // Le titre est-il un terme de procédure défini par le glossaire ? On cherche
   // sur le TITRE (« Motion de rejet préalable »), pas sur l'objet officiel : lui
   // contient le texte visé, dont les mots déclencheraient des définitions sans
@@ -209,6 +210,10 @@ export function ScrutinDetailScreen() {
   // (« 42 sur 577 ? »), et la forme du scrutin l'explique.
   const votants = resultat.pour + resultat.contre + resultat.abstention;
   const estMotionCensure = scrutin.typeVote === 'motion_censure';
+  // Motion dont l'adoption rejette / suspend l'examen du texte (§7.4) : elle
+  // porte la phrase à afficher, ici et au-dessus des groupes.
+  const laMotion = motion(scrutin.typeMotion);
+  const consequence = consequenceMotion(scrutin.typeMotion, scrutin.statut);
   const termeType = termeTypeVote(scrutin.typeVote);
   // Fracture à montrer seulement si les groupes ne sont pas unanimes.
   const campsDistincts = new Set(
@@ -388,6 +393,16 @@ export function ScrutinDetailScreen() {
               {termeType && definitionOuverte === 'type' ? (
                 <DefinitionGlossaire terme={termeType} />
               ) : null}
+
+              {/* ⚠️ Une MOTION inverse la lecture de son propre résultat : une
+                  motion de rejet préalable ADOPTÉE rejette le texte. Le verdict
+                  et l'écart restent le fait brut du scrutin — cette ligne dit ce
+                  que ce fait emporte, sans le remplacer (§7.4). Elle vient de la
+                  table fermée `constants/motions.ts` ; pas de motion → rien
+                  (§2.5), et sa définition complète s'ouvre depuis le titre. */}
+              {consequence ? (
+                <Text style={styles.mentionProcedure}>{consequence}</Text>
+              ) : null}
             </>
           )}
         </SectionCard>
@@ -443,6 +458,12 @@ export function ScrutinDetailScreen() {
             {/* Ligne de fracture : qui s'est opposé à qui, en un coup d'œil.
                 Position majoritaire de chaque groupe — factuel, sourcé par le
                 scrutin (§5.2), jamais un jugement. */}
+            {/* Sur une motion, « Ont voté pour » se lit à l'envers : c'est
+                pour le REJET du texte. On le dit avant les positions, sinon la
+                ventilation entière se lit comme un soutien au texte (§7.4). */}
+            {laMotion ? (
+              <Text style={styles.sensMotion}>{laMotion.sensPour}</Text>
+            ) : null}
             {campsDistincts >= 2 ? (
               <View style={styles.fracture}>
                 <LigneFracture positionsGroupes={scrutin.positionsGroupes} />
@@ -819,6 +840,11 @@ const styles = StyleSheet.create({
     ...typography.meta,
     color: colors.textTertiary,
     marginTop: spacing.md,
+  },
+  sensMotion: {
+    ...typography.meta,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
   },
   barScaleText: {
     fontSize: 10,

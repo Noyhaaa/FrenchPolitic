@@ -303,6 +303,35 @@ SEED_SCRUTINS: list[Scrutin] = [
         ],
     ),
     # Motion de censure — le cas où « X voix contre 0 » ne veut PAS dire ce
+    # Motion de REJET PRÉALABLE adoptée : le cas où le vocabulaire du scrutin dit
+    # l'inverse du fait. « Adopté » porte ici sur la MOTION — et donc sur le
+    # rejet du texte. C'est le cas réel `DLR5L17N50173` (approbation des comptes
+    # de la sécurité sociale), dont c'était l'unique vote : son badge annonçait
+    # « Adopté » sur un texte que la motion venait de rejeter (§7.4).
+    Scrutin(
+        id="scr-2026-0418",
+        dossier_id="dos-comptes-2026",
+        date="2026-07-08T15:30:00Z",
+        objet=(
+            "la motion de rejet préalable, déposée par Mme Rousseau, du projet "
+            "de loi d'approbation des comptes de la sécurité sociale (première "
+            "lecture)"
+        ),
+        statut="adopte",
+        scrutin_public=True,
+        type_vote="ordinaire",
+        type_motion="rejet_prealable",
+        resultat=ResultatGlobal(pour=271, contre=258, abstention=6, non_votants=42),
+        positions_groupes=[
+            _grp("RN", "pour", 88, 0, 2, 0.97),
+            _grp("LFI", "pour", 70, 0, 1, 0.98),
+            _grp("SOC", "pour", 61, 0, 1, 0.98),
+            _grp("ECO", "pour", 34, 0, 0, 1.0),
+            _grp("RE", "contre", 4, 148, 2, 0.96),
+            _grp("LR", "contre", 2, 52, 0, 0.96),
+        ],
+        sources=_sources("scrutin"),
+    ),
     # qu'il semble dire. L'article 49 de la Constitution ne fait recenser que
     # les voix FAVORABLES : `contre` et `abstention` sont à 0 par construction,
     # et seuls comptent les 267 voix face aux 289 requises. Les groupes qui ne
@@ -612,6 +641,48 @@ SEED_DOSSIERS: list[Dossier] = [
             champs_non_documentes=["historique"],
         ),
     ),
+    # Le dossier dont l'UNIQUE vote est une motion de rejet préalable adoptée :
+    # `statut` vaut donc « adopté », mais c'est la motion qui l'a été et le texte
+    # qui est tombé. `statut_motion` fait dire au badge « Motion adoptée » plutôt
+    # qu'« Adopté », qui affirmerait le contraire du fait (cf. `badgeDossier`).
+    Dossier(
+        id="dos-comptes-2026",
+        titre_officiel=(
+            "Projet de loi d'approbation des comptes de la sécurité sociale "
+            "de l'année 2025"
+        ),
+        titre_clair="Approbation des comptes de la sécurité sociale",
+        statut="adopte",
+        statut_motion="rejet_prealable",
+        theme="Santé",
+        temps_lecture_sec=30,
+        date_dernier_scrutin="2026-07-08T15:30:00Z",
+        scrutins=[_resume_scrutin("scr-2026-0418")],
+        trajectoire=[
+            PhaseScrutin(
+                label="1ère lecture (1ère assemblée saisie)",
+                statut="rejete",
+                chambre="assemblee",
+                date="2026-07-08",
+            ),
+        ],
+        sources=_sources("scrutin"),
+        resume=ResumeScrutin(
+            titre_clair="Approbation des comptes de la sécurité sociale",
+            resume=[
+                PhraseSourcee(
+                    phrase=(
+                        "La motion de rejet préalable a été adoptée par 271 voix "
+                        "contre 258."
+                    ),
+                    source_id="vote_ensemble",
+                ),
+            ],
+            confiance="haute",
+            relu_par_humain=False,
+            champs_non_documentes=["contexte", "objectif"],
+        ),
+    ),
     # Motion de censure : un ÉVÉNEMENT AUTONOME (ni texte, ni articles, ni
     # trajectoire) et le cas où « 267 voix contre 0 » se lit à l'envers si on
     # n'explique rien — l'article 49 ne recense que les voix favorables.
@@ -906,6 +977,10 @@ def _vote_depute(scrutin_id: str, groupe_id: str, position: str) -> VoteDepute:
         titre=titre,
         dossier_id=scrutin.dossier_id,
         position=position,
+        # Le fil nomme le vote quand c'est une motion : sans ça, « Pour » à côté
+        # du titre du texte se lit comme un soutien alors que le parlementaire
+        # en demandait le rejet (§7.4).
+        type_motion=scrutin.type_motion,
         contre_son_groupe=contre_son_groupe,
     )
 
@@ -925,6 +1000,9 @@ _POSITIONS: dict[str, dict[str, str]] = {
         "scr-2026-0410": "pour",
         "scr-2026-0405": "contre",
         "scr-2026-0398": "pour",
+        # Motion de rejet préalable : « contre » veut dire qu'il ne voulait PAS
+        # rejeter le texte — l'inverse de ce que la seule pastille laisse croire.
+        "scr-2026-0418": "contre",
     },
     "dep-seed-02": {
         "scr-2026-0412b": "contre",

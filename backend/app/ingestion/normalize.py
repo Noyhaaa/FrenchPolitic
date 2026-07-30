@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-from app.domain.enums import ObjetVote, PositionVote, TypeVote
+from app.domain.enums import ObjetVote, PositionVote, TypeMotion, TypeVote
 from app.utils.text import fold
 
 # Liste fermée des thèmes (source unique, miroir de `ThemeScrutin` côté front).
@@ -152,6 +152,51 @@ def est_amendement(objet: str) -> bool:
 def est_sous_amendement(objet: str) -> bool:
     """Le scrutin porte-t-il sur un sous-amendement (amendement à un amendement) ?"""
     return "sous-amendement" in fold(objet)
+
+
+# Motions dont l'adoption **inverse** la lecture du résultat (cf. `TypeMotion`).
+# Liste **fermée**, ordonnée du spécifique au général comme la table `MOTIFS` du
+# glossaire : le premier motif rencontré gagne. On n'y met que des formes dont on
+# sait écrire la conséquence, jamais le mot « motion » seul.
+_MOTIFS_MOTION: tuple[tuple[str, TypeMotion], ...] = (
+    ("motion de rejet prealable", TypeMotion.rejet_prealable),
+    # Coquille de la source, relevée telle quelle sur un scrutin de l'Assemblée
+    # (« la motion de rejet péalable, déposée par M. Hetzel… »). On ne devine
+    # rien : cette graphie-là ne peut désigner que celle du dessus (§2.5).
+    ("motion de rejet pealable", TypeMotion.rejet_prealable),
+    ("question prealable", TypeMotion.question_prealable),
+    ("exception d'irrecevabilite", TypeMotion.exception_irrecevabilite),
+    ("renvoi en commission", TypeMotion.renvoi_en_commission),
+    ("motion referendaire", TypeMotion.referendaire),
+    ("motion d'ajournement", TypeMotion.ajournement),
+)
+
+
+def type_motion(objet: str) -> TypeMotion | None:
+    """La motion sur laquelle porte ce vote, quand son adoption rejette,
+    suspend ou reporte l'examen du texte — sinon None.
+
+    C'est ce drapeau qui permet à l'app de DIRE l'inversion : sans lui, « Adopté »
+    sur une motion de rejet préalable se lit comme l'adoption du texte, qui vient
+    au contraire d'être rejeté (§7.4).
+
+    ⚠️ Deux exclusions. Un **amendement** n'est jamais une motion, même si son
+    objet cite le mot. Une **motion de censure** non plus : elle ne rejette pas
+    un texte, elle renverse un gouvernement — elle a son propre traitement
+    (`TypeVote.motion_censure`). Objet non reconnu → None, donc aucune mention
+    affichée : on ne devine pas une conséquence de procédure (§2.5).
+    """
+    if est_amendement(objet):
+        return None
+    # L'apostrophe courbe est courante dans l'open data comme sur senat.fr :
+    # sans ce repli, « motion d’ajournement » ne serait pas reconnue.
+    blob = fold(objet).replace("’", "'")
+    if "motion de censure" in blob:
+        return None
+    for motif, motion in _MOTIFS_MOTION:
+        if motif in blob:
+            return motion
+    return None
 
 
 def type_objet_vote(objet: str) -> ObjetVote:

@@ -104,6 +104,16 @@ Six écrans du cœur de valeur :
    encore en chemin). Mesuré : **254/328 dossiers** (96 promulgués · 126 en
    navette · 21 résolutions · 7 au Conseil constitutionnel · 4 retirés) ; les
    74 sans actes (`TXT-…`, `SEN-…`) gardent le bloc masqué.
+   Le **badge de tête** est décidé par `badgeDossier` (`utils/format.ts`), partagé
+   avec la carte du fil, la tuile et le hero pour que les quatre ne divergent
+   pas : loi promulguée → « Promulguée » ; **dernier vote = une motion** →
+   « Motion adoptée » / « Motion rejetée » ; sinon le statut. ⚠️ Une motion
+   inverse la lecture de son résultat, et le badge disait donc le contraire du
+   fait : **8 dossiers** annonçaient « Adopté » sur un texte que la motion venait
+   de rejeter — dont un dont c'était l'**unique** vote, la frise de la même fiche
+   disant « 1ère lecture · Rejeté » deux centimètres plus bas. On **nomme le
+   vote** plutôt que d'affirmer un sort du texte que ce seul vote ne décide pas :
+   un rejet en 1re lecture n'empêche pas la navette de continuer (§7.4, §2.5).
    Puis, pour une loi promulguée seulement, la carte **« La loi »**
    (`LoiCard`) : « Loi n° 2025-379 du 28 avril 2025 » et son *Journal officiel*.
    ⚠️ **Aucun lien dans cette carte** : le **texte voté par le Parlement**
@@ -197,6 +207,18 @@ Six écrans du cœur de valeur :
    ni écart — c'est ce 0-là qui trompait. Le glossaire le disait déjà
    (`motion-de-censure` : « Seules les voix POUR sont comptées »), les chiffres
    le contredisaient deux lignes plus bas.
+   ⚠️ **Une motion inverse la lecture de son résultat** : « Adopté » sur une
+   motion de rejet préalable veut dire que le **texte** a été rejeté. Le verdict
+   et l'écart restent le fait brut du scrutin — on ne les réécrit pas —, mais une
+   **mention factuelle** dit sous eux ce que ce fait emporte (« Adoptée, cette
+   motion rejette le texte sans examen de ses articles »), et une phrase
+   au-dessus des groupes dit ce que « pour » veut dire ici (« Sur cette motion,
+   voter "pour", c'est demander le rejet du texte ») — sans quoi la ventilation
+   entière se lit comme un soutien au texte (§7.4). Les phrases vivent une seule
+   fois dans `constants/motions.ts`, qui renvoie au glossaire pour la définition
+   complète ; pas de motion → rien du tout (§2.5). C'est aussi ce classement qui
+   **nomme** les 23 votes du Sénat dont l'objet tronqué ne permettait aucun titre
+   (`libelleScrutin(objet, typeMotion)`).
    Ensuite, deux visages selon le vote :
    — **Vote sur le texte** : section **Vote par groupe**
    avec la **ligne de fracture** (`LigneFracture` : quels groupes ont
@@ -303,7 +325,13 @@ Six écrans du cœur de valeur :
    concerné. ⚠️ **Aucun taux de participation n'est affiché** : l'open data ne
    recense que les votants physiques d'un scrutin public (268 en moyenne sur
    577), si bien qu'un ratio de présence se lirait comme un score d'absentéisme
-   que la source ne soutient pas (§7.4). « Contre son groupe » (pastille ambre)
+   que la source ne soutient pas (§7.4). ⚠️ Chaque entrée du fil portant sur une
+   **motion** la **nomme** (pastille sourde « Motion de rejet préalable »…) :
+   sans elle, une pastille verte « Pour » à côté du titre d'un texte se lit
+   comme un soutien, alors que le parlementaire en demandait le **rejet** —
+   mesuré, **23 350 votes nominatifs** sont dans ce cas. La position, elle,
+   reste le fait brut du scrutin ; on ne l'inverse pas.
+   « Contre son groupe » (pastille ambre)
    est en revanche un **fait déduit** du même scrutin, jamais un jugement —
    mais **jamais au Sénat** : la délégation de vote par groupe y rend le fait
    indéfendable, `contreSonGroupe` et `cohesionGroupe` y sont toujours absents
@@ -400,7 +428,28 @@ disputés (l'écart entre deux camps n'a pas de sens quand un seul est compté),
 le garde-fou des chiffres admet le seuil parmi les décomptes officiels. Le
 `suffragesRequis` n'est **affiché que sur une motion** : ailleurs il vaut
 exactement `exprimés // 2 + 1` (mesuré : 100 % des 8 411 autres scrutins).
-Rattrapage : `python -m app.ingestion.types_vote`. Les **sources
+Rattrapage : `python -m app.ingestion.types_vote`.
+Chaque scrutin porte enfin sa **motion**, quand c'en est une (`Scrutin.typeMotion`,
+`app/domain/enums.py`) — six formes constatées sur pièces : **rejet préalable**
+(58, art. 91 RAN), **question préalable** (11, art. 44 RS), **exception
+d'irrecevabilité** (7, art. 44 RS), **renvoi en commission** (5), plus la
+**référendaire** et l'**ajournement**, que le glossaire explique déjà. Une motion
+**inverse la lecture de son propre résultat** : l'adopter rejette le texte. ⚠️ La
+classification se fait sur l'objet **entier**, *avant* la troncature à
+120 caractères — un objet du Sénat s'ouvre sur le numéro et l'auteur (« la motion
+n° 278, présentée par Mme… ») et ne dit qu'au 135e caractère ce qu'elle est, si
+bien que classer après troncature ne verrait jamais rien (ces 23 votes
+s'affichaient sous forme de chaîne coupée, sans nom ni définition). Le
+`build_dossier` en tire deux conséquences : `Dossier.statutMotion` (le badge
+**nomme le vote** au lieu d'affirmer un sort du texte) et, à date égale, **un vote
+sur le texte passe devant une motion** pour fixer le statut — sans quoi l'ordre
+d'arrivée tranchait (mesuré : **16 dossiers**, dont **14 lois promulguées**,
+affichaient « Rejeté » parce qu'une motion rejetée était passée devant l'adoption
+du texte le même jour). Rattrapage : `python -m app.ingestion.motions` (ni réseau
+ni LLM), qui **ne déclasse jamais** — un classement posé à l'ingestion sur l'objet
+entier ne se relit pas depuis la base tronquée, donc il est préservé — et qui
+**imprime les objets non classés** pour compléter la liste fermée sur pièces (les
+formes du Sénat se rattrapent, elles, par `python -m app.ingestion.senat`). Les **sources
 du dossier** sont de niveau dossier uniquement — la source de chaque vote reste
 sur son scrutin, servie par sa fiche vote — mais elles les rassemblent **toutes**
 (§7.5) : `Dossier.sources` est une liste **dérivée**, recomposée à chaque
@@ -731,6 +780,7 @@ python -m app.ingestion.etats             # renseigne « où en est le texte » 
 python -m app.ingestion.lois              # attache la LOI FINALE (texte voté) + réécrit la Q4 à l'indicatif
 python -m app.ingestion.sources           # rapports de commission + recompose « les documents du dossier »
 python -m app.ingestion.types_vote        # forme des scrutins (ordinaire/solennel/motion) + recompose la Q3
+python -m app.ingestion.motions          # classe les motions (rejet préalable, question préalable…) en base
 uvicorn app.main:app --reload             # http://localhost:8000/docs (sert la base via .env)
 pytest                                     # suite de tests (forcés sur seed)
 ```
@@ -754,8 +804,10 @@ src/
                              + useDeputes / useDepute (chargement + cache + états)
   constants/themes.ts        Emoji + teintes par thème
   constants/glossaire.ts     Glossaire : contenu + reconnaissance des libellés (§8)
+  constants/motions.ts       Ce qu'emporte l'adoption d'une motion (l'inversion de sens)
   types/glossaire.ts         Types du glossaire (PAS un miroir backend — contenu local)
-  utils/format.ts            Formatage dates, libellés de statut/position/chambre, temps de lecture
+  utils/format.ts            Formatage dates, libellés de statut/position/chambre, badge de
+                             dossier (`badgeDossier`), temps de lecture
                              (⚠️ plus de `phasesNavette` : la trajectoire vient de l'API)
   utils/periodes.ts          Groupage/tri par période de la chronologie (écran Dossiers)
   components/                Composants réutilisables (DossierCard, StateViews…)
@@ -854,7 +906,9 @@ AN quand disponibles, `scrutinId` vers la fiche vote, et `sousAmendements?` — 
 documents du dossier**, dans l'ordre de la vie du texte — liste **dérivée**, cf.
 plus haut), `rapportsCommission?` (les rapports de commission, un par lecture,
 URL vérifiée à l'ingestion : ils **alimentent** `sources`, la fiche ne les rend
-pas à part), `statut`, `theme`, `dateDernierScrutin`, `trajectoire` (les étapes du texte au
+pas à part), `statut`, `statutMotion?` (le vote qui a fixé `statut` est une
+**motion** de ce type — le badge la **nomme** alors, au lieu d'affirmer un sort
+du texte que ce seul vote ne décide pas), `theme`, `dateDernierScrutin`, `trajectoire` (les étapes du texte au
 Parlement, **les deux chambres**, calculées à l'ingestion — vide = frise
 masquée), `etat?` (**où en est le texte aujourd'hui**, la clôture de la frise :
 `etat` — `promulgue` | `resolution` | `retire` | `conseil_constitutionnel` |
@@ -892,6 +946,12 @@ assemblées, et « 214 pour » n'a pas la même échelle selon l'hémicycle),
 `scrutinPublic`, `typeVote?` (`ordinaire` | `solennel` | `motion_censure` — la
 **forme** du scrutin, qui explique le nombre de votants ; absente au Sénat),
 `suffragesRequis?` (le seuil — **n'a d'intérêt que sur une motion de censure**),
+`typeMotion?` (`rejet_prealable` | `question_prealable` |
+`exception_irrecevabilite` | `renvoi_en_commission` | `referendaire` |
+`ajournement` — la **motion** dont l'adoption rejette, suspend ou reporte
+l'examen du texte. ⚠️ Elle **inverse la lecture du résultat** : posée, l'app
+affiche la mention qui dit ce que le vote emporte et nomme le vote ; absente,
+rien n'est affiché §2.5),
 `resultat`, `positionsGroupes` (avec `votantsPour` /
 `votantsContre` / `votantsAbstention` optionnels — le **nominatif**, absent =
 masqué, §2.5 ; chaque `Votant` porte son `nom` et, **uniquement s'il siège
@@ -907,7 +967,8 @@ recherche renvoient un `DossierListItem` allégé (dont `nombreScrutins`,
 `miseAJour`, `accroche?`, `natureTexte?` et `chambres` — les chambres qui ont
 voté le texte, sans quoi une carte du fil se lirait comme un vote de
 l'Assemblée ; il ne porte PAS `titreOfficiel`, d'où la nature calculée côté API ;
-il porte en revanche `typeVoteDernierScrutin?` / `suffragesRequisDernierScrutin?`,
+il porte en revanche `statutMotion?`, `typeMotionDernierScrutin?`,
+`typeVoteDernierScrutin?` / `suffragesRequisDernierScrutin?`,
 sans quoi une motion de censure se lirait « 267 pour, 0 contre » jusque dans le
 fil).
 Côté **parlementaires** : `Depute` (identité + `chambre` + groupe +
@@ -921,9 +982,11 @@ n'est donc pas un trou d'ingestion à combler mais une absence de source),
 `portrait` + `historique` paginé), `PortraitVote` (12 mois glissants : `votes`,
 `pour` / `contre` / `abstention`, `cohesionGroupe` — **pas de participation**, et
 jamais de cohésion au Sénat, cf. « État actuel ») et `VoteDepute` (`objetType`,
-`titre`, `dossierId?`, `position`, `contreSonGroupe?`). Types clés :
+`titre`, `dossierId?`, `position`, `typeMotion?` — la motion, quand le vote en
+est une : sans elle, « Pour » à côté du titre d'un texte se lit comme un soutien
+alors que le parlementaire en demandait le rejet —, `contreSonGroupe?`). Types clés :
 `StatutScrutin` (`adopte` | `rejete` | `en_cours`), `Chambre` (`assemblee` |
-`senat`), `PositionVote`, `ObjetVote` (`dossier` | `amendement` |
+`senat`), `TypeMotion`, `PositionVote`, `ObjetVote` (`dossier` | `amendement` |
 `sous_amendement`), `NiveauConfiance`. Ce modèle est le **contrat de l'API** (miroir
 camelCase des schémas Pydantic backend, à répercuter des deux côtés).
 
@@ -987,6 +1050,20 @@ camelCase des schémas Pydantic backend, à répercuter des deux côtés).
   échappent (ceux « à la tribune »). Le chiffre existerait, il ne voudrait rien
   dire — c'est exactement le piège que §7.4 interdit. Même famille de raisonnement
   que le refus du taux de participation côté AN.
+- ⚠️ **Une MOTION inverse la lecture de son résultat** : « Adopté » sur une
+  motion de rejet préalable veut dire que le **texte** a été rejeté. Ne jamais
+  afficher son sort sans le nommer. Vécu : 8 dossiers annonçaient « Adopté » sur
+  un texte rejeté (dont un dont c'était l'unique vote), 16 autres — dont
+  **14 lois promulguées** — annonçaient « Rejeté » parce qu'une motion rejetée
+  était passée devant l'adoption du texte le même jour dans `tous[0]`. D'où la
+  règle de tri de `build_dossier` : **à date égale, un vote sur le texte passe
+  devant une motion**. Et 23 350 votes nominatifs affichaient une pastille
+  « Pour » qui signifiait « pour le rejet ».
+- ⚠️ **Le classement d'une motion se fait sur l'objet ENTIER**, avant la
+  troncature à 120 caractères. Un objet du Sénat ne dit qu'au 135e caractère ce
+  qu'est la motion : le reclasser depuis la base ne retrouve rien, et
+  `app.ingestion.motions` **préserve** donc ce que l'ingestion a posé plutôt que
+  de l'effacer (même doctrine que l'exposé et l'initiative entre runs).
 - ⚠️ **Sur une motion de censure, `contre` et `abstention` valent 0 par
   construction** (art. 49 de la Constitution : seules les voix favorables sont
   recensées). Vérifié sur les 23 motions de la législature. Toute formule

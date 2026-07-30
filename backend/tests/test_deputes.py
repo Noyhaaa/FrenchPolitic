@@ -395,3 +395,16 @@ def test_liste_groupes_filtree_par_chambre(client):
     assert {g["chambre"] for g in assemblee} == {"assemblee"}
     # Les deux ensembles sont disjoints et couvrent la liste complète.
     assert len(senat) + len(assemblee) == len(client.get("/groupes").json())
+
+
+def test_l_historique_nomme_les_votes_de_motion(client):
+    """Une pastille « Pour » à côté du titre d'un texte se lit comme un soutien —
+    alors que sur une motion de rejet, le parlementaire en demandait le REJET.
+    Mesuré : 15 264 votes nominatifs sont dans ce cas. Le fil nomme donc le
+    vote ; la position, elle, reste le fait brut du scrutin (§7.4)."""
+    fiche = client.get("/deputes/dep-seed-01").json()
+    entrees = {v["scrutinId"]: v for v in fiche["historique"]}
+    motion = entrees["scr-2026-0418"]
+    assert motion["typeMotion"] == "rejet_prealable"
+    # Un vote ordinaire n'en porte pas : aucune mention n'est alors affichée.
+    assert entrees["scr-2026-0410"].get("typeMotion") is None

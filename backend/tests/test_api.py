@@ -405,3 +405,26 @@ def test_une_motion_de_censure_n_est_pas_un_vote_disputé(client):
     accueil = client.get("/accueil").json()
     ids = {v["scrutinId"] for v in accueil["votesDisputes"]}
     assert "scr-2026-0420" not in ids
+
+
+def test_une_motion_de_rejet_dit_qu_elle_inverse_le_sens(client):
+    """⚠️ Le badge d'un dossier vaut le sort de son dernier vote. Quand ce vote
+    est une motion de rejet préalable, ce sort dit l'INVERSE de ce qui arrive au
+    texte : la motion adoptée le rejette. Mesuré avant ce correctif, 8 dossiers
+    annonçaient « Adopté » sur un texte que la motion venait de rejeter — dont
+    un dont c'était le seul vote, la frise de la même fiche disant deux
+    centimètres plus bas « 1ère lecture · Rejeté »."""
+    dossier = client.get("/dossiers/dos-comptes-2026").json()
+    assert dossier["statut"] == "adopte"  # le fait brut du scrutin
+    assert dossier["statutMotion"] == "rejet_prealable"  # ce que le badge nomme
+    assert dossier["scrutins"][0]["typeMotion"] == "rejet_prealable"
+
+    scrutin = client.get("/scrutins/scr-2026-0418").json()
+    assert scrutin["typeMotion"] == "rejet_prealable"
+
+    # …et la carte du fil doit le savoir sans charger la fiche, sinon elle
+    # continue d'annoncer « Adopté » sur un texte rejeté.
+    fil = client.get("/dossiers?limit=100").json()
+    carte = next(d for d in fil if d["id"] == "dos-comptes-2026")
+    assert carte["statutMotion"] == "rejet_prealable"
+    assert carte["typeMotionDernierScrutin"] == "rejet_prealable"
