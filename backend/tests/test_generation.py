@@ -3,10 +3,9 @@ from __future__ import annotations
 
 from app.ai.faits import construire_faits
 from app.ai.gabarit import composer_resume
-from app.ai.generation import ResumeGenerator, generer_resume
+from app.ai.generation import generer_resume
 from app.ai.guardrails import run_guardrails
 from app.ai.rag import contexte_depuis_faits
-from app.domain.enums import StatutRevue
 from app.schemas import PositionGroupe, ResultatGlobal, Scrutin
 
 
@@ -112,10 +111,3 @@ def test_gabarit_sans_amendement_omet_la_phrase():
     )
     resume = generer_resume(faits)
     assert not any(p.source_id == "amendements" for p in resume.resume)
-
-
-async def test_resume_generator_mockllm_dossier_niveau():
-    """Le chemin LLM (MockLLM) tourne au niveau dossier sans lever d'erreur."""
-    gen = ResumeGenerator()
-    result = await gen.generate(_faits_complet())
-    assert result.statut_revue in (StatutRevue.publie, StatutRevue.en_attente)

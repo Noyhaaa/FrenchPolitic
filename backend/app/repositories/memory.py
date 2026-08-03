@@ -13,6 +13,9 @@ from app.domain.division import division
 from app.domain.enums import PositionVote
 from app.domain.recherche import ChampsRecherche, index_recherche, score, termes
 from app.repositories.base import (
+    FENETRE_DISPUTES_JOURS,
+    FENETRE_PORTRAIT_JOURS,
+    MAX_DISPUTES,
     MAX_DISPUTES_PAR_DOSSIER,
     DossierRepository,
     construire_portrait,
@@ -36,13 +39,6 @@ from app.schemas import (
     VoteDisputeItem,
 )
 from app.utils.text import fold as _fold
-
-# Même fenêtre que le repository Postgres (§5.2) : les 12 derniers mois.
-FENETRE_PORTRAIT_JOURS = 365
-
-# Mêmes règles que le repository Postgres pour la rangée des votes disputés.
-FENETRE_DISPUTES_JOURS = 90
-_MAX_DISPUTES = 10
 
 
 def _champs(d: Dossier) -> ChampsRecherche:
@@ -196,7 +192,7 @@ class InMemoryDossierRepository(DossierRepository):
         retenus = limiter_par_dossier(
             [item for _, item in classes], MAX_DISPUTES_PAR_DOSSIER
         )
-        return retenus[:_MAX_DISPUTES]
+        return retenus[:MAX_DISPUTES]
 
     async def recap_mensuel(self) -> RecapMensuel | None:
         dates = [s for s in self._scrutins.values() if s.date]

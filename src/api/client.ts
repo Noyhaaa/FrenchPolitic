@@ -26,12 +26,25 @@ function buildUrl(path: string, params?: Record<string, string | number>): strin
   return url;
 }
 
-/** GET typé avec timeout, annulation et erreurs normalisées. */
-export async function apiGet<T>(
+/**
+ * Requête typée avec timeout, annulation et erreurs normalisées.
+ *
+ * Toutes les méthodes passent par ici : une seule gestion du timeout, une seule
+ * normalisation d'erreur. Le `message` porte le **détail renvoyé par l'API**
+ * quand il y en a un (« Un compte existe déjà avec cette adresse e-mail. ») —
+ * c'est ce que les écrans de compte affichent, plutôt qu'un code HTTP.
+ */
+async function requete<T>(
+  methode: 'GET' | 'POST' | 'PUT',
   path: string,
-  params?: Record<string, string | number>,
-  signal?: AbortSignal,
+  options: {
+    params?: Record<string, string | number>;
+    corps?: unknown;
+    jeton?: string | null;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<T> {
+  const { params, corps, jeton, signal } = options;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
   // Relie une éventuelle annulation externe (ex. debounce) à ce contrôleur.
@@ -40,13 +53,19 @@ export async function apiGet<T>(
     else signal.addEventListener('abort', () => controller.abort());
   }
 
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (corps !== undefined) headers['Content-Type'] = 'application/json';
+  if (jeton) headers.Authorization = `Bearer ${jeton}`;
+
   try {
     const res = await fetch(buildUrl(path, params), {
-      headers: { Accept: 'application/json' },
+      method: methode,
+      headers,
+      body: corps === undefined ? undefined : JSON.stringify(corps),
       signal: controller.signal,
     });
     if (!res.ok) {
-      throw new ApiError(res.status, `Erreur ${res.status} sur ${path}`);
+      throw new ApiError(res.status, await messageErreur(res, path));
     }
     return (await res.json()) as T;
   } catch (err) {
@@ -60,4 +79,47 @@ export async function apiGet<T>(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/** Détail lisible renvoyé par l'API, sinon le code HTTP. */
+async function messageErreur(res: Response, path: string): Promise<string> {
+  try {
+    const corps = (await res.json()) as { detail?: unknown };
+    if (typeof corps?.detail === 'string' && corps.detail) return corps.detail;
+  } catch {
+    // Corps absent ou non-JSON : on retombe sur le message générique.
+  }
+  return `Erreur ${res.status} sur ${path}`;
+}
+
+/** GET typé avec timeout, annulation et erreurs normalisées. */
+export async function apiGet<T>(
+  path: string,
+  params?: Record<string, string | number>,
+  signal?: AbortSignal,
+): Promise<T> {
+  return requete<T>('GET', path, { params, signal });
+}
+
+/** GET typé porteur d'un jeton de session (routes `/moi`). */
+export async function apiGetAuth<T>(path: string, jeton: string): Promise<T> {
+  return requete<T>('GET', path, { jeton });
+}
+
+/** POST typé (inscription, connexion). */
+export async function apiPost<T>(
+  path: string,
+  corps: unknown,
+  jeton?: string | null,
+): Promise<T> {
+  return requete<T>('POST', path, { corps, jeton });
+}
+
+/** PUT typé (préférences du compte). */
+export async function apiPut<T>(
+  path: string,
+  corps: unknown,
+  jeton?: string | null,
+): Promise<T> {
+  return requete<T>('PUT', path, { corps, jeton });
 }

@@ -25,7 +25,17 @@ export type NomIcone =
   | 'assistant'
   | 'glossaire'
   | 'etoile'
-  | 'horloge';
+  | 'horloge'
+  // Parcours d'inscription et fiche profil
+  | 'check'
+  | 'personne'
+  | 'enveloppe'
+  | 'cadenas'
+  | 'oeil'
+  | 'oeilBarre'
+  | 'cloche'
+  | 'epingle'
+  | 'sortie';
 
 interface Props {
   name: NomIcone;
@@ -112,6 +122,69 @@ export function IconLigne({ name, color, size = 20, strokeWidth = 1.8 }: Props) 
             {...p}
             d="M12 4.5 l2.3 4.8 l5.2 0.7 l-3.8 3.7 l0.9 5.3 l-4.6 -2.5 l-4.6 2.5 l0.9 -5.3 l-3.8 -3.7 l5.2 -0.7 z"
           />
+        </Svg>
+      );
+    case 'check':
+      return (
+        <Svg {...s}>
+          <Path {...p} d="M5 12.5 l4.5 4.5 L19 7" />
+        </Svg>
+      );
+    case 'personne':
+      return (
+        <Svg {...s}>
+          <Circle {...p} cx="12" cy="8" r="3.6" />
+          <Path {...p} d="M5 20 a7 7 0 0 1 14 0" />
+        </Svg>
+      );
+    case 'enveloppe':
+      return (
+        <Svg {...s}>
+          <Path {...p} d="M3.5 6 h17 v12 h-17 z" />
+          <Path {...p} d="M3.5 7 l8.5 6 l8.5 -6" />
+        </Svg>
+      );
+    case 'cadenas':
+      return (
+        <Svg {...s}>
+          <Path {...p} d="M5.5 10.5 h13 v9.5 h-13 z" />
+          <Path {...p} d="M8.5 10.5 V7.5 a3.5 3.5 0 0 1 7 0 v3" />
+        </Svg>
+      );
+    case 'oeil':
+      return (
+        <Svg {...s}>
+          <Path {...p} d="M2.5 12 C5 7.5 8.5 5.5 12 5.5 s7 2 9.5 6.5 c-2.5 4.5 -6 6.5 -9.5 6.5 s-7 -2 -9.5 -6.5 z" />
+          <Circle {...p} cx="12" cy="12" r="3" />
+        </Svg>
+      );
+    case 'oeilBarre':
+      return (
+        <Svg {...s}>
+          <Path {...p} d="M2.5 12 C5 7.5 8.5 5.5 12 5.5 s7 2 9.5 6.5 c-2.5 4.5 -6 6.5 -9.5 6.5 s-7 -2 -9.5 -6.5 z" />
+          <Circle {...p} cx="12" cy="12" r="3" />
+          <Path {...p} d="M4 20 L20 4" />
+        </Svg>
+      );
+    case 'cloche':
+      return (
+        <Svg {...s}>
+          <Path {...p} d="M6 17 v-5 a6 6 0 0 1 12 0 v5 l1.5 2 h-15 z" />
+          <Path {...p} d="M10 19.5 a2.2 2.2 0 0 0 4 0" />
+        </Svg>
+      );
+    case 'epingle':
+      return (
+        <Svg {...s}>
+          <Path {...p} d="M12 21 c4 -5 6 -8 6 -10.5 a6 6 0 0 0 -12 0 C6 13 8 16 12 21 z" />
+          <Circle {...p} cx="12" cy="10.5" r="2.4" />
+        </Svg>
+      );
+    case 'sortie':
+      return (
+        <Svg {...s}>
+          <Path {...p} d="M14 5 H6 a1.5 1.5 0 0 0 -1.5 1.5 v11 A1.5 1.5 0 0 0 6 19 h8" />
+          <Path {...p} d="M11 12 h9 M17 8.5 l3.5 3.5 l-3.5 3.5" />
         </Svg>
       );
     case 'horloge':

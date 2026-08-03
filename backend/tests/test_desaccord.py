@@ -22,8 +22,6 @@ class _FakeLLM:
     async def generate_text(self, system: str, user: str) -> str:
         return self._reponses.pop(0) if self._reponses else ""
 
-    async def generate_json(self, system: str, user: str) -> dict:
-        return {}
 
 
 class _Client:

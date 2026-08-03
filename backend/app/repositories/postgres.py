@@ -12,10 +12,13 @@ from datetime import date, timedelta
 
 from app.db.models import DeputeRow, DossierRow, GroupeRow, ScrutinRow, VoteDeputeRow
 from app.domain.division import division
-from app.domain.enums import Chambre, ObjetVote, PositionVote
+from app.domain.enums import ObjetVote, PositionVote
 from app.domain.recherche import ChampsRecherche, score, termes
 from app.ingestion.normalize import nature_texte, type_objet_vote
 from app.repositories.base import (
+    FENETRE_DISPUTES_JOURS,
+    FENETRE_PORTRAIT_JOURS,
+    MAX_DISPUTES,
     MAX_DISPUTES_PAR_DOSSIER,
     DossierRepository,
     construire_portrait,
@@ -40,19 +43,6 @@ from app.schemas import (
     VoteDisputeItem,
 )
 from app.utils.text import fold
-
-# Fenêtre des statistiques de la fiche député (§5.2) : les 12 derniers mois.
-FENETRE_PORTRAIT_JOURS = 365
-
-# Fenêtre de la rangée « Les votes les plus disputés », comptée depuis le dernier
-# scrutin en base (et non depuis aujourd'hui : en intersession, une fenêtre
-# calendaire viderait la rangée alors que les votes existent). 90 jours couvrent
-# une session de travail parlementaire complète tout en laissant la rangée
-# évoluer à chaque ingestion — un classement « de tous les temps » serait figé.
-FENETRE_DISPUTES_JOURS = 90
-
-# Nombre de votes de la rangée. Au-delà, c'est une liste, plus une sélection.
-_MAX_DISPUTES = 10
 
 # Candidats ramenés avant classement. Le préfiltre `LIKE` a déjà réduit
 # l'ensemble ; ce plafond borne le coût du tri en Python même sur un terme très
@@ -294,7 +284,7 @@ class PostgresDossierRepository(DossierRepository):
                 .order_by(ScrutinRow.indice_division.desc(), ScrutinRow.id.desc())
                 # Large : le plafond par dossier écarte ensuite les doublons de
                 # texte, il faut donc de quoi remplir la rangée après coupe.
-                .limit(_MAX_DISPUTES * 5)
+                .limit(MAX_DISPUTES * 5)
             )
         ).all()
 
@@ -329,7 +319,7 @@ class PostgresDossierRepository(DossierRepository):
                     groupes_disperses=mesure.groupes_disperses,
                 )
             )
-        return limiter_par_dossier(items, MAX_DISPUTES_PAR_DOSSIER)[:_MAX_DISPUTES]
+        return limiter_par_dossier(items, MAX_DISPUTES_PAR_DOSSIER)[:MAX_DISPUTES]
 
     async def recap_mensuel(self) -> RecapMensuel | None:
         # Clé « AAAA-MM » sur la date ISO du scrutin ; comptes SQL (exacts,

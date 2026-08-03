@@ -2,13 +2,13 @@
 
 « Le risque n°1 n'est pas technique, il est éditorial. » Ces contrôles sont de la
 logique pure, testable sans LLM. Un résumé qui échoue à un garde-fou bloquant
-n'est jamais publié automatiquement : il part en revue humaine (§4.6).
+n'est jamais publié : `app.ai.generation` le remplace par un résumé vide plutôt
+que par un contenu douteux (§2.5).
 
 Contrôles :
 - ancrage       : chaque phrase renvoie à une source fournie (source_id connu) ;
 - lexique       : aucun adjectif/tournure évaluative (liste noire, §4.3) ;
-- chiffres      : les décomptes cités correspondent au résultat officiel ;
-- confiance     : « faible » ⇒ revue humaine obligatoire.
+- chiffres      : les décomptes cités correspondent au résultat officiel.
 """
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 
-from app.domain.enums import NiveauConfiance
 from app.schemas import ResultatGlobal, ResumeScrutin
 
 # Liste noire de lexique orienté (§4.3). Non exhaustive — à enrichir en revue.
@@ -208,14 +207,3 @@ def run_guardrails(
     report.violations += check_lexique(resume)
     report.violations += check_chiffres(resume, resultat, suffrages_requis)
     return report
-
-
-def doit_passer_en_revue(
-    report: GuardrailReport, confiance: NiveauConfiance
-) -> bool:
-    """Un résumé part en revue humaine si un garde-fou bloque OU confiance faible.
-
-    §4.4 : « si "faible", le résumé passe en file de revue humaine et n'est pas
-    publié automatiquement. »
-    """
-    return report.bloquant or confiance == NiveauConfiance.faible

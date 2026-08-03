@@ -10,7 +10,9 @@ donne le contexte global.
 ## Stack
 
 FastAPI · Pydantic v2 · httpx · SQLAlchemy 2 (async) + asyncpg · PostgreSQL.
-Python 3.12 (voir `.python-version`). pgvector prévu en Phase 2 (RAG).
+Python 3.12 (voir `.python-version`). Le « RAG » est ici un assemblage de
+passages officiels étiquetés (`app/ai/rag.py`), pas une recherche vectorielle :
+aucun embedding, aucun pgvector dans le dépôt.
 
 ## Démarrer
 
@@ -766,6 +768,44 @@ finissait par préserver le bon thème, mais après un appel gaspillé).
 | GET     | `/deputes/{id}/votes` | Fiche parlementaire | Historique paginé (« charger les votes plus anciens ») |
 | GET     | `/groupes?chambre=` | Annuaire        | Groupes politiques (nom, abréviation, couleur, chambre) — filtres |
 | GET     | `/health`          | —                | Statut du service                             |
+| POST    | `/inscription`     | Onboarding       | Créer un compte (409 si l'e-mail est pris)    |
+| POST    | `/connexion`       | Onboarding / Profil | Ouvrir une session (401, message unique)   |
+| GET     | `/moi`             | Profil           | Le compte de la session                       |
+| PUT     | `/moi/preferences` | Profil           | Enregistrer thèmes / département / alertes    |
+
+**Les comptes (`app/api/routes/comptes.py`)** — les **seules écritures** de
+l'API, et la seule table qui ne vienne pas de l'open data (`utilisateur`). Le
+compte est **facultatif** : le parcours d'inscription est passable et toutes les
+routes de lecture restent publiques (un test le vérifie). Il ne sert qu'à
+retrouver ses **préférences** d'un appareil à l'autre — thèmes suivis,
+département, préférence d'alerte —, jamais d'historique de lecture.
+
+Trois règles tenues dans le code :
+
+- **Minimisation.** Prénom, nom, e-mail, mot de passe. La maquette demandait
+  aussi un téléphone et une date de naissance : rien dans le produit ne les
+  utilise, ils ne sont donc pas collectés. `Compte` (le seul modèle exposé) ne
+  porte pas l'empreinte du mot de passe.
+- **Un seul échec de connexion.** E-mail inconnu et mot de passe faux
+  renvoient le **même** 401 avec le **même** message — distinguer les deux
+  dirait quelles adresses ont un compte. L'e-mail est stocké et comparé en
+  minuscules.
+- **`JWT_SECRET` obligatoire hors dev.** Sans lui, `app/security.py` refuse de
+  démarrer ailleurs qu'en `APP_ENV=dev`, où un secret **éphémère** est tiré par
+  processus (les sessions ne survivent alors pas à un redémarrage).
+
+⚠️ L'adresse e-mail est validée par une **expression régulière maison**
+(`app/schemas/utilisateur.py`), pas par `pydantic.EmailStr` : celui-ci exige
+`email-validator`, dont l'absence fait échouer l'**import** du module — donc
+toute l'API, pas seulement les comptes — sur un environnement pas réinstallé
+après un `git pull`. Le contrôle est le miroir de celui de l'app
+(`src/utils/validation.ts`), et il ne s'applique qu'à l'**inscription** : à la
+connexion, une adresse malformée est un identifiant faux et reçoit le 401
+commun, pas un 422 qui distinguerait déjà des catégories d'adresses.
+
+⚠️ Les comptes suivent le commutateur `REPOSITORY_BACKEND` comme le reste : en
+`memory` (le défaut), **un compte créé est perdu à l'arrêt du serveur**. La
+table `utilisateur` se crée par `python -m app.db.migrations`.
 
 **Les votes les plus disputés (rangée d'accueil)** — `app/domain/division.py`,
 fonction pure partagée par les deux repositories. « Disputé » qualifie
@@ -835,22 +875,24 @@ app/
   main.py            Assemblage FastAPI (CORS, routes, repository via lifespan)
   config.py          Réglages (env / .env)
   api/routes/        dossiers.py (fil, fiche dossier, fiche vote, recherche), health.py
+                     comptes.py  inscription / connexion / moi — les SEULES écritures
+  security.py        Mot de passe (bcrypt) et jeton de session (JWT HS256)
   schemas/           Contrat d'API (Pydantic, camelCase) = §5.3 — Dossier + Scrutin
+                     utilisateur.py  les seuls schémas d'ENTRÉE du dépôt
   domain/enums.py    Statuts, positions, niveaux de confiance…
   domain/recherche.py  Index, découpage en termes et pertinence (pur, partagé par les 2 repos)
-  db/                models.py (dossier, scrutin, groupe, depute, vote_depute, sync_run) · session.py (moteur async)
+  db/                models.py (dossier, scrutin, groupe, depute, vote_depute, utilisateur, sync_run) · session.py (moteur async)
                      migrations.py  DDL additives idempotentes (pas d'Alembic : `create_all` ne modifie pas l'existant)
   repositories/      Protocole + in-memory (seed) + postgres (ingéré) — choix via config
+                     utilisateurs.py  protocole des comptes (séparé : celui des dossiers est en lecture seule)
   data/seed.py       Dossiers + députés FICTIFS de démonstration (backend « memory »)
   ai/                Pipeline de résumé (§4)
-    prompts.py       Prompt système neutre (§4.1–4.3)
     rag.py           Construction du contexte ancré (RAG)
-    llm.py           Abstraction fournisseur (MockLLM · OllamaLLM local · Anthropic à venir)
+    llm.py           Abstraction fournisseur (OllamaLLM ; « mock » = aucun LLM)
     guardrails.py    Garde-fous : ancrage, lexique orienté, cohérence chiffres
     generation.py    Orchestration RAG → LLM → garde-fous → publier/revue
     theme.py         Classification de thème par LLM (liste fermée, repli heuristique)
     questions.py     Les 4 questions citoyennes (Q3 déterministe · Q1/Q4 LLM validées) + questions d'un vote d'amendement
-    review_queue.py  File de revue humaine (§4.6)
   ingestion/         Alimentation depuis les sources officielles (§5)
     assemblee.py     Open data AN : download + parse_scrutin (pur, nominatif inclus) → ScrutinParse
     senat.py         Scrutins publics du Sénat (senat.fr) : parse_page_scrutin + parse_scrutin_senat (purs) + CLI autonome
@@ -870,7 +912,6 @@ app/
     reformater.py    CLI : recalcule titre court + accroche des dossiers en base (sans réseau ni LLM)
     revalider.py     CLI : repasse les garde-fous sur les réponses en base, efface celles qui échouent
     divisions.py     CLI : recalcule l'indice de division des scrutins en base (rangée « votes disputés »)
-    legifrance.py    API Légifrance via PISTE (OAuth2) — stub Phase 2
 tests/               Tests API + garde-fous + génération + ingestion (+ repo pg opt-in)
 ```
 
@@ -919,17 +960,19 @@ tests/               Tests API + garde-fous + génération + ingestion (+ repo p
   sur les seuls votes sur l'ensemble), si bien que tout ratio de présence se
   lirait comme un score d'absentéisme que la source ne soutient pas (§7.4). Pas d'URL de portrait :
 
-- Les **garde-fous éditoriaux** (ancrage, lexique orienté avec accents, cohérence
-  des chiffres, décision de revue) et le pipeline de génération avec `MockLLM`.
+- Les **garde-fous éditoriaux** : ancrage, lexique orienté (accents compris) et
+  cohérence des chiffres. Un résumé qui en viole un n'est pas publié — il est
+  remplacé par un résumé vide, jamais par un contenu douteux (§2.5).
 
 **Résumé neutre par gabarit (en place)**
 - Généré à l'ingestion, **sans LLM ni clé API** : `app/ai/faits.py` (faits des
   scrutins) → `rag.py` (passages étiquetés) → `gabarit.py` (5 phrases sourcées) →
   garde-fous (`generer_resume`). Chaque phrase porte son `source_id` et passe
   l'ancrage / le lexique / les chiffres par construction (confiance « moyenne »).
-- Un LLM (AnthropicLLM derrière `LLMClient`, ou Ollama en local) pourra reformuler
-  le style plus tard sans toucher au reste ; la fusion ne préserve un résumé que
-  s'il est **relu par un humain**, sinon elle régénère depuis les faits à jour.
+- ⚠️ Le résumé n'est **jamais** produit par un LLM, et l'échafaudage qui le
+  permettait a été retiré : un modèle distord des faits de façon invisible aux
+  garde-fous lexicaux. La fusion ne préserve un résumé que s'il est **relu par
+  un humain**, sinon elle régénère depuis les faits à jour.
 
 **Exposé des motifs — bloc attribué (en place)**
 - Récupéré du PDF officiel du texte déposé (`textes_an.py`), affiché comme un bloc
@@ -979,7 +1022,7 @@ tests/               Tests API + garde-fous + génération + ingestion (+ repo p
   `LLM_PROVIDER=ollama` (`.env`) ; Ollama éteint → repli silencieux sur
   l'heuristique.
 
-**Les 4 questions citoyennes — qwen3 local, sorties validées (en place)**
+**Les 4 questions citoyennes — LLM local, sorties validées (en place)**
 - `app/ai/questions.py`, rempli à l'ingestion dans `resume.questions` : «
   Pourquoi les députés ont-ils débattu ? · Quel était le principal désaccord ? ·
   Quel est le résultat du vote ? · Qu'est-ce que ça change concrètement ? » (§2.2).
@@ -1120,20 +1163,26 @@ tests/               Tests API + garde-fous + génération + ingestion (+ repo p
   `positionsGroupes` (déterministe, sourcé par le scrutin). Réponses validées
   persistées et réutilisées entre runs ; sans contenu enrichi, seules les
   réponses déterministes existent (§2.5).
-- Pourquoi qwen3 et pas mistral : épreuves comparées (2026-07-18) — mistral 7B
-  changeait la nature du texte, convertissait les chiffres en lettres et glissait
-  du cadrage ; qwen3:14b (raisonnement coupé, température 0) a tenu « information
-  non disponible », l'attribution et les chiffres exacts. **On ne génère toujours
-  PAS le résumé neutre par LLM** : le gabarit déterministe reste seul maître du
-  résumé — seules des réponses **attribuables à une source unique et vérifiables
-  déterministiquement** passent par le modèle.
+- Modèle **configurable** (`LLM_MODEL`), aujourd'hui `mistral-small:24b` servi
+  par un Ollama distant. Le choix se fait sur épreuves, pas sur réputation :
+  comparaison du 2026-07-18 — mistral **7B** changeait la nature du texte,
+  convertissait les chiffres en lettres et glissait du cadrage, là où qwen3:14b
+  (raisonnement coupé, température 0) tenait « information non disponible »,
+  l'attribution et les chiffres exacts. Un modèle qui échoue à ces épreuves ne
+  casse rien pour autant : les contrôles déterministes rejettent ses sorties.
+- **On ne génère toujours PAS le résumé neutre par LLM** : le gabarit
+  déterministe reste seul maître du résumé — seules des réponses **attribuables
+  à une source unique et vérifiables déterministiquement** passent par le
+  modèle.
 
-**Stubs à interface stable (Phase 2)**
+**Pistes non commencées**
 - Légifrance/PISTE : **texte consolidé** des dossiers (ce que la loi change dans
-  le code — besoin distinct de l'exposé des motifs, déjà couvert). OAuth2 esquissé.
+  le code — besoin distinct de l'exposé des motifs, déjà couvert). Le stub OAuth2
+  qui dormait ici a été **supprimé** : il ne faisait que lever
+  `NotImplementedError`, et le lien Légifrance réellement servi vient de
+  l'archive AN (`navette.py` → `EtatTexte.url_legifrance`), sans PISTE.
   *(Le **contenu** des amendements — dispositif, exposé sommaire, article visé —
-  est désormais couvert par l'open data AN, cf. `amendements.py`, sans
-  Légifrance.)*
+  est couvert par l'open data AN, cf. `amendements.py`, sans Légifrance.)*
 
 ## Règles produit qui contraignent le backend
 

@@ -13,8 +13,6 @@ class _FakeLLM:
     async def generate_text(self, system: str, user: str) -> str:
         return self._reponse
 
-    async def generate_json(self, system: str, user: str) -> dict:
-        return {}
 
 
 def test_valider_publics_exact_match():

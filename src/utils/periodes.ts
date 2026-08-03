@@ -1,4 +1,5 @@
 import type { DossierListItem } from '@/types';
+import { capitale } from '@/utils/format';
 
 /** Un groupe de la chronologie : « Cette semaine », « Plus tôt en juillet »… */
 export interface PeriodeDossiers {
@@ -9,10 +10,6 @@ export interface PeriodeDossiers {
 
 function debutDeJour(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-}
-
-function capitale(texte: string) {
-  return texte.charAt(0).toUpperCase() + texte.slice(1);
 }
 
 /**

@@ -5,8 +5,6 @@ et les routes servies depuis le seed (backend « memory », cf. conftest).
 """
 from __future__ import annotations
 
-import pytest
-
 from app.domain.enums import PositionVote
 from app.ingestion import deputes as deputes_module
 from app.ingestion.deputes import (

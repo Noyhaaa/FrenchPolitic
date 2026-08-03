@@ -19,9 +19,11 @@ réponses sont **attribuables à une source unique** (l'exposé) et **vérifiabl
 par des contrôles déterministes** — tout chiffre de la réponse doit exister dans
 la source, la nature du texte (proposition/projet) ne doit pas être inversée,
 lexique évaluatif interdit, attribution imposée pour la Q4. Réponse en échec →
-None (§2.5), jamais publiée. Épreuves qwen3:14b (2026-07-18) : consignes tenues
-(« information non disponible » respecté, attribution respectée, chiffres exacts)
-là où mistral 7B fabriquait — d'où le passage à qwen3 (voir README §IA).
+None (§2.5), jamais publiée. Le modèle est configurable (`LLM_MODEL`,
+aujourd'hui `mistral-small:24b`) et se choisit sur épreuves : celles du
+2026-07-18 ont vu qwen3:14b tenir les consignes (« information non disponible »
+respecté, attribution respectée, chiffres exacts) là où mistral **7B**
+fabriquait (voir README §IA).
 
 Le module porte aussi les questions d'un **vote d'amendement** (fiche vote) :
 même logique — LLM uniquement sur ce qui est attribuable à une source unique

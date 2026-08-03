@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import deputes, dossiers, health
+from app.api.routes import comptes, deputes, dossiers, health
 from app.config import settings
 from app.data.seed import (
     SEED_DEPUTES,
@@ -19,21 +19,26 @@ from app.data.seed import (
     SEED_SCRUTINS,
     SEED_VOTES_DEPUTES,
 )
-from app.repositories import InMemoryDossierRepository
+from app.repositories import InMemoryDossierRepository, InMemoryUtilisateurRepository
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Construction du repository au démarrage selon la config. Les routes ne
-    # dépendent que du protocole — passer de memory à postgres est transparent.
+    # Construction des repositories au démarrage selon la config. Les routes ne
+    # dépendent que des protocoles — passer de memory à postgres est transparent.
+    # ⚠️ Les comptes suivent le même commutateur : en « memory », un compte créé
+    # ne survit pas au redémarrage du serveur.
     if settings.repository_backend == "postgres":
         from app.db.session import make_engine, make_session_factory
         from app.repositories.postgres import PostgresDossierRepository
+        from app.repositories.utilisateurs import PostgresUtilisateurRepository
 
         engine = make_engine()
+        session_factory = make_session_factory(engine)
         app.state.db_engine = engine
-        app.state.dossier_repository = PostgresDossierRepository(
-            make_session_factory(engine)
+        app.state.dossier_repository = PostgresDossierRepository(session_factory)
+        app.state.utilisateur_repository = PostgresUtilisateurRepository(
+            session_factory
         )
         yield
         await engine.dispose()
@@ -45,6 +50,7 @@ async def lifespan(app: FastAPI):
             votes_deputes=SEED_VOTES_DEPUTES,
             groupes=SEED_GROUPES,
         )
+        app.state.utilisateur_repository = InMemoryUtilisateurRepository()
         yield
 
 
@@ -69,6 +75,7 @@ def create_app() -> FastAPI:
     app.include_router(dossiers.search_router)
     app.include_router(deputes.router)
     app.include_router(deputes.groupes_router)
+    app.include_router(comptes.router)
     return app
 
 

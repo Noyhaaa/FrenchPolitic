@@ -10,7 +10,6 @@ from app.schemas.scrutin import (
     Accueil,
     Amendement,
     ArgumentGroupe,
-    ChangementTexte,
     DispositifTexte,
     Dossier,
     DossierListItem,
@@ -35,9 +34,21 @@ from app.schemas.scrutin import (
     VoteDisputeItem,
     Votant,
 )
+from app.schemas.utilisateur import (
+    Compte,
+    ConnexionRequete,
+    InscriptionRequete,
+    PreferencesUtilisateur,
+    SessionOuverte,
+)
 
 __all__ = [
     "Accueil",
+    "Compte",
+    "ConnexionRequete",
+    "InscriptionRequete",
+    "PreferencesUtilisateur",
+    "SessionOuverte",
     "Depute",
     "DeputeDetail",
     "DeputeListItem",
@@ -46,7 +57,6 @@ __all__ = [
     "VoteDepute",
     "Amendement",
     "ArgumentGroupe",
-    "ChangementTexte",
     "DispositifTexte",
     "Dossier",
     "DossierListItem",

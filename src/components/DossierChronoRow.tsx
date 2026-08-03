@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, mono, radius, serifDisplaySemi, spacing } from '@/theme';
 import { DossierListItem, StatutScrutin } from '@/types';
 import { formatDateRelative, libelleChambreCourt } from '@/utils/format';
-import { ResultBar } from './ResultBar';
+import { ResultBar, segmentsMotionCensure } from './ResultBar';
 
 /** Couleur du filet et de la pastille — le statut est toujours aussi porté par un texte. */
 const COULEUR: Record<StatutScrutin, string> = {
@@ -99,13 +99,7 @@ export function DossierChronoRow({ dossier, premier, dernier, onPress }: Props) 
                 height={4}
                 segments={
                   requises
-                    ? [
-                        { value: resultat.pour, color: colors.pour },
-                        {
-                          value: Math.max(0, requises - resultat.pour),
-                          color: colors.nonVotant,
-                        },
-                      ]
+                    ? segmentsMotionCensure(resultat.pour, requises)
                     : [
                         { value: resultat.pour, color: colors.pour },
                         { value: resultat.contre, color: colors.contre },

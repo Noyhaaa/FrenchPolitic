@@ -33,6 +33,31 @@ export function ResultBar({ segments, height = 10 }: Props) {
   );
 }
 
+/**
+ * Segments d'une **motion de censure**, mesurés contre le SEUIL de suffrages
+ * requis — jamais pour/contre (§7.4).
+ *
+ * ⚠️ L'article 49 de la Constitution ne fait recenser que les voix
+ * *favorables* : `contre` et `abstention` valent 0 **par construction**. Une
+ * barre pour/contre s'afficherait donc toujours pleine, disant l'inverse du
+ * résultat. Le seul rapport qui décide est « voix recueillies / voix requises »,
+ * et la part manquante se peint en « non votant » plutôt qu'en « contre » :
+ * personne n'a voté contre, la source ne le dit nulle part.
+ *
+ * Règle unique, partagée par les quatre endroits qui affichent une motion de
+ * censure (fil, chronologie, fiche dossier, fiche vote) — elle était recopiée
+ * dans chacun.
+ */
+export function segmentsMotionCensure(
+  pour: number,
+  suffragesRequis: number,
+): Segment[] {
+  return [
+    { value: pour, color: colors.pour },
+    { value: Math.max(0, suffragesRequis - pour), color: colors.nonVotant },
+  ];
+}
+
 const styles = StyleSheet.create({
   track: {
     flexDirection: 'row',

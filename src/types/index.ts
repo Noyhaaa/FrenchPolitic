@@ -174,12 +174,6 @@ export interface SourceOfficielle {
   url: string;
 }
 
-/** Bloc « Ce que prévoit le texte » (§4.5) — descriptif, non comparatif. */
-export interface ChangementTexte {
-  avant: string;
-  apres: string;
-}
-
 /**
  * La position d'un groupe dans le débat : son sens de vote (factuel, issu du
  * scrutin) et l'argument qu'il a lui-même donné en explication de vote (§7.4).
@@ -257,7 +251,6 @@ export interface ResumeScrutin {
   contexte?: string;
   objectif?: string;
   historique?: string;
-  changement?: ChangementTexte;
   publicConcerne: string[];
   confiance: NiveauConfiance;
   reluParHumain: boolean;
@@ -842,4 +835,45 @@ export interface GroupeListItem {
   abrev: string;
   couleur: string;
   chambre: Chambre;
+}
+
+// ── Compte utilisateur ───────────────────────────────────────────────────────
+// Miroir de `backend/app/schemas/utilisateur.py`. Le compte est **facultatif** :
+// l'app entière fonctionne sans lui, il ne sert qu'à retrouver ses préférences
+// d'un appareil à l'autre.
+
+/**
+ * Ce que le parcours d'inscription recueille — et tout ce qu'on stocke du
+ * lecteur. Aucun historique de lecture, aucune donnée de navigation.
+ */
+export interface Preferences {
+  /** Thèmes suivis : ils REMONTENT les rangées de l'accueil, ils n'en cachent aucune. */
+  themes: ThemeScrutin[];
+  /**
+   * Département d'un parlementaire, tel que l'annuaire l'écrit (« Gironde »).
+   * `null` tant qu'il n'a pas été choisi — la ligne disparaît alors (§2.5).
+   * (L'API sérialise toujours la clé, d'où `null` plutôt qu'absent.)
+   */
+  departement: string | null;
+  /**
+   * Préférence d'alerte, mémorisée pour le jour où les alertes existeront.
+   * ⚠️ Aucune notification n'est envoyée aujourd'hui (hors périmètre V1) :
+   * l'écran ne doit rien promettre d'autre que d'avoir retenu le choix.
+   */
+  alertes: boolean;
+}
+
+/** Le compte tel que l'API le renvoie — jamais de mot de passe. */
+export interface Compte {
+  id: string;
+  email: string;
+  prenom: string;
+  nom: string;
+  preferences: Preferences;
+}
+
+/** Réponse d'une inscription ou d'une connexion réussie. */
+export interface SessionOuverte {
+  jeton: string;
+  compte: Compte;
 }

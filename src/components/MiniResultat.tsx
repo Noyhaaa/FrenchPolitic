@@ -1,7 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { colors, mono, spacing } from '@/theme';
 import { ResultatGlobal, TypeVote } from '@/types';
-import { ResultBar } from './ResultBar';
+import { ResultBar, segmentsMotionCensure } from './ResultBar';
 
 interface Props {
   resultat: ResultatGlobal;
@@ -38,7 +38,6 @@ export function MiniResultat({
   const { pour, contre } = resultat;
 
   if (typeVote === 'motion_censure' && suffragesRequis) {
-    const manquantes = Math.max(0, suffragesRequis - pour);
     const pct = Math.round((Math.min(pour, suffragesRequis) / suffragesRequis) * 100);
     return (
       <View
@@ -48,10 +47,7 @@ export function MiniResultat({
       >
         <ResultBar
           height={height}
-          segments={[
-            { value: pour, color: colors.pour },
-            { value: manquantes, color: colors.nonVotant },
-          ]}
+          segments={segmentsMotionCensure(pour, suffragesRequis)}
         />
         <View style={styles.legend}>
           <Text style={[styles.pct, { color: colors.pour }]}>

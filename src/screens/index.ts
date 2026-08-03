@@ -9,3 +9,5 @@ export { DeputesScreen } from './DeputesScreen';
 export { DeputeDetailScreen } from './DeputeDetailScreen';
 export { AssistantScreen } from './AssistantScreen';
 export { ProfileScreen } from './ProfileScreen';
+export { OnboardingScreen } from './OnboardingScreen';
+export { ConnexionScreen } from './ConnexionScreen';

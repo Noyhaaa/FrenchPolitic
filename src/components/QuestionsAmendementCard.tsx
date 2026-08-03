@@ -1,8 +1,8 @@
-import { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { colors, radius, spacing, typography } from '@/theme';
 import type { PositionGroupe, QuestionsAmendement } from '@/types';
 import { LigneFracture } from './LigneFracture';
+import { QARow, stylesQA } from './QARow';
 
 interface Props {
   /** Absent si l'ingestion n'a pas (encore) généré les questions. */
@@ -13,45 +13,6 @@ interface Props {
   scrutinPublic: boolean;
   /** true = sous-amendement (libellés adaptés). */
   sous?: boolean;
-}
-
-/** Pastille numérotée (1..4) devant chaque question — miroir de QuestionsCard. */
-function Numero({ n }: { n: number }) {
-  return (
-    <View style={styles.numero}>
-      <Text style={styles.numeroTexte}>{n}</Text>
-    </View>
-  );
-}
-
-/** Une ligne question + réponse (texte, ou contenu libre via children). */
-function QARow({
-  n,
-  question,
-  reponse,
-  children,
-}: {
-  n: number;
-  question: string;
-  reponse?: string;
-  children?: ReactNode;
-}) {
-  return (
-    <View style={styles.qrow}>
-      <Numero n={n} />
-      <View style={styles.qbody}>
-        <Text style={styles.question}>{question}</Text>
-        {children ??
-          (reponse ? (
-            <Text style={styles.reponse}>{reponse}</Text>
-          ) : (
-            <Text style={[styles.reponse, styles.indispo]}>
-              Information non disponible.
-            </Text>
-          ))}
-      </View>
-    </View>
-  );
 }
 
 /**
@@ -102,7 +63,7 @@ export function QuestionsAmendementCard({
             <LigneFracture positionsGroupes={positionsGroupes} afficherUnanimite />
           </View>
         ) : (
-          <Text style={styles.reponse}>
+          <Text style={stylesQA.reponse}>
             Ce vote s'est fait à main levée : il n'existe pas de ventilation par
             groupe ni par parlementaire.
           </Text>
@@ -131,41 +92,6 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: colors.border,
     marginVertical: spacing.lg,
-  },
-  qrow: {
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  qbody: {
-    flex: 1,
-  },
-  numero: {
-    width: 26,
-    height: 26,
-    borderRadius: radius.pill,
-    backgroundColor: colors.brandSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  numeroTexte: {
-    ...typography.badge,
-    fontSize: 12,
-    color: colors.brand,
-  },
-  question: {
-    fontSize: 15,
-    lineHeight: 21,
-    fontWeight: '600',
-    color: colors.textPrimary,
-  },
-  reponse: {
-    marginTop: spacing.xs,
-    fontSize: 15,
-    lineHeight: 23,
-    color: colors.textSecondary,
-  },
-  indispo: {
-    fontStyle: 'italic',
   },
   fracture: {
     marginTop: spacing.sm,

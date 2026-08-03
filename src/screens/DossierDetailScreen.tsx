@@ -23,6 +23,7 @@ import {
   LoadingView,
   OfflineBanner,
   ResultBar,
+  segmentsMotionCensure,
   SectionCard,
   SourceGrid,
   StatusBadge,
@@ -140,13 +141,7 @@ function VoteDecisifCard({
         height={6}
         segments={
           estMotion && scrutin.suffragesRequis
-            ? [
-                { value: resultat.pour, color: colors.pour },
-                {
-                  value: Math.max(0, scrutin.suffragesRequis - resultat.pour),
-                  color: colors.nonVotant,
-                },
-              ]
+            ? segmentsMotionCensure(resultat.pour, scrutin.suffragesRequis)
             : [
                 { value: resultat.pour, color: colors.pour },
                 { value: resultat.abstention, color: colors.abstention },
@@ -421,26 +416,7 @@ export function DossierDetailScreen() {
           </SectionCard>
         )}
 
-        {/* 4. Ce qui change — titre hors carte, AVANT gris / APRÈS bleu (§4.5) */}
-        {resume.changement && (
-          <View style={styles.flatSection}>
-            <Text style={typography.overline}>Ce qui change</Text>
-            <View style={styles.changeRow}>
-              <View style={[styles.changeCol, styles.changeAvant]}>
-                <Text style={styles.avantLabel}>AVANT</Text>
-                <Text style={typography.bodySecondary}>
-                  {resume.changement.avant}
-                </Text>
-              </View>
-              <View style={[styles.changeCol, styles.changeApres]}>
-                <Text style={styles.apresLabel}>APRÈS</Text>
-                <Text style={styles.apresText}>{resume.changement.apres}</Text>
-              </View>
-            </View>
-          </View>
-        )}
-
-        {/* 5. Qui est concerné ? (masqué si non documenté — §3.2 point 6) */}
+        {/* 4. Qui est concerné ? (masqué si non documenté — §3.2 point 6) */}
         {resume.publicConcerne.length > 0 && (
           <SectionCard title="Qui est concerné ?">
             <View style={styles.chips}>
@@ -702,37 +678,6 @@ const styles = StyleSheet.create({
   voteChevron: {
     color: colors.textTertiary,
     fontSize: 24,
-    fontWeight: '600',
-  },
-  changeRow: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    gap: spacing.md,
-  },
-  changeCol: {
-    flex: 1,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    gap: spacing.xs,
-  },
-  changeAvant: {
-    backgroundColor: colors.surfaceMuted,
-  },
-  changeApres: {
-    backgroundColor: colors.brandSoft,
-  },
-  avantLabel: {
-    ...typography.overline,
-    fontStyle: 'italic',
-    color: colors.textTertiary,
-  },
-  apresLabel: {
-    ...typography.overline,
-    color: colors.brand,
-  },
-  apresText: {
-    ...typography.bodySecondary,
-    color: colors.brand,
     fontWeight: '600',
   },
   chips: {

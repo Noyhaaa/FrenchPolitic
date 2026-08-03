@@ -182,6 +182,37 @@ class VoteDeputeRow(Base):
     )
 
 
+class UtilisateurRow(Base):
+    """Compte utilisateur — la seule table qui ne vient pas de l'open data.
+
+    Tout le reste du schéma décrit des faits publics ingérés ; celle-ci porte
+    des données personnelles, d'où la minimisation : prénom, nom, e-mail,
+    empreinte du mot de passe. Ni téléphone ni date de naissance, que l'app
+    n'utiliserait nulle part.
+
+    L'`email` est stocké **en minuscules** (l'unicité d'une adresse ne dépend
+    pas de sa casse) et sert d'identifiant de connexion ; `id` est un UUID, de
+    sorte qu'aucune URL ni aucun jeton n'expose l'adresse.
+
+    `preferences` reprend exactement ce que le parcours d'inscription
+    recueille (thèmes suivis, département, alertes) : c'est ce qui permet de
+    retrouver son fil sur un autre appareil. L'app en garde toujours une copie
+    locale — le compte est facultatif.
+    """
+
+    __tablename__ = "utilisateur"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    mot_de_passe_hash: Mapped[str] = mapped_column(String(128))
+    prenom: Mapped[str] = mapped_column(Text)
+    nom: Mapped[str] = mapped_column(Text)
+    preferences: Mapped[dict] = mapped_column(JSONB, default=dict)
+    cree_le: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class SyncRunRow(Base):
     """Journal des synchronisations (observabilité, §8)."""
 

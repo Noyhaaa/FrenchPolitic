@@ -8,6 +8,15 @@ httpx>=0.27
 # Ingestion — extraction du texte des PDF officiels (exposé des motifs)
 pypdf>=5.1
 
+# Comptes utilisateurs — hachage du mot de passe et jeton de session.
+# Deux dépendances, pas une pile d'authentification (cf. app/security.py).
+# ⚠️ L'adresse e-mail est validée par une regex maison, PAS par
+# `pydantic.EmailStr` : celui-ci exigerait `email-validator`, dont l'absence
+# ferait échouer l'import du module — donc toute l'API, pas seulement les
+# comptes. Ne pas l'ajouter ici (cf. app/schemas/utilisateur.py).
+bcrypt>=4.1
+pyjwt>=2.9
+
 # Dev / tests
 pytest>=8.3
 pytest-asyncio>=0.24

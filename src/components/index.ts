@@ -1,18 +1,16 @@
 export { StatusBadge } from './StatusBadge';
 export { ThemeAvatar } from './ThemeAvatar';
 export { DossierCard } from './DossierCard';
-export { DossierTile, TILE_WIDTH } from './DossierTile';
-export { VoteDisputeTile, DISPUTE_TILE_WIDTH } from './VoteDisputeTile';
+export { DossierTile } from './DossierTile';
+export { VoteDisputeTile } from './VoteDisputeTile';
 export { HeroDossier } from './HeroDossier';
 export { MiniResultat } from './MiniResultat';
 export { RecapVotes } from './RecapVotes';
-export { ResultBar } from './ResultBar';
-export type { Segment } from './ResultBar';
+export { ResultBar, segmentsMotionCensure } from './ResultBar';
 export { GroupVoteRow } from './GroupVoteRow';
-export { SourceLink, SourceGrid } from './SourceLink';
+export { SourceGrid } from './SourceLink';
 export { SectionCard } from './SectionCard';
 export { Legend } from './Legend';
-export type { LegendItem } from './Legend';
 export { LigneFracture } from './LigneFracture';
 export { DefinitionGlossaire, MarqueurGlossaire } from './DefinitionGlossaire';
 export { IconLigne, ThemeIcone } from './IconLigne';
@@ -31,6 +29,30 @@ export { QuestionsCard } from './QuestionsCard';
 export { QuestionsAmendementCard } from './QuestionsAmendementCard';
 export { TrajectoireNavette } from './TrajectoireNavette';
 export { BrandHeader } from './BrandHeader';
+// Profil
+export { ProfilCiel } from './ProfilCiel';
+export { ProfilEntete } from './ProfilEntete';
+export { AnneauCouverture } from './AnneauCouverture';
+export { BarreOnglets } from './BarreOnglets';
+export { CarteRangees, RangeeReglage } from './CarteRangees';
+export { SelecteurDepartement } from './SelecteurDepartement';
 export { TabBarIcon } from './TabBarIcon';
 export { LoadingView, ErrorView, EmptyView, OfflineBanner } from './StateViews';
 export { DecrypteSplash } from './DecrypteSplash';
+// Formulaires et parcours d'accueil
+export { BoutonPrincipal } from './BoutonPrincipal';
+export { ChampTexte } from './ChampTexte';
+export { Chip } from './Chip';
+export { Interrupteur } from './Interrupteur';
+export { BarreProgression, ProgressionEtapes } from './ProgressionEtapes';
+export { OnboardingBienvenue } from './OnboardingBienvenue';
+export {
+  OnboardingCompte,
+  SAISIE_COMPTE_VIDE,
+  compteAmorce,
+  compteComplet,
+  type SaisieCompte,
+} from './OnboardingCompte';
+export { OnboardingThemes, THEMES_MINIMUM } from './OnboardingThemes';
+export { OnboardingDepartement, departementDe } from './OnboardingDepartement';
+export { OnboardingAlertes } from './OnboardingAlertes';

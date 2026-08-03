@@ -24,6 +24,13 @@ export type RootStackParamList = {
   // dossier ou d'un titre de vote (`DefinitionGlossaire`).
   Glossaire: undefined;
   GlossaireTerme: { termeId: string };
+  // Parcours d'accueil, au premier lancement — et atteint ensuite par « Créer un
+  // compte » depuis le Profil. Il sort en `reset` vers `MainTabs` : on ne doit
+  // pas pouvoir y revenir d'un geste de retour.
+  Onboarding: undefined;
+  // Connexion à un compte existant : atteinte depuis le parcours d'accueil ET
+  // depuis le Profil, d'où le libellé de retour générique.
+  Connexion: undefined;
 };
 
 declare global {

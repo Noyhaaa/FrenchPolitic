@@ -15,7 +15,15 @@ interface Props {
   onPress: (dossier: DossierListItem) => void;
 }
 
-/** Carte du fil (§3.1) — réutilisée aussi dans la recherche (§3.3). */
+/**
+ * Carte de dossier au format « vignette large ».
+ *
+ * ⚠️ Ce n'est plus la carte du fil d'accueil : celui-ci utilise `DossierTile`
+ * (rangées horizontales) et `HeroDossier` (« à la une »), et les résultats de
+ * recherche utilisent `DossierChronoRow` (lignes denses). Seule la fiche d'un
+ * terme du glossaire s'en sert encore, pour la liste « les dossiers où le mot
+ * apparaît ».
+ */
 export function DossierCard({ dossier, onPress }: Props) {
   const nbVotes =
     dossier.nombreScrutins > 1

@@ -2,7 +2,6 @@ import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,44 +13,12 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, radius, spacing, typography } from '@/theme';
-import { DeputeRow, EmptyView, OfflineBanner } from '@/components';
+import { Chip, DeputeRow, EmptyView, OfflineBanner } from '@/components';
 import { useDeputes } from '@/hooks';
 import type { Chambre, DeputeListItem } from '@/types';
 import type { RootStackParamList } from '@/navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
-
-function Chip({
-  actif,
-  label,
-  couleur,
-  onPress,
-}: {
-  actif: boolean;
-  label: string;
-  couleur?: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={[styles.chip, actif && styles.chipActif]}
-      accessibilityRole="button"
-      accessibilityState={{ selected: actif }}
-      accessibilityLabel={`Filtrer : ${label}`}
-    >
-      {couleur ? (
-        <View
-          style={[styles.chipPastille, { backgroundColor: couleur }]}
-          importantForAccessibility="no"
-        />
-      ) : null}
-      <Text style={[styles.chipTexte, actif && styles.chipTexteActif]}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
 
 /** Filtres de chambre, dans l'ordre constitutionnel des assemblées. */
 const CHAMBRES: ReadonlyArray<{ valeur?: Chambre; label: string }> = [
@@ -241,30 +208,6 @@ const styles = StyleSheet.create({
   chips: {
     gap: spacing.sm,
     paddingVertical: spacing.xs,
-  },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.pill,
-    paddingVertical: 6,
-    paddingHorizontal: 13,
-  },
-  chipActif: {
-    backgroundColor: colors.textPrimary,
-  },
-  chipPastille: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  chipTexte: {
-    ...typography.label,
-    color: colors.textSecondary,
-  },
-  chipTexteActif: {
-    color: colors.textOnLight,
   },
   list: {
     paddingHorizontal: spacing.lg,

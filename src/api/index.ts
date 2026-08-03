@@ -1,4 +1,3 @@
-export { API_BASE_URL } from './config';
 export { ApiError } from './client';
 export {
   fetchAccueil,
@@ -16,3 +15,10 @@ export {
   fetchVotesDepute,
 } from './deputes';
 export { cache } from './cache';
+export {
+  connecter,
+  envoyerPreferences,
+  fetchCompte,
+  inscrire,
+  type DemandeInscription,
+} from './comptes';

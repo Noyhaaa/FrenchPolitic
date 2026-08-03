@@ -5,7 +5,6 @@ from app.ai.guardrails import (
     check_ancrage,
     check_chiffres,
     check_lexique,
-    doit_passer_en_revue,
     run_guardrails,
 )
 from app.domain.enums import NiveauConfiance
@@ -82,13 +81,8 @@ def test_chiffres_coherents_ok():
     assert check_chiffres(resume, RESULTAT) == []
 
 
-def test_confiance_faible_force_la_revue():
-    report = run_guardrails(_resume(confiance=NiveauConfiance.faible), RESULTAT, {"texte_article_1"})
-    assert doit_passer_en_revue(report, NiveauConfiance.faible) is True
-
-
 def test_resume_propre_est_publiable():
     resume = _resume()
     report = run_guardrails(resume, RESULTAT, {"texte_article_1"})
     assert report.ok
-    assert doit_passer_en_revue(report, resume.confiance) is False
+    assert not report.bloquant

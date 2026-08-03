@@ -62,8 +62,8 @@ from app.ingestion.rapports import construire_index_rapports, verifier_rapports
 from app.ingestion.senat import (
     URL_TEXTE_PDF as SENAT_URL_TEXTE_PDF,
     SenatOpenDataClient,
+    auteur_amendement_senat,
     parse_scrutin_senat,
-    session_pour,
 )
 from app.ingestion.senateurs import (
     build_senateurs,
@@ -98,6 +98,7 @@ from app.ingestion.normalize import (
     est_sous_amendement,
     est_texte_procedural,
     est_vote_de_conduite_de_seance,
+    nature_texte,
     numero_amendement,
     numero_amendement_parent,
     titre_court,
@@ -125,7 +126,6 @@ from app.schemas import (
     DispositifTexte,
     Dossier,
     ExposeMotifs,
-    Initiative,
     MiseAJourDossier,
     PositionGroupe,
     QuestionsAmendement,
@@ -325,12 +325,6 @@ def _positions_documentees(
     return retenus
 
 
-def _dedupe_sources(sources: list[SourceOfficielle]) -> list[SourceOfficielle]:
-    # Même règle que la composition des documents du dossier : une URL, une
-    # entrée, la première vue gagne (`app.domain.sources`).
-    return dedupe_sources(sources)
-
-
 IndexAmendements = dict[tuple[str, str], list[AmendementEnrichi]]
 
 
@@ -343,6 +337,12 @@ def _amendement_from_scrutin(
     ambiguïté ; sinon absents (§2.5 : on n'invente pas). Quand l'archive des
     amendements est disponible, on attache le **contenu** (dispositif), l'exposé
     sommaire (côté auteur, attribué) et l'article visé.
+
+    ⚠️ L'auteur est cherché avec DEUX règles, car les deux chambres écrivent le
+    même fait autrement : l'Assemblée « de M. X », le Sénat « présenté par
+    M. X ». La règle sénatoriale n'intervient qu'en repli, donc elle ne peut pas
+    changer ce que l'AN donnait déjà. Sans ce repli, `auteur` restait toujours
+    `None` sur les amendements du Sénat.
     """
     numero = numero_amendement(scrutin.objet)
     cible = dispositif = expose = None
@@ -360,7 +360,10 @@ def _amendement_from_scrutin(
         id=scrutin.id,
         numero=numero,
         objet=scrutin.objet,
-        auteur=auteur_amendement(scrutin.objet),
+        auteur=(
+            auteur_amendement(scrutin.objet)
+            or auteur_amendement_senat(scrutin.objet)
+        ),
         sort="adopte" if scrutin.statut.value == "adopte" else "rejete",
         cible=cible,
         dispositif=dispositif,
@@ -474,7 +477,9 @@ def build_dossier(
         mise_a_jour=None,
         scrutins=[ScrutinResume.from_scrutin(s) for s in votes_texte],
         amendements=_structurer_amendements(votes_amendement, index_amendements),
-        sources=_dedupe_sources(sources),
+        # Une URL, une entrée, la première vue gagne — même règle que la
+        # composition des documents du dossier (`app.domain.sources`).
+        sources=dedupe_sources(sources),
         # Événement autonome (motion de censure, déclaration) : vrai seulement si
         # AUCUN des votes du dossier ne se rattache à un texte. Un dossier qui a
         # reçu ne serait-ce qu'un vote sur un texte est un dossier de texte.
@@ -574,10 +579,10 @@ def _merge_avec_existant(prev: Dossier, incoming: Dossier) -> Dossier:
     # `scrutin`** : reprendre les entrées composées d'un run précédent les
     # ferait survivre à la disparition de leur document.
     if any(s.type == "texte" for s in incoming.sources):
-        incoming.sources = _dedupe_sources(incoming.sources)
+        incoming.sources = dedupe_sources(incoming.sources)
     else:
         anciennes = [s for s in prev.sources if s.type == "scrutin"]
-        incoming.sources = _dedupe_sources(incoming.sources + anciennes)
+        incoming.sources = dedupe_sources(incoming.sources + anciennes)
     # Résumé : le gabarit est déterministe et reflète les faits à jour, donc on
     # garde la version fraîche. On ne préserve QUE le résumé relu/édité par un
     # humain (le travail éditorial ne doit pas être écrasé par une régénération).
@@ -988,7 +993,13 @@ class SyncJob:
         ref = reference_senat(texte)
         if ref is None:
             return False
-        projet = "projet de loi" in fold(dossier.titre_officiel)
+        # Même lecture de la nature que partout ailleurs (`nature_texte`, liste
+        # fermée en TÊTE de titre). Un simple `"projet de loi" in titre`
+        # attraperait aussi un titre qui ne fait que *citer* un projet de loi,
+        # et choisirait alors le mauvais préfixe d'URL.
+        projet = (nature_texte(dossier.titre_officiel) or "").startswith(
+            "Projet de loi"
+        )
         for url in urls_pdf_senat(ref, projet=projet):
             pdf_senat = await self._client.download_texte_pdf(url)
             if not pdf_senat:

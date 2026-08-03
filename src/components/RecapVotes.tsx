@@ -1,25 +1,11 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { colors, mono, radius, spacing, typography } from '@/theme';
 import { RecapMensuel } from '@/types';
+import { libelleMoisAnnee } from '@/utils/format';
 
 interface Props {
   recap: RecapMensuel;
 }
-
-const MOIS = [
-  'Janvier',
-  'Février',
-  'Mars',
-  'Avril',
-  'Mai',
-  'Juin',
-  'Juillet',
-  'Août',
-  'Septembre',
-  'Octobre',
-  'Novembre',
-  'Décembre',
-];
 
 /**
  * Récapitulatif du dernier mois **actif** à l'Assemblée (le bloc « Summary »
@@ -28,7 +14,7 @@ const MOIS = [
  * Purement descriptif — un décompte, aucun jugement (§7.8).
  */
 export function RecapVotes({ recap }: Props) {
-  const libelleMois = `${MOIS[recap.mois - 1] ?? recap.mois} ${recap.annee}`;
+  const libelleMois = libelleMoisAnnee(recap.annee, recap.mois);
 
   const cells = [
     { icon: '✓', label: 'Adoptés', value: recap.adoptes, color: colors.adopte },

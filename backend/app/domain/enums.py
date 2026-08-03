@@ -120,11 +120,3 @@ class TypeSource(str, Enum):
     scrutin = "scrutin"
     debats = "debats"
     amendements = "amendements"
-
-
-class StatutRevue(str, Enum):
-    """Statut de la revue humaine d'un résumé (§4.6 du MVP)."""
-
-    publie = "publie"          # validé, affiché dans l'app
-    en_attente = "en_attente"  # en file de revue humaine
-    rejete = "rejete"          # bloqué par un garde-fou / relecteur

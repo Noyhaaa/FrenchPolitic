@@ -280,13 +280,6 @@ export function estVoteSousAmendement(objet: string): boolean {
   return plier(objet).includes('sous-amendement');
 }
 
-/** Titre compact d'un amendement : « Amendement n° 80 » (ou l'objet complet
- * quand le numéro n'a pas pu être identifié — on n'invente pas, §2.5). */
-export function titreAmendement(a: Amendement, sous = false): string {
-  if (!a.numero) return a.objet;
-  return `${sous ? 'Sous-amendement' : 'Amendement'} n° ${a.numero}`;
-}
-
 /**
  * Partie descriptive de l'objet officiel, à afficher sous le titre compact.
  * Évite de répéter « l'amendement n° X de M. Y » (déjà porté par le titre et
@@ -378,13 +371,38 @@ export function pointsDispositif(dispositif: string): string[] {
   return points.map((p) => p.replace(RE_POINT, '').trim()).filter(Boolean);
 }
 
+/** Première lettre en capitale — `toLocaleDateString('fr-FR')` rend les mois en
+ *  minuscules, alors qu'ils ouvrent un en-tête ou un libellé de période. */
+export function capitale(texte: string): string {
+  return texte.charAt(0).toUpperCase() + texte.slice(1);
+}
+
 /** « Juillet 2026 » — en-tête de mois du fil de votes d'un député. */
 export function moisAnnee(iso: string): string {
-  const label = new Date(iso).toLocaleDateString('fr-FR', {
-    month: 'long',
-    year: 'numeric',
-  });
-  return label.charAt(0).toUpperCase() + label.slice(1);
+  return capitale(
+    new Date(iso).toLocaleDateString('fr-FR', {
+      month: 'long',
+      year: 'numeric',
+    }),
+  );
+}
+
+/**
+ * « Juillet 2026 » à partir d'une année et d'un mois **1–12** (le récap mensuel
+ * les sert ainsi, pas en ISO).
+ *
+ * Un mois hors bornes n'est pas « corrigé » silencieusement : `new Date` le
+ * ferait déborder sur l'année suivante et afficherait un mois que la source ne
+ * dit pas (§2.5). On rend alors le nombre brut, comme avant.
+ */
+export function libelleMoisAnnee(annee: number, mois: number): string {
+  if (mois < 1 || mois > 12) return `${mois} ${annee}`;
+  return capitale(
+    new Date(annee, mois - 1, 1).toLocaleDateString('fr-FR', {
+      month: 'long',
+      year: 'numeric',
+    }),
+  );
 }
 
 /**

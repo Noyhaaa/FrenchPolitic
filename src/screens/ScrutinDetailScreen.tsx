@@ -25,6 +25,7 @@ import {
   OfflineBanner,
   QuestionsAmendementCard,
   ResultBar,
+  segmentsMotionCensure,
   SectionCard,
   SourceGrid,
   StatusBadge,
@@ -40,16 +41,10 @@ import {
   libelleScrutin,
   statutLabel,
 } from '@/utils/format';
+import { SORT_UI } from '@/constants/sorts';
 import type { RootStackParamList } from '@/navigation/types';
 
 type DetailRoute = RouteProp<RootStackParamList, 'ScrutinDetail'>;
-
-/** Sort d'un (sous-)amendement → libellé + couleur (jamais la couleur seule §8). */
-const SORT_SOUS = {
-  adopte: { label: 'Adopté', color: colors.adopte },
-  rejete: { label: 'Rejeté', color: colors.contre },
-  retire: { label: 'Retiré', color: colors.textTertiary },
-} as const;
 
 /** Un groupe a-t-il un détail nominatif à montrer ? (§5.2, absent = masqué §2.5) */
 function aDesVotants(g: PositionGroupe): boolean {
@@ -306,16 +301,10 @@ export function ScrutinDetailScreen() {
                       dirait le contraire du résultat. */}
                   <ResultBar
                     height={6}
-                    segments={[
-                      { value: resultat.pour, color: colors.pour },
-                      {
-                        value: Math.max(
-                          0,
-                          scrutin.suffragesRequis - resultat.pour,
-                        ),
-                        color: colors.nonVotant,
-                      },
-                    ]}
+                    segments={segmentsMotionCensure(
+                      resultat.pour,
+                      scrutin.suffragesRequis,
+                    )}
                   />
                   <View style={styles.barScale}>
                     <Text style={styles.barScaleText}>0</Text>
@@ -567,7 +556,7 @@ export function ScrutinDetailScreen() {
           >
             <View style={styles.sousListe}>
               {scrutin.sousAmendements.map((sa) => {
-                const s = SORT_SOUS[sa.sort];
+                const s = SORT_UI[sa.sort];
                 // Extrait factuel (partie descriptive de l'objet), jamais
                 // reformulé — restitué tel quel si pas de découpe nette (§2.5).
                 const texte = detailObjetAmendement(sa) || sa.objet;

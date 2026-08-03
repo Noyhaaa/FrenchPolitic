@@ -93,6 +93,29 @@ MIGRATIONS: tuple[tuple[str, str], ...] = (
         "depute.commission",
         "ALTER TABLE depute ADD COLUMN IF NOT EXISTS commission TEXT",
     ),
+    # Table `utilisateur` : la première du schéma qui ne vienne pas de l'open
+    # data. `create_all` la créerait aussi, mais il n'est joué qu'au premier
+    # démarrage d'une base neuve — une base déjà peuplée ne le rejoue jamais.
+    # L'énoncé est donc ici, comme le reste de ce qui manque après un git pull.
+    (
+        "table utilisateur",
+        "CREATE TABLE IF NOT EXISTS utilisateur ("
+        " id VARCHAR(36) PRIMARY KEY,"
+        " email VARCHAR(320) NOT NULL,"
+        " mot_de_passe_hash VARCHAR(128) NOT NULL,"
+        " prenom TEXT NOT NULL,"
+        " nom TEXT NOT NULL,"
+        " preferences JSONB NOT NULL DEFAULT '{}'::jsonb,"
+        " cree_le TIMESTAMPTZ NOT NULL DEFAULT now()"
+        ")",
+    ),
+    # L'e-mail est déjà écrit en minuscules par l'application : un index unique
+    # simple suffit, et il porte aussi la recherche à la connexion.
+    (
+        "index unique utilisateur.email",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_utilisateur_email "
+        "ON utilisateur (email)",
+    ),
 )
 
 

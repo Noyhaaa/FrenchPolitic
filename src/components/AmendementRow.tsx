@@ -11,6 +11,7 @@ import {
 
 import { colors, radius, serifItalic, spacing, typography } from '@/theme';
 import type { Amendement } from '@/types';
+import { SORT_UI } from '@/constants/sorts';
 import {
   cibleCourte,
   detailObjetAmendement,
@@ -25,16 +26,6 @@ if (
 ) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
-
-const SORT_UI = {
-  adopte: { label: 'Adopté', color: colors.adopte, fond: colors.adopteSoft },
-  rejete: { label: 'Rejeté', color: colors.contre, fond: colors.rejeteSoft },
-  retire: {
-    label: 'Retiré',
-    color: colors.textTertiary,
-    fond: colors.surfaceMuted,
-  },
-} as const;
 
 /** Au-delà de ce nombre de lignes, l'exposé sommaire est replié (§8 : on ne
  *  noie pas la lecture sous un pavé — « Lire la suite » donne le texte entier). */

@@ -3,8 +3,8 @@
 « Le modèle ne connaît rien : il reformule uniquement un contexte qu'on lui
 fournit. » On rassemble ici les **faits officiels** d'un dossier, découpés en
 passages identifiés par un `source_id` — la SEULE source autorisée pour le
-résumé. Ces passages servent au gabarit déterministe (Phase 2) comme, demain,
-à un LLM (le `to_prompt_block` alimente alors le prompt).
+résumé. Ces passages alimentent le gabarit déterministe (`app.ai.gabarit`), qui
+compose le résumé, et leur ensemble de `source_id` sert de garde-fou d'ancrage.
 """
 from __future__ import annotations
 
@@ -31,10 +31,6 @@ class RagContext:
 
     def a(self, source_id: str) -> bool:
         return any(p.source_id == source_id for p in self.passages)
-
-    def to_prompt_block(self) -> str:
-        """Bloc texte injecté dans le prompt (chaque passage étiqueté)."""
-        return "\n\n".join(f"[{p.source_id}]\n{p.contenu}" for p in self.passages)
 
 
 _STATUT_FR = {"adopte": "adopté", "rejete": "rejeté", "en_cours": "en cours d'examen"}

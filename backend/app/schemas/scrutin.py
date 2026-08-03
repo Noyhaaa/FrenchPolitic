@@ -107,11 +107,6 @@ class SourceOfficielle(CamelModel):
     url: str
 
 
-class ChangementTexte(CamelModel):
-    avant: str
-    apres: str
-
-
 class PhaseScrutin(CamelModel):
     """Une étape de la trajectoire du texte au Parlement (frise de la fiche).
 
@@ -249,7 +244,6 @@ class ResumeScrutin(CamelModel):
     contexte: str | None = None
     objectif: str | None = None
     historique: str | None = None
-    changement: ChangementTexte | None = None
     public_concerne: list[str] = []
     confiance: NiveauConfiance
     relu_par_humain: bool

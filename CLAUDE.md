@@ -343,14 +343,100 @@ premier chargement ; ensuite le cache prend le relais hors-ligne. (L'ancien mock
 `src/data/mockScrutins.ts` a été supprimé — la référence de données fictives est
 désormais le seed backend `backend/app/data/seed.py`.)
 
-Plus deux écrans « à venir » (`AssistantScreen`, `ProfileScreen`) présents dans la
-tab bar mais hors périmètre V1 (§2.3 / §2.4).
+7. **Parcours d'accueil** (`OnboardingScreen`, cinq étapes portées par
+   `OnboardingBienvenue` / `Compte` / `Themes` / `Departement` / `Alertes`) —
+   affiché au **premier lancement** (flag `pref:onboarding-vu`, lu dans la même
+   barrière que les polices et l'accueil : le splash couvre l'attente, rien ne
+   clignote). Il est atteint ensuite par « Créer un compte » depuis le Profil ;
+   il n'est **pas rejouable** pour lui-même — la rangée « Revoir la
+   présentation » a été retirée, tout ce qu'elle réglait (thèmes, département,
+   alertes) étant modifiable directement dans le Profil. `revoirOnboarding` reste
+   exposé par `ProfilContext` mais n'a plus d'appelant. ⚠️ **Rien n'y est
+   obligatoire** :
+   « Passer » est présent à chaque étape et entre directement dans l'app, et le
+   **compte lui-même est facultatif** — laissé vide, le formulaire se passe et
+   tout fonctionne, les préférences restant sur l'appareil. Le compte
+   (`POST /inscription`, prénom · nom · e-mail · mot de passe — **ni téléphone
+   ni date de naissance**, que rien n'utiliserait) ne sert qu'à **retrouver ses
+   préférences sur un autre appareil** ; jeton JWT rangé en AsyncStorage,
+   session vérifiée au lancement (401 → jeton oublié, préférences locales
+   conservées). ⚠️ La maquette annonçait les votes « **en direct** » et des
+   **alertes** : l'ingestion est par lots et aucune notification n'est envoyée
+   (hors périmètre V1) — l'étape « alertes » **retient un choix** sans demander
+   la permission système ni rien promettre (§2.5). ⚠️ Elle proposait aussi
+   10 **régions** : rien en base ne relie une région à un élu, la liste affichée
+   est donc celle des **départements dérivés de l'annuaire réel**
+   (`departementDe`, ce qui précède la virgule de `circonscription`), sans
+   aucune liste écrite en dur. Les **thèmes** proposés sont ceux qui existent
+   réellement (`GET /themes`, avec leurs décomptes). ⚠️ Le choix de thèmes
+   **ordonne, il ne filtre pas** : `ordonnerSections` remonte les rangées
+   suivies en tête de l'accueil et n'en masque **aucune** — cacher un vote parce
+   qu'il n'a pas été coché serait exactement ce que §2.5 interdit ; une mention
+   (« Vos thèmes en premier ») dit ce qui a été fait à l'ordre, faute de quoi il
+   se lirait comme celui de la source. L'accent du parcours est la **pervenche
+   de la marque**, jamais le rouge de la maquette (cf. « Pièges »).
+8. **Profil** (`ProfileScreen`) : un **bandeau de ciel étoilé** (`ProfilCiel`,
+   même grammaire constellation que `DecrypteSplash`) d'où déborde le
+   **médaillon** (initiales sur dégradé pervenche, ou pictogramme sans compte),
+   puis le nom, le département, et l'**anneau de couverture**
+   (`AnneauCouverture`). Le reste tient en **trois onglets** (`BarreOnglets`) :
+   *Infos* (compte + département), *Thèmes*, *Réglages* (alertes, déconnexion,
+   mentions). Se déconnecter **ne vide pas** les préférences — elles décrivent ce
+   que ce lecteur suit sur cet appareil, pas sa session. Le **département se
+   choisit sur place** (`SelecteurDepartement` : un calque interne à l'écran, pas
+   un `Modal`, qui réutilise `OnboardingDepartement` tel quel — donc la même
+   liste dérivée de l'annuaire aux deux endroits). `ConnexionScreen` est atteint
+   d'ici **et** du parcours d'accueil ; il n'a **pas** de « mot de passe
+   oublié », rien n'envoyant de courrier (§2.5).
+   ⚠️ L'**anneau n'est pas un score du lecteur** : la maquette `profil_v4` posait
+   là un « Civic Score 78/100 », que rien ne peut calculer — aucun historique de
+   lecture n'est conservé, et une note sur la personne n'aurait aucune source. Ce
+   qui est affiché est de l'**arithmétique pure sur les décomptes de
+   `GET /themes`** : la part des dossiers publiés que rassemblent les thèmes
+   suivis. Le chiffre n'est **jamais nu** — l'écran l'accompagne toujours de sa
+   phrase (« Vos thèmes couvrent N dossiers sur M publiés »), sans quoi un
+   pourcentage se lirait comme une note ; corpus indisponible → anneau et phrase
+   **absents**, jamais « 0 % » (§2.5). Sont tombés de la même maquette, faute de
+   source : l'onglet « Activité » entier (activité récente, graphe hebdomadaire,
+   « +31 % vs semaine passée »), les compteurs « Suivis / Votes lus /
+   Amendements », les badges « Citoyen vérifié » / « Champion civique », les
+   rangées Téléphone et Date de naissance (jamais collectées), les quatre
+   bascules de notifications (rien n'émet), Langue / Confidentialité / Modifier
+   le profil, et la ligne de version. Le rouge `#FF3040` de la maquette (onglet
+   actif, CTA, déconnexion) est partout remplacé par la pervenche : c'est
+   `colors.rejete`, un onglet actif en rouge se lirait comme un verdict de vote.
+   ⚠️ Le scintillement du ciel **n'anime aucune prop SVG** : les 32 étoiles sont
+   statiques, réparties en 4 calques dont seule l'`opacity` de la `View` respire,
+   en `useNativeDriver: true`. Animer l'opacité des `Circle` (ce que fait
+   `DecrypteSplash`, sur un écran de lancement bref) impose le driver JS — sur un
+   onglet jamais démonté, le thread JS sature et les taps comme la navigation se
+   figent. Vécu.
+
+Plus un écran « à venir » (`AssistantScreen`) présent dans la tab bar mais hors
+périmètre V1 (§2.3 / §2.4).
 
 **Backend** — API FastAPI servant les endpoints du cœur (`/accueil` — écran
 d'accueil complet en une réponse —, `/dossiers`, `/dossiers/{id}`,
 `/scrutins/{id}`, `/recherche`, `/recap` — activité du dernier mois actif)
 et ceux des **parlementaires** (`/deputes?chambre=`, `/deputes/{id}`,
 `/deputes/{id}/votes` — historique paginé —, `/groupes?chambre=`).
+S'y ajoutent les **seules écritures de l'API** — le **compte utilisateur**
+(`POST /inscription`, `POST /connexion`, `GET /moi`, `PUT /moi/preferences`,
+`app/api/routes/comptes.py`) et la seule table qui ne vienne pas de l'open data
+(`utilisateur`). Trois règles y sont tenues : **minimisation** (prénom, nom,
+e-mail, empreinte bcrypt — `Compte`, le seul modèle exposé, ne porte jamais
+l'empreinte) ; **un seul échec de connexion** (e-mail inconnu et mot de passe
+faux renvoient le même 401 avec le même message — les distinguer dirait quelles
+adresses ont un compte ; l'e-mail est stocké et comparé en minuscules) ; et
+`JWT_SECRET` **obligatoire hors dev** (`app/security.py` refuse de démarrer
+sans lui ailleurs qu'en `APP_ENV=dev`, où un secret **éphémère** est tiré par
+processus — les sessions ne survivent alors pas à un redémarrage). Le compte est
+**facultatif** : toutes les routes de lecture restent publiques (un test le
+vérifie), et il ne sert qu'à retrouver ses **préférences** (thèmes, département,
+alerte) d'un appareil à l'autre — jamais d'historique de lecture. Les comptes
+suivent `REPOSITORY_BACKEND` comme le reste : en `memory`, **un compte créé est
+perdu à l'arrêt du serveur**. `UtilisateurRepository` est un protocole
+**séparé** de `DossierRepository`, qui est purement lecture.
 Le détail d'un dossier reste
 **léger** (liste de `ScrutinResume`) ; le détail complet d'un vote — groupes et
 **vote nominatif** (noms des députés, résolus via l'annuaire acteurs de l'archive
@@ -473,10 +559,12 @@ distingue dans la liste. Le
 uniquement sur les faits des scrutins (nature, trajectoire, résultat du vote
 décisif, positions des groupes, comptes d'amendements), **sans LLM ni clé API** :
 5 phrases sourcées, chacune portant son `source_id`, qui passent les **garde-fous
-éditoriaux** (§4.4) par construction. Un LLM (AnthropicLLM derrière `LLMClient`)
-pourra fluidifier le style plus tard sans changer ce contrat ; la fusion
-inter-runs ne préserve un résumé que s'il a été **relu par un humain**
-(`relu_par_humain`), sinon elle régénère. **Exposé des motifs** (le « pourquoi »
+éditoriaux** (§4.4) par construction. ⚠️ L'échafaudage qui permettait de faire
+produire ce résumé par un LLM (`ResumeGenerator`, prompts, file de revue) a été
+**supprimé** : la doctrine a tranché contre, un modèle distordant les faits de
+façon invisible aux garde-fous lexicaux. La fusion inter-runs ne préserve un
+résumé que s'il a été **relu par un humain** (`relu_par_humain`), sinon elle
+régénère. **Exposé des motifs** (le « pourquoi »
 du texte) récupéré du **PDF officiel du texte déposé** (`app/ingestion/textes_an.py`
 — URL dérivée de l'`uid` du document, extraction `pypdf`, dépôt initial d'abord ;
 **repli Sénat** `app/ingestion/textes_senat.py` quand le texte AN n'est qu'une
@@ -511,7 +599,8 @@ Préservée entre runs comme l'exposé (un run sans archive ne l'efface pas), et
 rattrapable seule par `python -m app.ingestion.initiatives`.
 Pas besoin de Légifrance pour ça (option a ; la
 neutralisation par LLM — option b — viendra avec un LLM assez fiable). **LLM local
-(Ollama, `qwen3:14b`) branché sur trois tâches vérifiables** : (1) la
+(Ollama, `mistral-small:24b` — `LLM_MODEL`) branché sur trois tâches
+vérifiables** : (1) la
 **classification de thème** (`app/ai/theme.py`) — les dossiers « Autre » de
 l'heuristique reçoivent un thème choisi dans la **liste fermée**, sortie
 hors-liste/verbeuse rejetée (repli) ; (1bis) les **publics concernés**
@@ -768,7 +857,8 @@ Pas de suite de tests côté frontend. Vérification = `tsc --noEmit` + `expo ex
 
 ```bash
 cd backend && source .venv/bin/activate   # venv Python 3.12 (indispensable)
-python -m app.db.migrations               # colonnes ajoutées au modèle (additif, idempotent)
+pip install -e ".[dev]"                   # après un pull qui change pyproject (bcrypt, pyjwt)
+python -m app.db.migrations               # colonnes ET tables ajoutées au modèle (additif, idempotent)
 python -m app.ingestion.run --limit 300   # ingère l'open data AN + Sénat dans Postgres
 python -m app.ingestion.senat --limit 40  # sénateurs + scrutins du Sénat seuls (~10 s)
 python -m app.ingestion.deputes           # référentiel députés + votes nominatifs seuls
@@ -791,15 +881,21 @@ système (sans les deps) est utilisé et échoue (`ModuleNotFoundError`).
 ## Architecture du code
 
 ```
-App.tsx                      Racine : GestureHandlerRootView + SafeAreaProvider + RootNavigator
+App.tsx                      Racine : GestureHandlerRootView + SafeAreaProvider + ProfilProvider
+                             + RootNavigator (monté après polices + accueil + profil local)
 src/
   theme/                     Design system (source unique de vérité visuelle)
     colors.ts                Palette sombre éditoriale (prototype new_screens), statuts, couleurs de vote
+                             + états de formulaire (⚠️ distincts de adopte/rejete, cf. « Pièges »)
     spacing.ts               Échelle d'espacement + rayons
     typography.ts            Échelle typographique (serif titres · sans corps · mono métadonnées)
   types/index.ts             Modèle de données (miroir des schémas backend, §5.3 MVP)
-  api/                       Client HTTP : config (URL), client (fetch+timeout), dossiers+scrutins,
-                             deputes, cache offline
+  api/                       Client HTTP : config (URL), client (apiGet/apiPost/apiPut + timeout),
+                             dossiers+scrutins, deputes, comptes, cache offline
+  storage/preferences.ts     Choix du lecteur sur l'appareil (thèmes, département, alerte, jeton)
+                             — distinct de api/cache.ts, qui garde des données publiques
+  session/ProfilContext.tsx  Session + préférences : le seul provider applicatif de l'app
+  utils/validation.ts        Règles de saisie du compte (miroir de app/schemas/utilisateur.py)
   hooks/                     useDossiers / useDossier / useScrutin / useRecherche + useThemes
                              + useDeputes / useDepute (chargement + cache + états)
   constants/themes.ts        Emoji + teintes par thème
@@ -811,12 +907,16 @@ src/
                              (⚠️ plus de `phasesNavette` : la trajectoire vient de l'API)
   utils/periodes.ts          Groupage/tri par période de la chronologie (écran Dossiers)
   components/                Composants réutilisables (DossierCard, StateViews…)
+                             + formulaires : BoutonPrincipal, ChampTexte, Interrupteur, Chip
+                               (partagé avec DeputesScreen), ProgressionEtapes
+                             + les 5 étapes Onboarding{Bienvenue,Compte,Themes,Departement,Alertes}
   screens/                   Un écran par fichier (barrel dans index.ts)
   navigation/
     types.ts                 Types de navigation (RootStack + MainTabs)
     MainTabs.tsx             Bottom tabs : Accueil · Recherche (→ ExplorerScreen) · Députés · Assistant · Profil
     RootNavigator.tsx        Stack : MainTabs + DossierDetail + ScrutinDetail + DeputeDetail
                              + Dossiers (résultats) + Glossaire + GlossaireTerme
+                             + Onboarding (route initiale au 1er lancement) + Connexion
 ```
 
 Flux : `RootNavigator` → `MainTabs` (tabs) → `DossierDetail` puis `ScrutinDetail`
@@ -990,12 +1090,22 @@ alors que le parlementaire en demandait le rejet —, `contreSonGroupe?`). Types
 `sous_amendement`), `NiveauConfiance`. Ce modèle est le **contrat de l'API** (miroir
 camelCase des schémas Pydantic backend, à répercuter des deux côtés).
 
+Côté **compte** (miroir de `backend/app/schemas/utilisateur.py`) : `Preferences`
+(`themes` — ils **ordonnent** l'accueil, ils ne filtrent rien —, `departement`
+`string | null`, `alertes`), `Compte` (jamais de mot de passe) et
+`SessionOuverte` (`jeton` + `compte`). C'est **tout** ce qu'on stocke du
+lecteur : ni historique de lecture, ni recherches, ni téléphone, ni date de
+naissance — ces deux derniers, présents dans la maquette, n'auraient aucun usage.
+
 ## Prochaines étapes (backlog priorisé, cf. §10 MVP)
 
-- **Backend Phase 2** : brancher la génération réelle des résumés (RAG pgvector +
-  client LLM Anthropic derrière `LLMClient`) au niveau du **dossier**, puis publier
-  via les garde-fous / file de revue (déjà en place). Objectif : remplir le résumé
-  aujourd'hui vide des dossiers Postgres.
+- **Afficher le résumé neutre déjà produit.** Le gabarit remplit
+  `ResumeScrutin.resume` (5 phrases sourcées) et **l'app ne le rend nulle part** :
+  `DossierDetailScreen` n'affiche que `contexte` / `objectif` / `historique`, que
+  seul le seed remplit. Sur données Postgres, la section « résumé » est donc vide
+  alors que tout `app/ai/` existe pour la remplir. C'est un manque de câblage
+  d'affichage, pas un manque de données. ⚠️ Ne PAS y répondre en branchant un LLM :
+  cf. la doctrine ci-dessus.
 - **Enrichissement ingestion** : Légifrance/PISTE pour le **texte consolidé** des
   dossiers (ce que la loi change dans le code — l'**exposé des motifs** est déjà
   couvert via le PDF AN, cf. `textes_an.py`, et le **contenu des amendements** via
@@ -1037,8 +1147,32 @@ camelCase des schémas Pydantic backend, à répercuter des deux côtés).
 ## Pièges à éviter
 
 - Le suivi de dossier (badge « mis à jour ») est **intégré en V1** — c'était une
-  levée assumée du verrou §2.4. Restent hors périmètre V1 : notifications push,
-  suivi de député, comparateur, assistant à champ libre, prédiction d'impact.
+  levée assumée du verrou §2.4. Le **compte utilisateur** l'est aussi (parcours
+  d'accueil + `POST /inscription`), mais **facultatif** : il ne conditionne
+  aucune lecture. Restent hors périmètre V1 : notifications push, suivi de
+  député, comparateur, assistant à champ libre, prédiction d'impact.
+- ⚠️ **`colors.rejete` (#FF3040) veut dire « rejeté »**, ce n'est pas un accent
+  d'interface. La maquette `onboarding-v3` en faisait sa couleur d'action
+  (boutons, points de progression, sélection) : transposé tel quel, un CTA se
+  serait lu comme un verdict de vote. L'accent de l'app est **`colors.brand`**
+  (pervenche). Même raison pour les **états de formulaire**, qui ont leurs
+  propres tokens (`valide`, `invalide`, `champ*`) : un champ correctement rempli
+  n'est pas un texte adopté.
+- ⚠️ **Une préférence ordonne, elle ne filtre jamais.** Les thèmes choisis
+  remontent les rangées de l'accueil (`ordonnerSections`) et n'en masquent
+  aucune — cacher un vote parce qu'il n'a pas été coché serait précisément ce
+  que §2.5 interdit. Et l'écran **dit** que l'ordre a été modifié, sans quoi il
+  se lirait comme celui de la source.
+- ⚠️ **Ne rien promettre que l'app ne fasse.** La maquette annonçait les votes
+  « en direct » (l'ingestion est par lots) et des alertes push (aucune n'est
+  envoyée, hors périmètre V1) : les deux libellés ont été réécrits, et l'étape
+  « alertes » ne demande **pas** la permission système — elle retient un choix
+  et le dit. Ne pas rebrancher `expo-notifications` tant que rien n'émet.
+- ⚠️ **Le compte ne collecte que ce qui sert** : prénom, nom, e-mail, mot de
+  passe. Le téléphone et la date de naissance de la maquette n'ont été repris
+  nulle part, et `Compte` n'expose jamais l'empreinte du mot de passe. À la
+  connexion, e-mail inconnu et mot de passe faux doivent garder le **même**
+  401 et le **même** message.
 - Ne pas introduire d'adjectifs évaluatifs ou de jugements dans les données seed ou
   les libellés (« ambitieux », « insuffisant », « controversé »… interdits, §4.3).
   Cela vaut aussi pour le label de `miseAJour` (rester factuel).
@@ -1071,6 +1205,9 @@ camelCase des schémas Pydantic backend, à répercuter des deux côtés).
   et tout indice de division y disent le contraire du fait — la comparer au
   **seuil** (`suffragesRequis`) est la seule lecture juste. Vécu : la Q3
   annonçait « rejeté par 0 voix contre 267 » sur les 23 motions.
+- ⚠️ **`JWT_SECRET` absent en dev = secret éphémère** : les sessions ne
+  survivent pas à un redémarrage d'`uvicorn`, et il faut se reconnecter. Ce
+  n'est pas un bug. Hors dev, l'application refuse de démarrer sans lui.
 - ⚠️ **Pas d'Alembic** : ajouter une colonne à `db/models.py` ne suffit pas, la
   base existante ne la verra jamais (`create_all` ne modifie pas une table). Il
   faut un énoncé dans `app/db/migrations.py` (additif et idempotent).

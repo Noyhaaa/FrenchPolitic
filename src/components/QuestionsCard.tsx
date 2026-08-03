@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { colors, radius, spacing, typography } from '@/theme';
 import type { ArgumentGroupe, PositionVote, QuestionsCitoyennes } from '@/types';
 import { libelleScrutin, positionLabel } from '@/utils/format';
+import { QARow, stylesQA } from './QARow';
 
 interface Props {
   questions: QuestionsCitoyennes;
@@ -20,45 +21,6 @@ const COULEUR_SENS: Record<PositionVote, string> = {
   abstention: colors.abstention,
   non_votant: colors.textSecondary,
 };
-
-/** Pastille numérotée (1..4) devant chaque question. */
-function Numero({ n }: { n: number }) {
-  return (
-    <View style={styles.numero}>
-      <Text style={styles.numeroTexte}>{n}</Text>
-    </View>
-  );
-}
-
-/** Une ligne question + réponse (Q1/Q3/Q4). */
-function QARow({
-  n,
-  question,
-  reponse,
-  children,
-}: {
-  n: number;
-  question: string;
-  reponse?: string;
-  children?: ReactNode;
-}) {
-  return (
-    <View style={styles.qrow}>
-      <Numero n={n} />
-      <View style={styles.qbody}>
-        <Text style={styles.question}>{question}</Text>
-        {children ??
-          (reponse ? (
-            <Text style={styles.reponse}>{reponse}</Text>
-          ) : (
-            <Text style={[styles.reponse, styles.indispo]}>
-              Information non disponible.
-            </Text>
-          ))}
-      </View>
-    </View>
-  );
-}
 
 /**
  * « Le vote en 4 questions » — l'entrée de compréhension de la fiche dossier
@@ -171,7 +133,7 @@ export function QuestionsCard({ questions, evenementAutonome }: Props) {
                 séance »). */}
           </>
         ) : (
-          <Text style={[styles.reponse, styles.indispo]}>
+          <Text style={[stylesQA.reponse, stylesQA.indispo]}>
             Information non disponible.
           </Text>
         )}
@@ -197,7 +159,7 @@ export function QuestionsCard({ questions, evenementAutonome }: Props) {
         <QARow n={n} question="Qu'est-ce que ça change concrètement ?">
         {questions.changement ? (
           <>
-            <Text style={styles.reponse}>{questions.changement}</Text>
+            <Text style={stylesQA.reponse}>{questions.changement}</Text>
             {/* Le NOM du document, pas son lien : celui-ci vit dans « Les
                 documents du dossier » (§7.5). Mais lequel des trois a servi
                 change le sens de la phrase — « le texte voté » décrit ce qui
@@ -210,7 +172,7 @@ export function QuestionsCard({ questions, evenementAutonome }: Props) {
             ) : null}
           </>
         ) : (
-          <Text style={[styles.reponse, styles.indispo]}>
+          <Text style={[stylesQA.reponse, stylesQA.indispo]}>
             Information non disponible.
           </Text>
         )}
@@ -249,41 +211,6 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: colors.border,
     marginVertical: spacing.lg,
-  },
-  qrow: {
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  qbody: {
-    flex: 1,
-  },
-  numero: {
-    width: 26,
-    height: 26,
-    borderRadius: radius.pill,
-    backgroundColor: colors.brandSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  numeroTexte: {
-    ...typography.badge,
-    fontSize: 12,
-    color: colors.brand,
-  },
-  question: {
-    fontSize: 15,
-    lineHeight: 21,
-    fontWeight: '600',
-    color: colors.textPrimary,
-  },
-  reponse: {
-    marginTop: spacing.xs,
-    fontSize: 15,
-    lineHeight: 23,
-    color: colors.textSecondary,
-  },
-  indispo: {
-    fontStyle: 'italic',
   },
   ancre: {
     marginTop: spacing.xs,

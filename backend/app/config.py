@@ -23,17 +23,26 @@ class Settings(BaseSettings):
     # Choix de la source de données : "memory" (seed) ou "postgres" (ingéré).
     repository_backend: str = "memory"
 
-    # Branchées en Phase 1/2 (voir .env.example). Vides = mode mock.
+    # Base ingérée (voir .env.example). Vide = repository "memory" seul.
     database_url: str | None = None
-    an_opendata_base_url: str = "https://www.assemblee-nationale.fr/dyn/opendata"
-    legifrance_client_id: str | None = None
-    legifrance_client_secret: str | None = None
 
-    # Génération IA (Phase 2).
-    llm_provider: str = "mock"  # "mock" | "ollama" | (à venir) "anthropic"
-    llm_model: str = "claude-sonnet-5"  # ex. "mistral:latest" pour Ollama
+    # Génération IA. ⚠️ « mock » ne désigne pas un client : c'est la sentinelle
+    # « pas de LLM du tout », testée par les appelants avant qu'ils n'appellent
+    # `get_llm_client()` (cf. `app.ai.llm`). Seul « ollama » est implémenté —
+    # le résumé neutre, lui, n'est jamais produit par un modèle.
+    llm_provider: str = "mock"  # "mock" (= aucun LLM) | "ollama"
+    llm_model: str = "mistral-small:24b"
     llm_base_url: str = "http://localhost:11434"  # Ollama local
-    anthropic_api_key: str | None = None
+
+    # Comptes utilisateurs. Le secret signe les jetons de session : sans lui,
+    # aucun jeton émis ne peut être vérifié. Absent en dev → un secret éphémère
+    # est tiré au démarrage (les jetons ne survivent alors pas à un
+    # redémarrage, ce qui est le comportement attendu en local) ; absent
+    # ailleurs → l'application refuse de démarrer (cf. app.security).
+    jwt_secret: str | None = None
+    # Durée de validité d'un jeton (30 jours) : l'app mobile le garde et
+    # l'envoie à chaque requête de compte, il n'y a pas de rafraîchissement.
+    jwt_ttl_heures: int = 720
 
 
 settings = Settings()

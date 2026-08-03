@@ -26,10 +26,30 @@ import {
 } from '@/components';
 import { themeEmoji } from '@/constants/themes';
 import { useAccueil, useRecap } from '@/hooks';
-import { DossierListItem, VoteDisputeItem } from '@/types';
+import { useProfil } from '@/session/ProfilContext';
+import { DossierListItem, SectionTheme, ThemeScrutin, VoteDisputeItem } from '@/types';
 import type { RootStackParamList } from '@/navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
+
+/**
+ * Remonte les rangées des thèmes suivis, sans en retirer aucune.
+ *
+ * ⚠️ Le choix d'un lecteur **ordonne**, il ne filtre pas : masquer un texte
+ * parce qu'il n'est pas dans ses thèmes reviendrait à lui cacher un vote qui a
+ * bien eu lieu (§2.5). L'ordre relatif des rangées non choisies est celui de
+ * l'API, inchangé — un tri stable, pour que deux lancements donnent le même fil.
+ */
+export function ordonnerSections(
+  sections: SectionTheme[],
+  themesSuivis: ThemeScrutin[],
+): SectionTheme[] {
+  if (themesSuivis.length === 0) return sections;
+  const suivis = new Set<string>(themesSuivis);
+  const enTete = sections.filter((s) => suivis.has(s.theme));
+  const ensuite = sections.filter((s) => !suivis.has(s.theme));
+  return [...enTete, ...ensuite];
+}
 
 /** Hauteur de la barre de navigation superposée au hero (hors safe area). */
 const NAV_HEIGHT = 52;
@@ -107,6 +127,7 @@ export function HomeScreen() {
   const { data, loading, refreshing, offline, error, refresh, retry } =
     useAccueil();
   const { data: recap, refresh: refreshRecap } = useRecap();
+  const { preferences } = useProfil();
 
   const onPressDossier = useCallback(
     (dossier: DossierListItem) =>
@@ -179,6 +200,14 @@ export function HomeScreen() {
   }
 
   const accueil = data;
+  const sections = accueil
+    ? ordonnerSections(accueil.sections, preferences.themes)
+    : [];
+  // Une rangée choisie est-elle effectivement remontée ? Sinon on n'annonce
+  // rien : la mention doit décrire ce qui est à l'écran, pas l'intention.
+  const themesRemontes =
+    preferences.themes.length > 0 &&
+    sections.some((s) => preferences.themes.includes(s.theme));
 
   return (
     <View style={styles.container}>
@@ -229,7 +258,13 @@ export function HomeScreen() {
               </View>
             ) : null}
 
-            {accueil.sections.map((section) => (
+            {/* Dit ce qui vient d'être fait à l'ordre des rangées : sans cette
+                ligne, le lecteur prendrait cet ordre pour celui de la source. */}
+            {themesRemontes ? (
+              <Text style={styles.mentionOrdre}>Vos thèmes en premier</Text>
+            ) : null}
+
+            {sections.map((section) => (
               <TuilesRow
                 key={section.theme}
                 titre={`${themeEmoji[section.theme] ?? themeEmoji.Autre}  ${
@@ -284,6 +319,12 @@ const styles = StyleSheet.create({
     gap: spacing.xxl,
     paddingTop: spacing.xxl,
     paddingBottom: spacing.xxl,
+  },
+  mentionOrdre: {
+    ...typography.overline,
+    color: colors.brand,
+    paddingHorizontal: spacing.lg,
+    marginBottom: -spacing.md,
   },
   section: {
     gap: spacing.md,

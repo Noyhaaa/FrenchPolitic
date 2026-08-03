@@ -11,7 +11,6 @@ from app.ingestion.normalize import type_objet_vote
 from app.domain.sources import documents_du_dossier
 from app.schemas import (
     Amendement,
-    ChangementTexte,
     Depute,
     Dossier,
     EtatTexte,
@@ -510,10 +509,6 @@ SEED_DOSSIERS: list[Dossier] = [
             contexte="Les loyers ont augmenté plus vite que les revenus dans les grandes villes.",
             objectif="Limiter les hausses et rénover des logements abordables.",
             historique="Un encadrement existait déjà à titre expérimental depuis 2019.",
-            changement=ChangementTexte(
-                avant="Loyer libre lors d'un changement de locataire.",
-                apres="Hausse plafonnée à l'indice de référence.",
-            ),
             public_concerne=["Particuliers", "Entreprises", "Collectivités", "Associations"],
             # Les 4 questions citoyennes, ici pour que le backend `memory` —
             # celui sur lequel tournent les tests — exerce la partie de l'index

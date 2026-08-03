@@ -16,6 +16,7 @@ import { RootNavigator } from '@/navigation/RootNavigator';
 import { DecrypteSplash } from '@/components';
 import { amorcerAccueil } from '@/hooks';
 import { cache, fetchAccueil } from '@/api';
+import { ProfilProvider, useProfil } from '@/session/ProfilContext';
 
 // Durée minimale d'affichage du splash de lancement (ms) : l'animation
 // « chat-constellation » doit avoir le temps de s'allumer, même quand tout
@@ -27,6 +28,22 @@ const SPLASH_MIN_MS = 2400;
 const SPLASH_FADE_MS = 550;
 
 export default function App() {
+  return (
+    <ProfilProvider>
+      <Lancement />
+    </ProfilProvider>
+  );
+}
+
+/**
+ * Écran de lancement : le splash reste tant que les polices, l'accueil, le
+ * délai minimal ET le profil local (parcours déjà vu ? session valide ?) ne
+ * sont pas prêts. Lire le profil ici plutôt que dans le navigateur évite tout
+ * clignotement entre l'app et le parcours d'accueil.
+ */
+function Lancement() {
+  const { pret: profilPret, onboardingVu } = useProfil();
+
   // Newsreader (antiqua de presse) : chaque graisse est une famille distincte
   // en RN, on charge les 4 utilisées par `typography.ts` avant de rendre la nav.
   const [fontsLoaded] = useFonts({
@@ -65,7 +82,7 @@ export default function App() {
     };
   }, []);
 
-  const ready = fontsLoaded && minElapsed && donneesPretes;
+  const ready = fontsLoaded && minElapsed && donneesPretes && profilPret;
 
   // Fondu enchaîné : quand tout est prêt, l'accueil est monté dessous et le
   // splash (en surimpression) s'estompe, puis on le démonte. Pas de coupure
@@ -91,7 +108,7 @@ export default function App() {
       <SafeAreaProvider>
         <StatusBar style="light" />
         {/* L'accueil est monté dès que tout est prêt, sous le splash qui s'efface. */}
-        {ready ? <RootNavigator /> : null}
+        {ready ? <RootNavigator onboardingVu={onboardingVu} /> : null}
         {splashMonte ? (
           <Animated.View
             style={[StyleSheet.absoluteFill, { opacity: splashOpacity }]}

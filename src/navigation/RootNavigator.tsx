@@ -7,11 +7,13 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { colors } from '@/theme';
 import {
+  ConnexionScreen,
   DeputeDetailScreen,
   DossierDetailScreen,
   DossiersScreen,
   GlossaireScreen,
   GlossaireTermeScreen,
+  OnboardingScreen,
   ScrutinDetailScreen,
 } from '@/screens';
 import { MainTabs } from './MainTabs';
@@ -31,11 +33,31 @@ const navTheme: Theme = {
   },
 };
 
-export function RootNavigator() {
+/**
+ * @param onboardingVu Le parcours d'accueil a déjà été vu (ou passé) : on entre
+ *   alors directement dans l'app. Lu du stockage avant le montage (cf. App.tsx),
+ *   de sorte que rien ne clignote — le splash couvre l'attente.
+ */
+export function RootNavigator({ onboardingVu }: { onboardingVu: boolean }) {
   return (
     <NavigationContainer theme={navTheme}>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Navigator
+        screenOptions={{ headerShown: false }}
+        initialRouteName={onboardingVu ? 'MainTabs' : 'Onboarding'}
+      >
         <Stack.Screen name="MainTabs" component={MainTabs} />
+        <Stack.Screen
+          name="Onboarding"
+          component={OnboardingScreen}
+          // Pas d'animation d'entrée : c'est le premier écran de l'app, il
+          // prend la suite du splash qui s'efface.
+          options={{ animation: 'none' }}
+        />
+        <Stack.Screen
+          name="Connexion"
+          component={ConnexionScreen}
+          options={{ presentation: 'card', animation: 'slide_from_bottom' }}
+        />
         <Stack.Screen
           name="DossierDetail"
           component={DossierDetailScreen}

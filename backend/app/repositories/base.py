@@ -66,6 +66,19 @@ def ordonner_sections(sections: list[SectionTheme]) -> list[SectionTheme]:
     )
 
 
+# Fenêtre du portrait de vote d'un parlementaire (§5.2) : les 12 derniers mois.
+FENETRE_PORTRAIT_JOURS = 365
+
+# Fenêtre de la rangée « Les votes les plus disputés », comptée depuis le dernier
+# scrutin en base (et non depuis aujourd'hui : en intersession, une fenêtre
+# calendaire viderait la rangée alors que les votes existent). 90 jours couvrent
+# une session de travail parlementaire complète tout en laissant la rangée
+# évoluer à chaque ingestion — un classement « de tous les temps » serait figé.
+FENETRE_DISPUTES_JOURS = 90
+
+# Nombre de votes de la rangée. Au-delà, c'est une liste, plus une sélection.
+MAX_DISPUTES = 10
+
 # Votes d'un même texte admis dans la rangée « Les votes les plus disputés ».
 # Un texte très clivant (l'aide à mourir, le budget) monopoliserait sinon la
 # rangée avec ses lectures successives, et l'écran ne montrerait plus qu'un seul

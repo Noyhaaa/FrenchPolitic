@@ -34,7 +34,7 @@ from app.ingestion.senateurs import (
     groupes_senat,
     votes_du_scrutin_senat,
 )
-from app.ingestion.sync import build_dossier
+from app.ingestion.sync import _amendement_from_scrutin, build_dossier
 
 
 def _bloc_groupe(
@@ -315,6 +315,25 @@ def test_amendement_simple_numero_auteur_et_article():
     # L'article visé est cité par l'objet lui-même côté Sénat (côté Assemblée
     # il vient de l'archive des amendements).
     assert article_vise_senat(page.objet) == "Article 8"
+
+
+def test_auteur_senatorial_est_bien_branche_sur_l_amendement():
+    """L'auteur d'un amendement du Sénat arrive jusqu'à `Amendement.auteur`.
+
+    Régression vécue : `auteur_amendement_senat` existait, était testée, mais
+    n'était appelée nulle part — la dérivation de l'auteur passe par
+    `_amendement_from_scrutin`, qui n'appliquait que la règle de l'Assemblée
+    (« de M. X »). `Amendement.auteur` était donc TOUJOURS None au Sénat.
+    """
+    page = parse_page_scrutin(
+        _page(320, "23 juin 2026", _OBJET_AMENDEMENT, sort="Rejet&eacute;"), 2025
+    )
+    assert page is not None
+    scrutin = parse_scrutin_senat(page).scrutin
+    # La règle de l'Assemblée ne reconnaît pas la formulation sénatoriale…
+    assert auteur_amendement(scrutin.objet) is None
+    # … mais le repli la rattrape, sur le scrutin réellement construit.
+    assert _amendement_from_scrutin(scrutin).auteur == "M. Marc Dupont"
 
 
 def test_amendements_identiques_sans_numero_ni_auteur():
