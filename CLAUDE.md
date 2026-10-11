@@ -1,1228 +1,362 @@
-# Décrypté — Application mobile de compréhension des votes de l'Assemblée nationale
+# Décrypté — guide de travail sur le dépôt
 
-## Le produit en une phrase
+Application mobile qui répond en 30 secondes à **« Sur quoi les parlementaires
+ont-ils voté, et que dit le texte ? »**. Chaque affirmation est reliée à une source
+officielle, et l'app ne produit aucune opinion. À terme, ce doit être le
+« Duolingo de la démocratie ». Le MVP doit prouver qu'on peut faire comprendre un
+vote en 30 s sans trahir les faits.
 
-Le **traducteur neutre et mobile des décisions de l'Assemblée** : répondre en
-30 secondes à « Sur quoi les députés ont-ils voté, et que dit le texte ? », chaque
-affirmation reliée à une source officielle, sans opinion produite.
+## Où est la vérité
 
-Vision long terme : le « Duolingo de la démocratie ». Le MVP prouve qu'on peut faire
-comprendre un vote en 30 s sans trahir les faits.
+| Document | Rôle |
+|---|---|
+| [`MVP_Assemblee_Nationale_v2.md`](MVP_Assemblee_Nationale_v2.md) | **Fait foi** pour le périmètre, la neutralité et les priorités. Les `§x.y` du code y renvoient. |
+| Ce fichier | Fait foi là où le produit a dépassé le MVP : l'app est **centrée sur le dossier** (pas sur le scrutin), le badge « mis à jour » (§7.7), le suivi de dossier et le compte facultatif en V1 (levée du verrou §2.4). |
+| [`backend/README.md`](backend/README.md) | Détail de chaque source, de l'ingestion, de l'IA et des endpoints. **À lire avant de toucher `app/ingestion` ou `app/ai`.** |
+| [`README.md`](README.md) | Présentation du produit et tableau des sources open data. |
 
-La spécification complète du produit est dans [`MVP_Assemblee_Nationale_v2.md`](MVP_Assemblee_Nationale_v2.md).
-**Ce fichier fait foi** pour toute question de périmètre, de neutralité ou de priorité.
+Pour le *pourquoi* d'une décision, regarde d'abord les commentaires du code
+(ils citent la section du MVP), puis le backend README, puis l'historique git de
+ce fichier.
 
-## Structure du dépôt (monorepo)
+## Doctrine éditoriale (non négociable)
+
+Ces règles priment sur toute préférence esthétique ou technique.
+
+1. **Neutralité (§2.5).** Aucune phrase ne s'affiche si elle ne peut pas être
+   rattachée à une source officielle. Quand une donnée manque, on **masque le
+   bloc** ou on écrit « information non disponible ». On ne suppose jamais rien.
+   Face à un appariement ambigu, on **n'attache rien**. On ne devine jamais.
+2. **Symétrie entre groupes (§7.4).** Tous les groupes et toutes les origines
+   reçoivent le même gabarit et la même longueur (`GroupVoteRow`, `InitiativeLigne`).
+3. **Jamais la couleur seule (RGAA, §8).** Un statut porte toujours un glyphe et
+   un libellé (`StatusBadge`, `Legend`).
+4. **Réversibilité (§7.5).** La source officielle est à un tap (`SourceLink`).
+5. **Transparence IA (§7.6).** Tout contenu généré affiche `AiNotice`.
+6. **Nominatif réservé aux scrutins publics (§5.2).** C'est `scrutinPublic` qui
+   le conditionne. Sinon, on explique l'absence (vote à main levée).
+7. **Langue simple (§8).** Un terme de jargon s'explique via le glossaire,
+   jamais par une définition écrite en dur dans un écran.
+8. **Mise à jour factuelle (§7.7).** Le badge dit « Nouveau vote ». Il n'évalue
+   jamais.
+
+Ce qui en découle concrètement :
+- **Aucun adjectif évaluatif.** Cela vaut pour les données, les libellés et le
+  seed. La liste noire est `LEXIQUE_ORIENTE` dans `app/ai/guardrails.py`
+  (« ambitieux », « nécessaire », « historique », « massif »…).
+- **La parole d'un auteur reste attribuée.** L'exposé des motifs et l'exposé
+  sommaire s'affichent en bloc cité, jamais fondus dans le texte neutre. Le fait
+  officiel prime sur la parole du déposant, et la loi votée prime sur le texte
+  déposé.
+- **Jamais de prédiction.** Aucun champ ne décrit une étape à venir, aucune
+  phrase n'est au futur. Le calendrier parlementaire est une décision politique,
+  pas une donnée.
+- **Pas de métrique que la source ne soutient pas.**
+  - Aucun **taux de participation** : l'open data ne recense que les votants
+    d'un scrutin public.
+  - Au **Sénat**, ni « contre son groupe » ni cohésion : les bulletins y sont
+    déposés par un délégué de groupe.
+- **Une préférence ordonne, elle ne filtre jamais.** Les thèmes suivis remontent
+  sur l'accueil, aucun n'est masqué, et l'écran dit que l'ordre a changé.
+- **On ne promet rien que l'app ne fasse pas.** Pas de « en direct »
+  (l'ingestion est par lots), pas de push (rien n'émet), et pas de
+  `expo-notifications` tant que rien n'émet.
+
+### Ce que le LLM a le droit de faire
+
+- Le **résumé neutre** est **déterministe** : `app/ai/` enchaîne faits → rag →
+  gabarit → garde-fous. **Ne jamais le confier à un LLM** : un modèle déforme les
+  faits d'une manière que les garde-fous lexicaux ne voient pas. L'échafaudage
+  qui le permettait a été supprimé, ne le réintroduis pas.
+- Le LLM (Ollama, config `LLM_*` dans `backend/.env`, `mistral-small:24b` sur un
+  serveur distant) ne sert qu'à des **tâches vérifiables** :
+  - le **thème**, dans la liste fermée `THEMES` ;
+  - les **publics concernés**, dans une liste fermée de 19, 3 au plus ;
+  - la **Q1** et la **Q4** ;
+  - les **arguments de la Q2** ;
+  - le « pourquoi » et le « changement » des **amendements**.
+- Tout passe par `valider_reponse` / `valider_argument` (`app/ai/questions.py`).
+  Une réponse rejetée produit « rien ». La règle de fond : **le modèle reformule,
+  il n'ajoute rien**. Concrètement :
+  - les chiffres doivent figurer dans la source ;
+  - pas de glose ni de développement de sigle absents de la source ;
+  - le déposant n'est pas requalifié ;
+  - un argument de Q2 doit être ancré lexicalement dans ce qui a été prononcé.
+- La **Q3** (le résultat) est composée de façon déterministe. Dans la Q2, le sens
+  pour/contre vient du **scrutin**, jamais du modèle.
+- La Q4 a trois sources possibles, par ordre de préférence :
+  1. le texte adopté, à l'indicatif ;
+  2. le dispositif déposé, au conditionnel ;
+  3. l'exposé des motifs, préfixé « Selon l'auteur du texte, ».
+- Après l'ajout d'un garde-fou, lance `python -m app.ingestion.revalider` : les
+  réponses validées sont réutilisées entre runs, et sans ce passage les
+  anciennes resteraient en base.
+- Si le serveur LLM est injoignable, **demande avant de changer de modèle**. Ne
+  bascule pas sur un modèle local.
+
+## Dépôt, stack, commandes
 
 ```
-/            Frontend mobile Expo / React Native / TypeScript (racine)
-  src/       Code de l'app (voir « Architecture du code » plus bas)
-backend/     API FastAPI (Python) — voir backend/README.md
+/          Frontend Expo / React Native / TypeScript strict (src/)
+backend/   API FastAPI + ingestion open data (Python 3.12, SQLAlchemy async, PostgreSQL)
 ```
 
-Frontend et backend partagent **le même contrat de données** : les types
-`Dossier` / `Scrutin` du frontend (`src/types/index.ts`) et les schémas Pydantic
-du backend (`backend/app/schemas/`) sont des miroirs (camelCase des deux côtés).
-Toute évolution du modèle doit être répercutée **des deux côtés**.
-
-## État actuel
-
-**Frontend** — parcours en or de la V1 (§2.2 du MVP), **branché sur l'API**
-(`src/api` + hooks `src/hooks`), avec cache offline (AsyncStorage), états
-chargement / erreur / hors-ligne, et **pull-to-refresh** sur l'accueil comme
-sur les fiches (les hooks exposent `refresh` — état `refreshing` distinct,
-les données restent affichées pendant le rafraîchissement).
-
-> **Unité centrale = le Dossier (texte de loi)**, pas le scrutin. Un dossier
-> agrège ses **scrutins** successifs (navette), ses amendements et un résumé
-> neutre. Un dossier remonte dans le fil avec un badge **« mis à jour »** quand un
-> nouveau scrutin s'y rattache (§7.7). Ce choix intègre en V1 ce qui était prévu
-> en V2 — le verrou §2.4 sur le suivi de dossier est **levé** en conséquence.
-
-Six écrans du cœur de valeur :
-1. **Accueil façon Netflix** (`HomeScreen` → `useAccueil`, `GET /accueil`) :
-   l'écran complet arrive en **une réponse** (affichage atomique, pas de
-   remplissage progressif) — hero « à la une », rangées horizontales
-   **Aujourd'hui** / **Hier** (masquées si vides, §2.5), rangée **« Les votes
-   les plus disputés »** (`VoteDisputeTile`, `Accueil.votesDisputes`), carte
-   **récap du dernier mois actif** (`useRecap`, `GET /recap`), puis **une rangée
-   par thème**. La rangée des votes disputés est ordonnée par
-   `app/domain/division.py` — **arithmétique pure sur les décomptes officiels**
-   (écart de voix, abstention, fracture entre groupes, pondérés par l'ampleur),
-   jamais un jugement sur la mesure (§4.3) : chaque carte affiche ses chiffres à
-   côté du rang, et un sous-titre dit sur quoi porte le classement. Sont exclus
-   les votes à main levée, ceux de moins de 50 votants et ceux de **conduite de
-   séance** (suspension, prolongation au-delà de minuit, seconde délibération —
-   très serrés mais ils ne décident de rien) ; 2 votes maximum par dossier. La
-   **dispersion interne** des groupes est affichée mais **pas classante** :
-   incalculable au Sénat (délégation), la pondérer classerait les deux chambres
-   sur des critères différents. Pas de défilement infini : la recherche sert à aller au-delà.
-   Les cartes et le hero affichent la **nature du texte** (« Projet de loi »…)
-   en label, **servie par l'API** (`DossierListItem.natureTexte`, dérivée du
-   titre officiel — rien d'affiché sinon, on ne déduit pas). Le **titre affiché**
-   (`titreClair`) est le titre officiel **débarrassé de cette nature et de son
-   connecteur** (« Proposition de loi visant à améliorer la sécurité des
-   trains » → « Améliorer la sécurité des trains », `titre_court` dans
-   `normalize.py`) : liste fermée de connecteurs, sinon titre intact (« Projet de
-   loi **de finances** pour 2025 » n'est pas amputé). Sous le titre vient
-   l'**accroche** — le **but du texte en une phrase, tirée de la Q1** dont
-   l'amorce (« Les députés ont examiné ce texte pour… ») est retirée
-   (`accroche_depuis_q1`) : rien n'est régénéré, la Q1 est déjà validée. Pas de
-   Q1 → **pas d'accroche**, la ligne disparaît (§2.5).
-2. **Fiche dossier** (`DossierDetailScreen` → `useDossier`) : en tête, la
-   **frise « Trajectoire au Parlement »** (`TrajectoireNavette`, alimentée par
-   `Dossier.trajectoire` **servie par l'API**) — les étapes officielles du
-   dossier, **les deux chambres comprises** (1re lecture à l'Assemblée puis au
-   Sénat, CMP, Conseil constitutionnel, promulgation), chacune avec sa chambre
-   écrite en toutes lettres. Le statut n'est posé que si la source le
-   documente ; frise masquée si aucune étape ne l'est (§2.5). Chaque étape dont
-   le libellé officiel est du jargon (**12/12 de ceux présents en base**) s'ouvre
-   sur sa **définition de procédure** (`constants/glossaire.ts`), affichée sous
-   la frise — les pastilles s'enchaînent horizontalement et n'ont pas la place
-   d'un paragraphe ; une seule ouverte à la fois. ⚠️ Elle n'est
-   plus dérivée côté app des objets de vote (`phasesNavette` a été supprimé de
-   `format.ts`) : les scrutins d'une chambre ne peuvent pas documenter l'autre.
-   La frise **se clôt sur « Où en est le texte ? »** (`Dossier.etat` servi par
-   l'API) : à elle seule elle ne raconte que le passé et laissait sans réponse
-   la question suivante. Cinq états, chacun un fait des mêmes actes officiels —
-   **« C'est la loi »** (sans autre précision : le numéro, la date et le
-   *Journal officiel* vivent dans la carte « La loi » juste en dessous, et les
-   répéter ici dirait deux fois la même chose à deux centimètres), « Résolution
-   adoptée », « Texte retiré par son auteur », « Devant le Conseil
-   constitutionnel », ou « En cours d'examen » suivi de la **dernière étape
-   enregistrée**. ⚠️ **Jamais l'étape suivante** : le calendrier parlementaire
-   est une décision politique, pas une donnée — l'annoncer serait une
-   prédiction (§2.5). Ce que la source ne dit pas est dit explicitement
-   (« Aucune étape postérieure n'est publiée »), pour que le silence se lise
-   comme celui de l'archive et non de l'app. Le bloc porte glyphe **et** libellé
-   (RGAA §8) et partage l'état « une seule définition ouverte » des pastilles ;
-   seul « Résolution » y ouvre son aide, car c'est le seul mot qu'aucune
-   pastille de la frise ne porte (la sienne dit « Lecture unique ») — on
-   n'explique pas deux fois au même endroit. Une **loi promulguée** remonte
-   aussi dans le **badge de tête** (« Promulguée » au lieu d'« Adopté », le
-   résultat du dernier vote : exact, mais il laissait croire que le texte était
-   encore en chemin). Mesuré : **254/328 dossiers** (96 promulgués · 126 en
-   navette · 21 résolutions · 7 au Conseil constitutionnel · 4 retirés) ; les
-   74 sans actes (`TXT-…`, `SEN-…`) gardent le bloc masqué.
-   Le **badge de tête** est décidé par `badgeDossier` (`utils/format.ts`), partagé
-   avec la carte du fil, la tuile et le hero pour que les quatre ne divergent
-   pas : loi promulguée → « Promulguée » ; **dernier vote = une motion** →
-   « Motion adoptée » / « Motion rejetée » ; sinon le statut. ⚠️ Une motion
-   inverse la lecture de son résultat, et le badge disait donc le contraire du
-   fait : **8 dossiers** annonçaient « Adopté » sur un texte que la motion venait
-   de rejeter — dont un dont c'était l'**unique** vote, la frise de la même fiche
-   disant « 1ère lecture · Rejeté » deux centimètres plus bas. On **nomme le
-   vote** plutôt que d'affirmer un sort du texte que ce seul vote ne décide pas :
-   un rejet en 1re lecture n'empêche pas la navette de continuer (§7.4, §2.5).
-   Puis, pour une loi promulguée seulement, la carte **« La loi »**
-   (`LoiCard`) : « Loi n° 2025-379 du 28 avril 2025 » et son *Journal officiel*.
-   ⚠️ **Aucun lien dans cette carte** : le **texte voté par le Parlement**
-   (`Dossier.texteAdopte`, la « petite loi ») et le **texte en vigueur**
-   (Légifrance, `etat.urlLegifrance`) sont deux documents distincts — ce que le
-   Parlement a adopté, et ce qui s'applique aujourd'hui, une loi ayant pu être
-   modifiée depuis — mais ils vivent tous deux dans « Les documents du dossier »
-   en bas de fiche, avec le reste (cf. plus bas). La **référence écrite** reste
-   ici, elle : c'est elle qui permet de retrouver la loi si un lien vieillit.
-   Le **corps** de la loi n'est jamais affiché — droit codifié illisible, même
-   doctrine que le dispositif.
-   Sous le titre, la carte **« À l'origine du texte »** (`InitiativeLigne`,
-   `Dossier.initiative` servie par l'API) — **qui porte le texte**, la première
-   question qu'on se pose devant un vote : le **Gouvernement** (tout projet de
-   loi, art. 39), le **parlementaire auteur** (sa **photo officielle** — celle
-   du référentiel, jamais une URL dérivée ici —, repli sur les initiales, avec
-   la pastille **et le libellé** de son groupe ; la carte ouvre sa fiche), ou le
-   **Sénat**. Même
-   gabarit dans les trois cas (§7.4) — médaillon, intitulé, précision : le
-   médaillon d'une institution est l'`Avatar` réduit à son initiale, pour
-   qu'aucune origine ne reçoive un traitement plus flatteur. ⚠️ **Pas** le
-   liseré d'accent d'`ExposeMotifsCard` : là-bas il signale un contenu non
-   neutre, ici c'est un fait — et un liseré teinté du groupe laisserait croire
-   que la carte porte son opinion. Pas de `deputeId` → pas de chevron et carte
-   non pressable : jamais d'affordance qui ne mène nulle part. Origine sans
-   personne nommable → **carte masquée** plutôt qu'« un parlementaire », qui
-   n'apprendrait rien (§2.5). Mesuré : **242/255 dossiers officiels**
-   (49 Gouvernement · 124 parlementaires dont 110 nommés · 69 Sénat) ; les
-   dossiers reconstitués et les motions n'en ont pas.
-   Puis résumé du texte,
-   et **trois sections distinctes** — les **votes sur le texte**, avec le
-   **vote décisif mis en avant** (`VoteDecisifCard` + `voteDecisif` dans
-   `format.ts`, miroir de `_vote_decisif` backend : le vote sur l'ensemble le
-   plus récent, carte accentuée + phrase explicative factuelle — c'est lui qui
-   scelle l'adoption/le rejet, pas les votes d'articles ni les motions ; sans
-   vote sur l'ensemble, rien n'est désigné §2.5) suivi de la **liste compacte
-   des autres votes** (titre = **type du vote en clair** via `libelleScrutin` :
-   « Vote sur l'ensemble », « Motion de censure », « Article 2 »… + **chambre** +
-   statut + micro-résultat ; objet non reconnu restitué tel quel, §2.5), les
-   **Amendements** (ligne compacte via `AmendementRow` : numéro + sort + auteur,
-   sans répéter la formule « l'amendement n° X de M. Y »), et les
-   **Sous-amendements** (avec rappel de l'amendement parent). Chaque ligne ouvre
-   la fiche vote. Un vote d'amendement n'apparaît **que** dans sa section (un
-   sous-amendement que dans la sienne), et les listes longues sont repliées
-   au-delà de 4 éléments (« Voir les N autres… »). La fiche se clôt sur
-   **« Les documents du dossier »** (§7.5) — **tous** les documents officiels du
-   texte, dans l'**ordre de sa vie** : dossier législatif → texte déposé →
-   **rapports de commission** (un par lecture, chacun avec son numéro) → compte
-   rendu de séance → texte voté → texte en vigueur. La liste est **dérivée** de
-   ce que le dossier porte déjà (`app/domain/sources.py`, `documents_du_dossier`,
-   idempotente) : rien n'y est écrit à la main, une URL n'y paraît qu'une fois
-   (l'exposé et le dispositif sortent du même PDF), et un document absent laisse
-   sa place vide (§2.5). ⚠️ C'est le **seul endroit de la fiche** où un document
-   du dossier est lié : `ExposeMotifsCard`, `QuestionsCard` et `LoiCard` ne
-   portent plus de `SourceLink` — la même URL deux ou trois fois sur une page
-   n'ajoutait rien. Ce qui reste dans les cartes, c'est ce qu'un lien ne dit
-   pas : la **provenance en toutes lettres** (« Selon l'auteur du texte »,
-   « seuls les groupes qui se sont exprimés en séance », et pour la Q4 le **nom**
-   du document dont elle sort — « D'après : Texte voté par le Parlement » —, car
-   lequel des trois a servi change le sens de la phrase). Vérifié en base : les
-   URLs qu'affichaient les cartes sont **toutes** dans la liste, zéro orpheline.
-   Ce qui reste hors d'ici, c'est la source de chaque **vote** — elle vit sur sa
-   propre fiche. Mesuré : de **1,17 à 4,12 liens** par dossier, et de **313 à
-   36** dossiers réduits à une seule source.
-3. **Fiche vote** (`ScrutinDetailScreen` → `useScrutin`, `GET /scrutins/{id}`) :
-   titre = type du vote en clair — **cliquable quand c'est un terme de
-   procédure** (« Motion de rejet préalable », « Vote sur l'ensemble »…), il
-   déplie alors sa définition (`constants/glossaire.ts`, §8) ; la recherche se
-   fait sur le **titre**, jamais sur l'objet officiel, dont les mots
-   déclencheraient des définitions sans rapport avec le type de vote —,
-   **objet officiel complet en dessous**, la
-   **chambre** (`scrutin.chambre` via `libelleChambre`, jamais « Assemblée
-   nationale » en dur), puis —
-   **sur toutes les fiches, quel que soit le type de vote** — le **Résultat du
-   vote EN TÊTE** (§2.2 : voir le résultat tout de suite ; verdict, décomptes
-   pour/contre/abstention, barre combinée + échelle, décomptes officiels),
-   clos par la **forme du scrutin** : « Scrutin public ordinaire · 42 votants »,
-   **dépliable** sur sa définition (`termeTypeVote`, `constants/glossaire.ts`).
-   C'est la réponse à « 42 voix contre 0, pourquoi seulement 42 ? » — un scrutin
-   **ordinaire** se tient en séance parmi les députés alors présents (médiane
-   **132** votants), un scrutin **solennel** est annoncé à l'avance (médiane
-   **528**). ⚠️ **Jamais un taux de participation** : la source ne recense que
-   les votants d'un scrutin public, un ratio se lirait comme un score
-   d'absentéisme qu'elle ne soutient pas (§7.4, même règle que la fiche député).
-   Forme absente (Sénat, dont la page ne la nomme pas) → « 42 votants » seul.
-   ⚠️ **Une motion de censure ne se raconte PAS pour/contre** : l'article 49 de
-   la Constitution ne fait recenser que les voix **favorables**, si bien que
-   `contre` et `abstention` y valent 0 **par construction** (vérifié : les
-   23 motions de la législature). La fiche montre alors « 267 voix pour ·
-   289 requises », une barre mesurée **contre le seuil**, ni colonne « Contre »
-   ni écart — c'est ce 0-là qui trompait. Le glossaire le disait déjà
-   (`motion-de-censure` : « Seules les voix POUR sont comptées »), les chiffres
-   le contredisaient deux lignes plus bas.
-   ⚠️ **Une motion inverse la lecture de son résultat** : « Adopté » sur une
-   motion de rejet préalable veut dire que le **texte** a été rejeté. Le verdict
-   et l'écart restent le fait brut du scrutin — on ne les réécrit pas —, mais une
-   **mention factuelle** dit sous eux ce que ce fait emporte (« Adoptée, cette
-   motion rejette le texte sans examen de ses articles »), et une phrase
-   au-dessus des groupes dit ce que « pour » veut dire ici (« Sur cette motion,
-   voter "pour", c'est demander le rejet du texte ») — sans quoi la ventilation
-   entière se lit comme un soutien au texte (§7.4). Les phrases vivent une seule
-   fois dans `constants/motions.ts`, qui renvoie au glossaire pour la définition
-   complète ; pas de motion → rien du tout (§2.5). C'est aussi ce classement qui
-   **nomme** les 23 votes du Sénat dont l'objet tronqué ne permettait aucun titre
-   (`libelleScrutin(objet, typeMotion)`).
-   Ensuite, deux visages selon le vote :
-   — **Vote sur le texte** : section **Vote par groupe**
-   avec la **ligne de fracture** (`LigneFracture` : quels groupes ont
-   majoritairement voté pour / contre / se sont abstenus — factuel, sourcé par
-   le scrutin, jamais un jugement §7.4, masquée si unanimité), la ventilation
-   détaillée par groupe et les **noms des votants** dépliables groupe par
-   groupe quand le nominatif est disponible (§5.2). Chaque nom **ouvre la fiche
-   du député** (souligné, jamais la couleur seule §8/RGAA) — mais **seulement**
-   si le backend a joint son `deputeId`, c'est-à-dire s'il siège encore : un
-   ancien député garde son nom sans lien, jamais de cul-de-sac vers un 404. Le
-   décompte affiché en tête de chaque position est le **chiffre officiel du
-   groupe**, pas la longueur de la liste : un votant que la source ne sait pas
-   nommer en est absent (on n'affiche jamais une référence machine `PA…` en
-   guise de nom, §2.5). Sur un vote du **Sénat**, une mention factuelle suit la
-   ventilation : les bulletins d'un scrutin public ordinaire y sont déposés par
-   un délégué de groupe pour tous ses membres, les noms reflètent donc la
-   position du groupe — sans elle, la liste dirait autre chose que ce qu'elle
-   dit (§7.4).
-   — **Vote d'amendement / sous-amendement** : PAS de section « Vote par
-   groupe » — après le résultat, la carte **« L'amendement en 4 questions »**
-   (`QuestionsAmendementCard`, `Scrutin.questions`) : « Pourquoi ? » (exposé
-   sommaire, préfixé « Selon son auteur » §4.3), « Qu'est-ce qu'il
-   changerait ? » (dispositif, conditionnel), « Qui était pour, qui était
-   contre ? » (rendu déterministe depuis `positionsGroupes` via `LigneFracture`,
-   unanimité affichée aussi), « Quel est le résultat ? » (déterministe, camp
-   gagnant en premier). Suivent **ce qu'il change** (`dispositif`, factuel, en
-   **carte** — même niveau visuel que le bloc auteur), **ce que dit l'auteur**
-   (exposé sommaire, bloc attribué non neutre §4.3), et
-   **ses sous-amendements** (chacun ouvrant sa propre fiche vote, empilée via
-   `navigation.push`).
-4. **Explorer** (`ExplorerScreen` → `useRecherche` + `useThemes`, avec debounce ;
-   remplace l'ancien `SearchScreen`, supprimé) : tant que rien n'est cherché,
-   l'écran ne montre plus un vide en attente d'un mot — quatre **portes
-   d'entrée** (Dossiers, Élus, Assistant, Glossaire), puis les **catégories**,
-   la plus fournie en vedette et les suivantes en rangées, écrêtées à 5 avec un
-   « Voir les N autres » qui **déplie vraiment** la liste. Le libellé de la
-   vedette dit ce que la donnée dit — « la plus fournie en dossiers », un
-   décompte de `useThemes` —, pas « la plus suivie », qui demanderait une
-   analytique qu'on n'a pas (§2.5). ⚠️ **Explorer n'interroge pas la
-   recherche** : la tuile *Dossiers*, la validation du champ et le tap sur une
-   catégorie **ouvrent l'écran `Dossiers`**. Explorer fait découvrir, `Dossiers`
-   montre ce qu'on a trouvé — les afficher au même endroit ferait disparaître la
-   découverte au premier mot tapé, et le retour arrière n'aurait plus de sens.
-4ter. **Dossiers** (`DossiersScreen` → `useRecherche`, route
-   `{ query, theme? }`) : les **résultats**, délibérément dissemblables
-   d'Explorer — barre d'outils `surface` portant la requête, onglets soulignés
-   *Textes* / *Députés* avec leur décompte, puis une **chronologie** de lignes
-   denses (`DossierChronoRow`, pas de cartes : `DossierCard` reste au fil
-   d'accueil). Les deux vides = parcourir tous les textes ; `theme` seul =
-   parcourir une catégorie. Le groupage (« Cette semaine », « Plus tôt en
-   juillet ») vient de `utils/periodes.ts`, **seule source du tri** : libellés de
-   groupe et ordre des lignes sortent du même calcul, ils ne peuvent pas se
-   contredire. Une ligne n'affiche sa **barre pour/contre** que si
-   `resultatDernierScrutin` est présent ; sinon la mention qui l'explique la
-   remplace — « Pas encore mis aux voix » si `nombreScrutins === 0`, sinon
-   « Vote à main levée — pas de nominatif » (§5.2, §2.5). Cet écran demande
-   `LIMITE_MAX` (100) à l'API là où le défaut est 20 : il annonce des catégories
-   entières (« Justice · 51 dossiers » côté Explorer) et n'en rendrait sinon que
-   20, se contredisant à l'écran. Quand le plafond est atteint, le titre dit
-   « Les 100 plus récents » au lieu d'un décompte qui se lirait comme un total.
-   Les *députés* viennent de `GET /deputes?q=` (plafonné à 5), onglet vide masqué.
-   La requête est **multi-termes** : tous les mots sont exigés mais pas
-   forcément côte à côte ni dans le titre, car l'index de recherche
-   (`app/domain/recherche.py`, source unique de `search_index`) couvre aussi les
-   réponses **Q1/Q4** et les **publics concernés** — c'est là qu'est le
-   vocabulaire du lecteur (« logement », « hôpital »), pas dans les titres
-   officiels. Les résultats sont **classés par pertinence** (titre > accroche et
-   thème > réponses citoyennes ; à égalité, le plus récent), et un **thème seul**
-   parcourt le thème. L'exposé des motifs est hors index (trop de bruit). Le
-   filtre de thème ne s'applique pas aux personnes : les députés disparaissent
-   quand il est actif.
-4bis. **Glossaire** (`GlossaireScreen` l'index, `GlossaireTermeScreen` la fiche —
-   au niveau du stack racine, atteints depuis Explorer **et** depuis l'aide en
-   ligne). L'index : un **mot du jour** déterministe (index sur le numéro de
-   jour — même mot pour tous, changement à minuit, aucun stockage), des chips de
-   famille (Procédure · Institutions · Budget · Vote), puis les termes groupés
-   par lettre avec leur définition courte, pour comprendre **sans ouvrir la
-   fiche**. La fiche : la définition en une phrase, le déroulé « Concrètement »
-   (`etapes`), les faux amis (« À ne pas confondre » — un voisin sans fiche
-   reste affiché mais **atténué et non cliquable**, il ne doit pas promettre un
-   lien qui n'existe pas), et surtout **les dossiers où le mot apparaît**
-   (`useRecherche` sur `requete ?? libelle`) : une définition ne doit pas être un
-   cul-de-sac, on repart lire un texte. Bloc sans contenu → masqué (§2.5).
-5. **Annuaire des parlementaires** (`DeputesScreen` → `useDeputes`,
-   `GET /deputes`) : recherche par nom (debounce), **chips de chambre**
-   (Les deux / Assemblée nationale / Sénat) **puis** chips de groupe
-   (`GET /groupes`, pastille de couleur **+ libellé**) — les groupes proposés
-   suivent la chambre choisie, et changer de chambre invalide un filtre de
-   groupe devenu sans objet (§2.5). Une ligne par parlementaire (`DeputeRow` :
-   `Avatar` — **photo officielle**, repli sur les initiales —, nom, groupe,
-   circonscription). L'effectif affiché est celui réellement servi, jamais
-   « 577 » ni « 925 » en dur.
-6. **Fiche parlementaire** (`DeputeDetailScreen` → `useDepute`, `GET /deputes/{id}`) :
-   identité (groupe, circonscription, **commission**, début de mandat — chaque
-   champ masqué s'il n'est pas documenté, et les deux chambres ne documentent pas
-   les mêmes : la **commission** n'existe qu'au Sénat, le **début de mandat** qu'à
-   l'Assemblée), puis le **portrait de vote** sur 12 mois glissants
-   (`PortraitVoteCard` : votes exprimés, part **avec son groupe**, ventilation
-   pour/abstention/contre avec légende) et l'**historique de vote**
-   (`VoteHistoryFil` : fil groupé par mois, rail + nœud coloré par position,
-   pastille de sens **écrite**, tag de nature et date, titre officiel), filtrable
-   Tous / Dossiers / Amendements / Sous-amend. et **paginé** (« Charger les votes
-   plus anciens », `GET /deputes/{id}/votes`). Chaque entrée ouvre le dossier
-   concerné. ⚠️ **Aucun taux de participation n'est affiché** : l'open data ne
-   recense que les votants physiques d'un scrutin public (268 en moyenne sur
-   577), si bien qu'un ratio de présence se lirait comme un score d'absentéisme
-   que la source ne soutient pas (§7.4). ⚠️ Chaque entrée du fil portant sur une
-   **motion** la **nomme** (pastille sourde « Motion de rejet préalable »…) :
-   sans elle, une pastille verte « Pour » à côté du titre d'un texte se lit
-   comme un soutien, alors que le parlementaire en demandait le **rejet** —
-   mesuré, **23 350 votes nominatifs** sont dans ce cas. La position, elle,
-   reste le fait brut du scrutin ; on ne l'inverse pas.
-   « Contre son groupe » (pastille ambre)
-   est en revanche un **fait déduit** du même scrutin, jamais un jugement —
-   mais **jamais au Sénat** : la délégation de vote par groupe y rend le fait
-   indéfendable, `contreSonGroupe` et `cohesionGroupe` y sont toujours absents
-   et l'app masque alors ces indications (mécanique §2.5 déjà en place).
-
-L'URL de l'API est dérivée de l'hôte Metro en dev (`src/api/config.ts`),
-surchargeable via `EXPO_PUBLIC_API_URL`. **Le backend doit tourner** pour un
-premier chargement ; ensuite le cache prend le relais hors-ligne. (L'ancien mock
-`src/data/mockScrutins.ts` a été supprimé — la référence de données fictives est
-désormais le seed backend `backend/app/data/seed.py`.)
-
-7. **Parcours d'accueil** (`OnboardingScreen`, cinq étapes portées par
-   `OnboardingBienvenue` / `Compte` / `Themes` / `Departement` / `Alertes`) —
-   affiché au **premier lancement** (flag `pref:onboarding-vu`, lu dans la même
-   barrière que les polices et l'accueil : le splash couvre l'attente, rien ne
-   clignote). Il est atteint ensuite par « Créer un compte » depuis le Profil ;
-   il n'est **pas rejouable** pour lui-même — la rangée « Revoir la
-   présentation » a été retirée, tout ce qu'elle réglait (thèmes, département,
-   alertes) étant modifiable directement dans le Profil. `revoirOnboarding` reste
-   exposé par `ProfilContext` mais n'a plus d'appelant. ⚠️ **Rien n'y est
-   obligatoire** :
-   « Passer » est présent à chaque étape et entre directement dans l'app, et le
-   **compte lui-même est facultatif** — laissé vide, le formulaire se passe et
-   tout fonctionne, les préférences restant sur l'appareil. Le compte
-   (`POST /inscription`, prénom · nom · e-mail · mot de passe — **ni téléphone
-   ni date de naissance**, que rien n'utiliserait) ne sert qu'à **retrouver ses
-   préférences sur un autre appareil** ; jeton JWT rangé en AsyncStorage,
-   session vérifiée au lancement (401 → jeton oublié, préférences locales
-   conservées). ⚠️ La maquette annonçait les votes « **en direct** » et des
-   **alertes** : l'ingestion est par lots et aucune notification n'est envoyée
-   (hors périmètre V1) — l'étape « alertes » **retient un choix** sans demander
-   la permission système ni rien promettre (§2.5). ⚠️ Elle proposait aussi
-   10 **régions** : rien en base ne relie une région à un élu, la liste affichée
-   est donc celle des **départements dérivés de l'annuaire réel**
-   (`departementDe`, ce qui précède la virgule de `circonscription`), sans
-   aucune liste écrite en dur. Les **thèmes** proposés sont ceux qui existent
-   réellement (`GET /themes`, avec leurs décomptes). ⚠️ Le choix de thèmes
-   **ordonne, il ne filtre pas** : `ordonnerSections` remonte les rangées
-   suivies en tête de l'accueil et n'en masque **aucune** — cacher un vote parce
-   qu'il n'a pas été coché serait exactement ce que §2.5 interdit ; une mention
-   (« Vos thèmes en premier ») dit ce qui a été fait à l'ordre, faute de quoi il
-   se lirait comme celui de la source. L'accent du parcours est la **pervenche
-   de la marque**, jamais le rouge de la maquette (cf. « Pièges »).
-8. **Profil** (`ProfileScreen`) : un **bandeau de ciel étoilé** (`ProfilCiel`,
-   même grammaire constellation que `DecrypteSplash`) d'où déborde le
-   **médaillon** (initiales sur dégradé pervenche, ou pictogramme sans compte),
-   puis le nom, le département, et l'**anneau de couverture**
-   (`AnneauCouverture`). Le reste tient en **trois onglets** (`BarreOnglets`) :
-   *Infos* (compte + département), *Thèmes*, *Réglages* (alertes, déconnexion,
-   mentions). Se déconnecter **ne vide pas** les préférences — elles décrivent ce
-   que ce lecteur suit sur cet appareil, pas sa session. Le **département se
-   choisit sur place** (`SelecteurDepartement` : un calque interne à l'écran, pas
-   un `Modal`, qui réutilise `OnboardingDepartement` tel quel — donc la même
-   liste dérivée de l'annuaire aux deux endroits). `ConnexionScreen` est atteint
-   d'ici **et** du parcours d'accueil ; il n'a **pas** de « mot de passe
-   oublié », rien n'envoyant de courrier (§2.5).
-   ⚠️ L'**anneau n'est pas un score du lecteur** : la maquette `profil_v4` posait
-   là un « Civic Score 78/100 », que rien ne peut calculer — aucun historique de
-   lecture n'est conservé, et une note sur la personne n'aurait aucune source. Ce
-   qui est affiché est de l'**arithmétique pure sur les décomptes de
-   `GET /themes`** : la part des dossiers publiés que rassemblent les thèmes
-   suivis. Le chiffre n'est **jamais nu** — l'écran l'accompagne toujours de sa
-   phrase (« Vos thèmes couvrent N dossiers sur M publiés »), sans quoi un
-   pourcentage se lirait comme une note ; corpus indisponible → anneau et phrase
-   **absents**, jamais « 0 % » (§2.5). Sont tombés de la même maquette, faute de
-   source : l'onglet « Activité » entier (activité récente, graphe hebdomadaire,
-   « +31 % vs semaine passée »), les compteurs « Suivis / Votes lus /
-   Amendements », les badges « Citoyen vérifié » / « Champion civique », les
-   rangées Téléphone et Date de naissance (jamais collectées), les quatre
-   bascules de notifications (rien n'émet), Langue / Confidentialité / Modifier
-   le profil, et la ligne de version. Le rouge `#FF3040` de la maquette (onglet
-   actif, CTA, déconnexion) est partout remplacé par la pervenche : c'est
-   `colors.rejete`, un onglet actif en rouge se lirait comme un verdict de vote.
-   ⚠️ Le scintillement du ciel **n'anime aucune prop SVG** : les 32 étoiles sont
-   statiques, réparties en 4 calques dont seule l'`opacity` de la `View` respire,
-   en `useNativeDriver: true`. Animer l'opacité des `Circle` (ce que fait
-   `DecrypteSplash`, sur un écran de lancement bref) impose le driver JS — sur un
-   onglet jamais démonté, le thread JS sature et les taps comme la navigation se
-   figent. Vécu.
-
-Plus un écran « à venir » (`AssistantScreen`) présent dans la tab bar mais hors
-périmètre V1 (§2.3 / §2.4).
-
-**Backend** — API FastAPI servant les endpoints du cœur (`/accueil` — écran
-d'accueil complet en une réponse —, `/dossiers`, `/dossiers/{id}`,
-`/scrutins/{id}`, `/recherche`, `/recap` — activité du dernier mois actif)
-et ceux des **parlementaires** (`/deputes?chambre=`, `/deputes/{id}`,
-`/deputes/{id}/votes` — historique paginé —, `/groupes?chambre=`).
-S'y ajoutent les **seules écritures de l'API** — le **compte utilisateur**
-(`POST /inscription`, `POST /connexion`, `GET /moi`, `PUT /moi/preferences`,
-`app/api/routes/comptes.py`) et la seule table qui ne vienne pas de l'open data
-(`utilisateur`). Trois règles y sont tenues : **minimisation** (prénom, nom,
-e-mail, empreinte bcrypt — `Compte`, le seul modèle exposé, ne porte jamais
-l'empreinte) ; **un seul échec de connexion** (e-mail inconnu et mot de passe
-faux renvoient le même 401 avec le même message — les distinguer dirait quelles
-adresses ont un compte ; l'e-mail est stocké et comparé en minuscules) ; et
-`JWT_SECRET` **obligatoire hors dev** (`app/security.py` refuse de démarrer
-sans lui ailleurs qu'en `APP_ENV=dev`, où un secret **éphémère** est tiré par
-processus — les sessions ne survivent alors pas à un redémarrage). Le compte est
-**facultatif** : toutes les routes de lecture restent publiques (un test le
-vérifie), et il ne sert qu'à retrouver ses **préférences** (thèmes, département,
-alerte) d'un appareil à l'autre — jamais d'historique de lecture. Les comptes
-suivent `REPOSITORY_BACKEND` comme le reste : en `memory`, **un compte créé est
-perdu à l'arrêt du serveur**. `UtilisateurRepository` est un protocole
-**séparé** de `DossierRepository`, qui est purement lecture.
-Le détail d'un dossier reste
-**léger** (liste de `ScrutinResume`) ; le détail complet d'un vote — groupes et
-**vote nominatif** (noms des députés, résolus via l'annuaire acteurs de l'archive
-AMO, chacun accompagné de son `deputeId` s'il siège encore — c'est le lien du
-vote vers la fiche du député) — vit dans la table `scrutin` et est servi à la
-demande. Deux backends de
-données commutables via
-`REPOSITORY_BACKEND` : `memory` (données seed, défaut) ou `postgres` (données
-ingérées). En dev, `backend/.env` fixe `REPOSITORY_BACKEND=postgres` + `DATABASE_URL`
-pour que l'API serve la base ; **les tests forcent `memory`** (`tests/conftest.py`)
-et restent donc sur le seed. **Phase 1 faite** : ingestion réelle de l'open data AN
-(17e législature) — scrutins publics + groupes (archive AMO) — parsée, contrôlée,
-**regroupée par dossier** et upsertée dans PostgreSQL (SQLAlchemy
-async), via `python -m app.ingestion.run` (**commit par dossier** + ligne de
-progression `[i/total]` — un run interrompu ne perd que le dossier en cours ;
-exposé des motifs et thème sont mis en cache par dossier pour ne pas refaire
-un travail déjà acquis à chaque run, cf. `backend/README.md`). Regroupement en cascade : `dossierRef`
-officiel quand il existe ; sinon **réconciliation** — le titre cité dans l'objet
-du vote (« … de la proposition de loi visant à… ») est comparé aux titres
-officiels de l'archive **dossiers législatifs** (`app/ingestion/dossiers_legislatifs.py`,
-correspondance exacte **puis par signature** — fold sans espaces/ponctuation, qui
-rattrape la saleté de l'archive : apostrophes, fautes de frappe « afin de​garantir »,
-tirets — sans confondre ordinaire/organique ; non ambiguë) pour
-retrouver le vrai `dossierRef` (et son lien officiel §7.5) ; sinon **texte de rattachement** →
-dossier reconstitué à id stable `TXT-…` (dérivé de la **signature** du titre, pas
-du simple fold — un même texte cité avec une apostrophe droite sur un scrutin et
-courbe sur un autre fusionne en un seul dossier, ne se scinde pas en deux) ;
-sinon singleton (motion de censure, déclaration — événements autonomes
-légitimes dans le fil, marqués `estEvenementAutonome`, cf. plus bas). ⚠️ Le
-titre cité est débarrassé de **toutes** ses mentions finales de procédure
-(`_RE_MENTION_FINALE`, répétable) : la source en **enchaîne** parfois deux
-(« …le droit à l'aide à mourir **(seconde délibération) (deuxième lecture)** »),
-et n'en retirer qu'une laissait « (seconde délibération) » dans le titre, dont
-la signature ne correspondait plus au titre officiel — le texte se **dédoublait**
-alors en un `TXT-…` vide à côté de son vrai dossier (vécu sur l'aide à mourir, le
-PLF 2026, le PLFSS 2025 et 2026, Mayotte, le narcotrafic : mesuré, **22 dossiers
-sur 54** rejoignent leur dossier officiel une fois la mention retirée). Une
-parenthèse **au milieu** du titre est en revanche conservée : elle fait partie de
-ce que la source désigne. La réconciliation couvre la législature **courante et
-la précédente** (archive `download_dossiers` téléchargée deux fois, best-effort
-sur la précédente) : un dossier **reporté après une dissolution** garde son
-`dossierRef` d'origine (cas réel : « simplification de la vie économique »,
-ref L16, encore voté en L17) — sans ce repli, un tel texte ne serait jamais
-retrouvé par titre et se fragmenterait en `TXT-…`, perdant au passage son
-exposé des motifs et l'enrichissement de ses amendements (la clé de jointure de
-l'archive amendements est justement le `dossierRef`). Le garde-fou d'ambiguïté
-(un titre → un seul dossier, jamais deviné) protège déjà contre une collision
-de titre entre deux législatures. ~60 % des dossiers ont
-ainsi leur page officielle. On n'importe PAS les titres de l'archive (minuscules,
-fragmentés) : le libellé du scrutin est plus propre. Le fil ne montre donc que des
-textes/dossiers, jamais un amendement isolé — ni un vote de **conduite de séance**
-(demande de suspension, de seconde délibération) : quand un tel vote deviendrait un
-dossier à lui seul, il est **écarté du fil** (`est_vote_de_conduite_de_seance`, la
-même liste fermée que la rangée « votes les plus disputés » — une seule référence
-pour les deux). Le même vote formulé pendant l'examen d'un texte reste, lui, un vote
-de ce dossier, à sa place dans sa liste. Les votes d'amendement sont classés à
-l'ingestion (`est_amendement` / `est_sous_amendement` sur l'objet officiel, avec
-extraction du numéro et de l'auteur quand ils sont sans ambiguïté) et chaque
-sous-amendement est **rattaché à son amendement parent** (« … à l'amendement
-n° X ») ; le scrutin du parent embarque ses sous-amendements pour la fiche vote.
-La fusion inter-runs pose le badge « mis à jour » quand un nouveau scrutin
-(texte, amendement ou sous-amendement) rejoint un dossier connu.
-Chaque scrutin porte enfin sa **forme** (`Scrutin.typeVote`, table fermée
-`SPO`/`SPS`/`MOC` → `ordinaire` / `solennel` / `motion_censure` ; code inconnu →
-rien, §2.5) et ses **suffrages requis** (`nbrSuffragesRequis`) — deux champs que
-l'archive publiait depuis toujours et que l'ingestion ne lisait pas. Ils
-répondent à « pourquoi seulement 42 votants ? » (médiane **132** en scrutin
-ordinaire contre **528** en solennel) et corrigent surtout la **motion de
-censure** : l'article 49 n'y recense que les voix favorables, donc la formule
-générale « camp gagnant en premier » écrivait « **rejeté par 0 voix contre
-267** » sur les 23 motions de la base — l'inverse du fait. `phrase_motion_censure`
-(partagée par la Q3 et le résumé) dit désormais « recueilli 267 voix sur les
-289 requises », `division()` **écarte** les motions du classement des votes
-disputés (l'écart entre deux camps n'a pas de sens quand un seul est compté), et
-le garde-fou des chiffres admet le seuil parmi les décomptes officiels. Le
-`suffragesRequis` n'est **affiché que sur une motion** : ailleurs il vaut
-exactement `exprimés // 2 + 1` (mesuré : 100 % des 8 411 autres scrutins).
-Rattrapage : `python -m app.ingestion.types_vote`.
-Chaque scrutin porte enfin sa **motion**, quand c'en est une (`Scrutin.typeMotion`,
-`app/domain/enums.py`) — six formes constatées sur pièces : **rejet préalable**
-(58, art. 91 RAN), **question préalable** (11, art. 44 RS), **exception
-d'irrecevabilité** (7, art. 44 RS), **renvoi en commission** (5), plus la
-**référendaire** et l'**ajournement**, que le glossaire explique déjà. Une motion
-**inverse la lecture de son propre résultat** : l'adopter rejette le texte. ⚠️ La
-classification se fait sur l'objet **entier**, *avant* la troncature à
-120 caractères — un objet du Sénat s'ouvre sur le numéro et l'auteur (« la motion
-n° 278, présentée par Mme… ») et ne dit qu'au 135e caractère ce qu'elle est, si
-bien que classer après troncature ne verrait jamais rien (ces 23 votes
-s'affichaient sous forme de chaîne coupée, sans nom ni définition). Le
-`build_dossier` en tire deux conséquences : `Dossier.statutMotion` (le badge
-**nomme le vote** au lieu d'affirmer un sort du texte) et, à date égale, **un vote
-sur le texte passe devant une motion** pour fixer le statut — sans quoi l'ordre
-d'arrivée tranchait (mesuré : **16 dossiers**, dont **14 lois promulguées**,
-affichaient « Rejeté » parce qu'une motion rejetée était passée devant l'adoption
-du texte le même jour). Rattrapage : `python -m app.ingestion.motions` (ni réseau
-ni LLM), qui **ne déclasse jamais** — un classement posé à l'ingestion sur l'objet
-entier ne se relit pas depuis la base tronquée, donc il est préservé — et qui
-**imprime les objets non classés** pour compléter la liste fermée sur pièces (les
-formes du Sénat se rattrapent, elles, par `python -m app.ingestion.senat`). Les **sources
-du dossier** sont de niveau dossier uniquement — la source de chaque vote reste
-sur son scrutin, servie par sa fiche vote — mais elles les rassemblent **toutes**
-(§7.5) : `Dossier.sources` est une liste **dérivée**, recomposée à chaque
-écriture par `app/domain/sources.py` depuis les documents que le dossier porte
-déjà (page du dossier, texte déposé, `rapportsCommission`, compte rendu de la Q2,
-texte voté, Légifrance). ⚠️ Ne rien y ajouter à la main : ce serait perdu au run
-suivant. Le seul document qu'il a fallu **ingérer** pour ça est le **rapport de
-commission** (`app/ingestion/rapports.py`) — il était dans l'archive des dossiers
-téléchargée à chaque run, sous la famille `RAPINIT` (« rapport sur une
-initiative », à distinguer des `RAPAUT`/`RAPTACOM`). Son URL publique contient le
-slug de la commission, que **rien** dans l'archive ne donne (et 4 des 12 organes
-les plus fréquents ne sont même pas des commissions : `due`, `ots`…) ; on passe
-donc par le **résolveur du site**, `/dyn/docs/{uid}`, qui redirige vers la page
-canonique et répond 404 sur un uid inconnu — dérivation depuis l'`uid` comme
-partout, **vérifiée par HEAD** avant d'être attachée (doctrine
-`attacher_portraits`). Mesuré : 287 rapports sur 205 dossiers, **0 non résolu**.
-Le compte rendu de séance est typé `debats` (pas `texte`) : son icône le
-distingue dans la liste. Le
-**résumé neutre est généré à l'ingestion par un gabarit déterministe** (`app/ai/`
-— `faits` → `rag` → `gabarit` → garde-fous, dans `generer_resume`), ancré
-uniquement sur les faits des scrutins (nature, trajectoire, résultat du vote
-décisif, positions des groupes, comptes d'amendements), **sans LLM ni clé API** :
-5 phrases sourcées, chacune portant son `source_id`, qui passent les **garde-fous
-éditoriaux** (§4.4) par construction. ⚠️ L'échafaudage qui permettait de faire
-produire ce résumé par un LLM (`ResumeGenerator`, prompts, file de revue) a été
-**supprimé** : la doctrine a tranché contre, un modèle distordant les faits de
-façon invisible aux garde-fous lexicaux. La fusion inter-runs ne préserve un
-résumé que s'il a été **relu par un humain** (`relu_par_humain`), sinon elle
-régénère. **Exposé des motifs** (le « pourquoi »
-du texte) récupéré du **PDF officiel du texte déposé** (`app/ingestion/textes_an.py`
-— URL dérivée de l'`uid` du document, extraction `pypdf`, dépôt initial d'abord ;
-**repli Sénat** `app/ingestion/textes_senat.py` quand le texte AN n'est qu'une
-transmission du Sénat → exposé récupéré sur senat.fr via le numéro cité)
-et stocké dans `Dossier.expose_motifs` : contenu **non neutre** (point de vue de
-l'auteur, §4.3), affiché en **bloc cité et attribué** (`ExposeMotifsCard`), jamais
-fondu dans le résumé neutre. Le **même PDF** livre aussi le **dispositif** (les
-articles du texte : `decouper_dispositif`, `Dossier.dispositif`) — lui est un
-**fait officiel**, jamais affiché brut (droit codifié illisible) mais servant de
-**source vérifiable** à la Q4. Un dispositif au-delà de `_MAX_DISPOSITIF`
-(10 000 car. : budget, PLFSS) n'est **pas stocké du tout** — le modèle ne doit
-jamais voir un texte partiel qu'il présenterait comme le tout (§2.5 ; à 15 700
-car. mistral-small part en rapport de 3 000 car., rejeté par les garde-fous).
-Le **même document de dépôt** livre enfin l'**initiative** — qui porte le texte
-(`app/ingestion/initiative.py`, `Dossier.initiative`) : le champ `auteurs` de
-l'archive donne soit un `acteurRef` (résolu en nom + groupe + `deputeId` par
-l'annuaire AMO, exactement comme un votant nominatif), soit un `organeRef`.
-Trois origines, aucune autre : **Gouvernement** dès que le texte est un *projet*
-de loi (art. 39 — on ne descend **jamais** au ministre déposant, dont la qualité
-n'est documentée dans aucune de nos sources et que 7 cas sur 48 seulement
-permettraient de nommer) ; **parlementaire** quand la source désigne **un seul**
-auteur de `qualite="auteur"` (plusieurs → l'origine reste, le nom disparaît :
-même règle que `auteur_amendement`, §2.5 ; les `qualite="rapporteur"` de la même
-liste ne sont jamais des auteurs) ; **Sénat** quand l'auteur est l'organe
-`PO838901` **et** que le dépôt est classé `INITNAV` — les deux indices sont
-exigés. L'initiative est lue sur le **dépôt initial** (plus petit numéro), jamais
-sur un document de navette : un texte renvoyé par le Sénat après une 1re lecture
-à l'Assemblée y est signé du Sénat, s'y rabattre ferait passer un texte né à
-l'Assemblée pour un texte sénatorial. Mesuré : **242/255 dossiers officiels**
-(49 · 124 · 69), zéro contradiction avec la nature écrite dans le titre.
-Préservée entre runs comme l'exposé (un run sans archive ne l'efface pas), et
-rattrapable seule par `python -m app.ingestion.initiatives`.
-Pas besoin de Légifrance pour ça (option a ; la
-neutralisation par LLM — option b — viendra avec un LLM assez fiable). **LLM local
-(Ollama, `mistral-small:24b` — `LLM_MODEL`) branché sur trois tâches
-vérifiables** : (1) la
-**classification de thème** (`app/ai/theme.py`) — les dossiers « Autre » de
-l'heuristique reçoivent un thème choisi dans la **liste fermée**, sortie
-hors-liste/verbeuse rejetée (repli) ; (1bis) les **publics concernés**
-(`app/ai/publics.py`, `resume.public_concerne` → section « Qui est concerné ? ») —
-même doctrine : liste fermée de 19 publics (miroir `publicEmoji` côté front),
-validation exact-match, cap 3, rien de valide → section masquée ; (2) les
-**4 questions citoyennes**
-(`app/ai/questions.py`, servies dans `resume.questions`, affichées par
-`QuestionsCard` en tête de fiche dossier — dont le **titre de la Q2 suit ce
-qu'elle montre** : « Quel était le principal désaccord ? » seulement si les
-groupes affichés ont plusieurs sens de vote, sinon « Ce que les groupes ont
-dit », et jamais « unanimité », que cette liste ne prouve pas ; une mention y
-rappelle que **seuls les groupes qui se sont exprimés en séance** y figurent —
-mesuré, ils sont en moyenne 6 de moins que les groupes ayant voté, et la carte se
-lisait sinon comme le panorama de l'hémicycle, §7.4) :
-« Pourquoi ont-ils débattu ? » (Q1,
-depuis l'exposé) et « Qu'est-ce que ça change ? » (Q4, au conditionnel) sont
-passées à des **contrôles déterministes** (`valider_reponse` : chiffres présents
-dans la source, nature du texte non inversée, lexique, caractères hors français,
-attribution, **glose entre parenthèses** absente de la source, **déposant non
-requalifié**) — rejet → « information non disponible ». Les deux derniers
-garde-fous appliquent la même règle que les chiffres — *le modèle reformule, il
-n'ajoute rien* : un sigle ne se développe pas tout seul (cas réel : « l'Anses
-(Agence nationale de sécurité du médicament…) », développement absent de la
-source et qui est celui de l'**ANSM**), et un amendement « du Gouvernement »
-n'est pas déposé par « le député » (`deposant()` dans `normalize.py` lit le
-déposant dans l'objet officiel ; sur un vote d'amendement la **nature du texte
-est ignorée** — un député amende couramment un projet de loi —, et deux indices
-contradictoires donnent `None`, donc aucun contrôle §2.5). Contrôle
-**asymétrique**, appliqué aux seules réponses **attribuées** : la Q1 garde son
-amorce « Les députés ont examiné ce texte… ». Les réponses validées étant
-réutilisées entre runs, tout nouveau garde-fou s'applique au passé via
-`python -m app.ingestion.revalider` (175 réponses fautives effacées à
-l'introduction de ces deux-là). **Q4 a trois sources, dans
-cet ordre** — chacune plus proche de ce qui s'applique réellement que la
-suivante : (1) le **texte définitivement voté** (`Dossier.texteAdopte`, la
-« petite loi ») — fait, *sans* attribution et à l'**indicatif** (« La loi
-interdit… »), car le texte s'applique ; (2) le **dispositif du texte déposé**
-(fait aussi, mais d'une version que la navette a modifiée, d'où le
-**conditionnel**) ; (3) l'**exposé** (parole du déposant — réponse
-obligatoirement préfixée « Selon l'auteur du texte »). C'est le prolongement de
-la règle « le fait officiel prime sur la parole du déposant » : **la loi votée
-prime sur le texte déposé**. Une réponse déjà en base **remonte** l'échelle dès
-qu'une source plus haute apparaît (`peut_mieux_faire` compare la
-`changementSource` stockée à la meilleure disponible). Sans cette échelle, la
-fiche d'une loi en vigueur affichait le pitch de son auteur au conditionnel sur
-une *proposition* — mesuré, 83 des 96 lois promulguées. Quand la source est un
-texte officiel (loi votée, dispositif de texte
-ou d'amendement), un mot du lexique évaluatif est admis **s'il figure tel quel
-dans la source** (`lexique_de_la_source_admis`) : on interdit au modèle
-d'**ajouter** un jugement, pas de reprendre les mots de la loi (cas réel :
-« contenus dangereux », écrit dans l'article unique d'une résolution) ; le **résultat** (Q3) est
-composé **déterministiquement** depuis le vote décisif ; le **désaccord** (Q2)
-vient des **comptes rendus des débats** (archive « SyceronBrut »,
-`app/ingestion/debats.py`), par **trois viviers de prises de position** dans cet
-ordre : la section **« Explications de vote »** (chaque groupe explique lui-même
-sa position), sinon la **discussion générale**, sinon seulement les débats **sans
-section dédiée** — motion de rejet préalable et paroles placées directement sous
-le titre de discussion (motion de censure, déclaration art. 50-1). Les morceaux
-consécutifs d'un même orateur sont **recollés** et la **présidence de séance est
-écartée** (elle est députée, donc résoluble en groupe : ses annonces d'ordre du
-jour ne sont pas une position, §7.4). Le débat est relié au **vote conclusif** du
-dossier (`_vote_conclusif` : ensemble > article unique > texte cité directement >
-vote procédural > motion ; **jamais** un vote d'article numéroté) par le **numéro
-de texte** cité au CR — joint aux numéros de tous les documents du dossier,
-dédoublonnés par **(législature, numéro)** car la série redémarre à chaque
-législature, et robuste à la navette comme au vote solennel à J+n —, sinon par
-**date de séance + recoupement du titre** ; un candidat unique le jour J ne
-suffit **jamais** sans recoupement (ambiguïtés écartées, §2.5), mais un même
-texte rouvert plusieurs fois le même jour (reprise de séance) est **fusionné**
-avant l'index plutôt que traité comme deux candidats ambigus. Chaque explication
-est ensuite **paraphrasée en une phrase, validée et attribuée à
-son groupe** (§7.4) — le **sens pour/contre vient du scrutin**, jamais du LLM, et
-jamais de synthèse éditoriale (« qui a raison ») ; l'**objet du vote d'ancrage**
-accompagne les positions (`desaccordObjet`), sans quoi « pour » sur une motion de
-rejet se lirait comme « pour le texte ». La validation d'un argument
-(`valider_argument`, règle unique partagée par la génération et la revalidation)
-ajoute aux contrôles communs un **ancrage lexical** : une part minimale des mots
-de contenu de la paraphrase doit se retrouver dans la phrase réellement
-prononcée. Même règle que les chiffres — *le modèle reformule, il n'ajoute rien* —
-mais c'est la seule qui attrape une phrase **plausible et fabriquée** : mesuré en
-base avant garde-fou, « le texte ne répond pas aux attentes des Français en
-matière de sécurité et d'immigration » était servi tel quel sur trois dossiers
-sans rapport (dont un texte sur les honoraires d'expert-comptable), attribué à un
-groupe qui avait voté **pour** — aucun contrôle de forme ne pouvait le voir. Pour
-que ce garde-fou (et les suivants) s'applique au passé, l'**extrait de compte
-rendu** qui a produit chaque argument est conservé hors payload
-(`dossier.desaccord_sources`) : la Q2 se revalide donc hors ligne comme la
-Q1/Q4 le font depuis l'exposé. Un argument sans source stockée est
-**invérifiable**, donc effacé par `revalider` (1 476 arguments l'ont été à
-l'introduction de l'ancrage). Le seuil est volontairement **permissif** au départ,
-le resserrer ne coûtant plus aucun appel au modèle. ⚠️ On **ne génère toujours
-PAS** le
-résumé/prose neutre par LLM (mistral 7B distordait les faits invisiblement ; seul
-ce qui est attribuable à une source unique ET vérifiable déterministiquement
-passe par le modèle) — le **gabarit déterministe reste seul maître du résumé**.
-Les **votes d'amendement sont enrichis** de leur **contenu** (dispositif : ce que
-l'amendement change), de leur **exposé sommaire** et de l'**article visé**, tirés
-de l'open data AN (`app/ingestion/amendements.py` — archive
-`amendements_div_legis`, ~300 Mo, **sans Légifrance**). Liaison au vote par
-**(dossierRef, numéro)** parmi les amendements de **séance** (préfixe d'organe
-« AN », numéro numérique = celui cité dans l'objet du vote) ; l'ambiguïté entre
-lectures d'une même navette est levée par la **date** du vote (fenêtre ± 3 j),
-sinon on n'attache rien (§2.5). ~77 % des votes d'amendement (5,5 k) reçoivent
-ainsi leur contenu. Le **dispositif** est un extrait officiel factuel ; l'**exposé
-sommaire** est le point de vue de l'auteur (non neutre, §4.3), affiché en **bloc
-attribué** — déplié à la demande dans la liste (`AmendementRow`) **et** sur la
-**fiche vote** de l'amendement/sous-amendement (`ScrutinDetailScreen`, où le
-contenu est aussi porté par le `Scrutin`) —, jamais fondu dans le résumé neutre —
-même traitement que l'exposé des motifs. Best-effort : un échec de
-téléchargement de l'archive préserve l'enrichissement déjà en base. Chaque **vote
-d'amendement porte aussi ses questions citoyennes** (`Scrutin.questions`,
-générées à l'ingestion par `generer_questions_amendement`) : « pourquoi » (LLM ←
-exposé sommaire, préfixe vérifié « Selon son auteur »), « changement » (LLM ←
-dispositif, conditionnel) — mêmes contrôles déterministes (`valider_reponse`) —
-et « résultat » déterministe (**camp gagnant en premier** : « rejeté par 268
-voix contre 188 », jamais l'inverse) ; réponses validées réutilisées entre runs.
-Le « qui était pour / contre » n'est pas généré : l'app le rend depuis
-`positionsGroupes` (`LigneFracture`).
-
-Les **députés** (§5.2) ont leur propre référentiel (table `depute`, construite
-depuis l'archive AMO : nom, groupe du mandat GP en cours, circonscription, début
-de mandat, plus la **photo officielle** — seule URL *dérivée* de l'`acteurRef`,
-donc attachée uniquement après vérification HEAD, sinon `null` : 576/577) et leurs **votes nominatifs** (table `vote_depute`, une ligne par
-député × scrutin — 577 députés et ~1,27 M de votes sur la base de dev). Ces
-lignes portent le fait déduit **« contre son groupe »** (position ≠
-`positionMajoritaire` du groupe sur le MÊME scrutin, calculé pour les seules
-positions exprimées, `null` si le groupe n'a pas de position majoritaire
-exploitable). Alimentés par le run normal **et** par une commande autonome
-`python -m app.ingestion.deputes` (AMO + archive scrutins seulement, ni LLM ni
-dossiers : quelques minutes au lieu d'un run complet). Détails dans
-`backend/README.md`.
-
-**Le Sénat** (`app/ingestion/senat.py`, `senateurs.py`) — **Phase 1bis faite** :
-les scrutins publics du Sénat sont ingérés et **rejoignent le dossier où vivent
-déjà les votes de l'Assemblée**, si bien qu'un texte en navette ne se dédouble
-pas dans le fil. Le Sénat ne publie pas d'archive groupée : on lit, par scrutin,
-sa page HTML (objet, date de séance, sort, résultat, **analyse par groupe**, lien
-vers le dossier) et son JSON nominatif (une ligne par matricule, codes
-`p`/`c`/`a`/`n`), plus l'annuaire `api-senat/senateurs.json` (avec la **photo
-officielle donnée par la source**, contrairement à l'AN où l'URL est dérivée).
-⚠️ L'année des URLs est celle du **début de session** (oct.→sept.) : le scrutin
-n° 340 de la session « 2025 » date du 21 juillet **2026** (`session_pour`).
-Rattachement en cascade, miroir de celle de l'AN : (1) `titreDossier.senatChemin`
-des `dossierParlementaire` de l'archive AN — **l'Assemblée publie elle-même
-l'URL du dossier Sénat**, 873 dossiers appariés sans une requête ; (2) le lien
-inverse (la page dossier du Sénat cite l'URL AN, résolue via `titreChemin`, casse
-repliée) ; (3) la réconciliation **par titre** déjà en place — les objets de vote
-du Sénat sont structurellement identiques à ceux de l'AN au préfixe « sur » près,
-qu'on retire à l'entrée pour que tout l'aval s'applique tel quel ; (4) sinon un
-**dossier d'origine sénatoriale** `SEN-{slug}` (le slug du Sénat est stable — pas
-de hachage, contrairement aux `TXT-…`) ; (5) sinon un singleton. Mesuré : 12/12
-des derniers scrutins rattachés à un dossier AN. Cas nouveau, absent de l'AN :
-les **amendements identiques** portent plusieurs numéros → on n'en retient
-**aucun** (§2.5). ⚠️ **Jamais de « contre son groupe » ni de cohésion au
-Sénat** : les bulletins d'un scrutin public ordinaire y sont déposés par un
-délégué pour tout le groupe, et la source ne distingue pas ces scrutins de ceux à
-la tribune — le fait serait un artefact de procédure présenté comme un fait
-politique (§7.4). Les sénateurs vivent dans les **mêmes tables** que les députés
-(`depute`, `vote_depute`, `groupe`), discriminés par `chambre`, ids préfixés
-`SEN-…`. Commande autonome `python -m app.ingestion.senat` (~10 s pour
-40 scrutins), ou intégrée au run complet (`--sans-senat` pour s'en passer).
-L'annuaire livre aussi les `organismes` de chaque sénateur, d'où la **commission
-permanente** (`Depute.commission`, 346/348) : les sept permanentes portent un
-`ordre` 7001-7007, la commission des affaires européennes — à laquelle 41
-sénateurs appartiennent **en plus** de la leur — ouvre une autre série (8001), si
-bien que retenir le plus petit `ordre` donne la permanente sans lister de libellés
-en dur, qui vieilliraient mal.
-
-Hors périmètre pour l'instant : les **débats du Sénat** (donc pas de Q2 sur un
-dossier purement sénatorial) et l'enrichissement des **amendements** (base Ameli).
-⚠️ Le **début de mandat** d'un sénateur n'est pas un trou d'ingestion : `senateurs.json`
-ne publie **aucune date de mandat** (vérifié à la source). Le combler demanderait
-une autre source (`data.senat.fr`, ODSEN) — d'ici là `depuis` reste `None` et
-l'app masque le champ, ce qui est le comportement correct (§2.5).
-
-**Trajectoire au Parlement** (`app/ingestion/navette.py`) — la frise est
-calculée à l'ingestion depuis les **`actesLegislatifs`** des
-`dossierParlementaire`, que l'archive *dossiers législatifs* (déjà téléchargée à
-chaque run) contenait sans qu'on les lise. Ils donnent l'enchaînement officiel
-**des deux chambres** avec dates et `statutConclusion` (AN1 · SN1 · CMP · CC ·
-PROM). Liste fermée de 11 codes d'étape (on écarte « Travaux », « Débat » et
-« Mise en application de la loi ») ; un libellé de conclusion non reconnu — dont
-les avis du Conseil constitutionnel, qui ne sont ni adoption ni rejet — laisse
-l'étape **sans statut** (§2.5). Repli pour les dossiers sans actes (`TXT-…`,
-`SEN-…`) : les mentions de navette des objets de vote, **distinguées par
-chambre**. C'est la raison du déplacement côté backend : les scrutins d'une
-chambre ne peuvent pas documenter l'autre. ⚠️ Quand un dossier figure dans les
-**deux** archives téléchargées (193 cas : un texte reporté après la dissolution
-garde son `dossierRef` L16), c'est la copie de la législature **courante** qui
-prime — celle de la précédente est un instantané figé, et 36 dossiers y sont
-sans leur promulgation.
-
-**Où en est le texte** (`etat_du_texte`, même module) — les mêmes actes donnent
-l'état **d'aujourd'hui**, que la frise seule ne disait pas : `promulgue` (96 —
-`PROM-PUB` livre `codeLoi`, la date, le JO et l'URL Légifrance, présents
-ensemble sur 96/96, d'où la **source du texte en vigueur** posée sur le
-dossier), `en_navette` (126 — la dernière étape retenue, telle quelle),
-`resolution` (21), `conseil_constitutionnel` (7 — saisi sans conclusion
-publiée), `retire` (4 — un `…RTRINI` **dans la dernière étape** seulement : un
-retrait suivi d'autres actes ne conclut rien). Soit **254/328** ; sans actes,
-pas d'état (§2.5). `resolution` mérite son état parce qu'une résolution est
-conclue dès sa lecture unique — ni transmise à l'autre chambre, ni promulguée :
-la ranger « en navette » ferait passer 21 textes terminés pour des textes en
-attente. Le **code de procédure** (8 ou 22) est le seul indice retenu, jamais le
-libellé de l'étape. ⚠️ **Aucun champ ne décrit une étape à venir** — un test le
-vérifie sur la liste des champs elle-même. Préservé entre runs comme
-l'initiative, et rattrapable seul par `python -m app.ingestion.etats`.
-
-**La loi finale** (`app/ingestion/textes_adoptes.py`) — tout ce qui précède
-décrit le texte **déposé** (exposé, dispositif, Q4) ; sur une loi promulguée,
-cette version n'existe plus. `PROM-PUB.texteLoiRef` désigne le **texte
-définitivement voté** (la « petite loi »), dont l'URL se dérive de l'`uid` comme
-celle du texte déposé : `PIONANR5L17BTA0075` → `…/l17t0075_texte-adopte-seance`,
-`PRJLSNR5S459BTA0040` → `senat.fr/leg/tas24-040`. `TexteAdopte` dissocie le
-**lien** (posé dès que l'archive désigne le texte : 76/96) et le **corps** (stocké
-seulement sous `_MAX_DISPOSITIF`, 45/76, car il sert de source à la Q4 et doit
-être lu *entièrement* par le modèle). Q4 réécrite sur 44 (1 rejetée par les
-garde-fous). ⚠️ Côté Sénat l'année de l'URL est celle de la **session**, jamais
-approchée : la numérotation redémarre à chaque session, et un décalage d'un an
-attrape un texte sans rapport (vérifié : `tas24-159` est une résolution
-européenne sur la subsidiarité). ⚠️ Les **20 lois sans `texteLoiRef`** ne sont
-pas devinées — leur dossier porte 2 à 4 textes adoptés (un par lecture), et le
-plus récent est parfois la version *modifiée par le Sénat*, qui n'est pas la loi.
-`decouper_loi` n'est pas `decouper_dispositif` : une petite loi n'a pas d'exposé,
-son en-tête est administratif, et le découpage part du **premier article** —
-repéré **sans** `IGNORECASE`, car les titres d'article sont capitalisés là où une
-référence en prose ne l'est pas (« à l'article 45 de la Constitution », qui figure
-justement dans cet en-tête). Préservé entre runs, rattrapable par
-`python -m app.ingestion.lois`.
-
-⚠️ **Pas d'Alembic** dans le dépôt (`init_models` = `create_all`, qui ne touche
-jamais une table existante). Les colonnes ajoutées au modèle s'appliquent via
-`python -m app.db.migrations` — DDL **additives et idempotentes**, à jouer après
-un `git pull` qui change `db/models.py`.
-
-## Stack & commandes
-
-- **Expo** SDK 54, **React Native** 0.81, **React** 19, **TypeScript** strict.
-- Navigation : `@react-navigation` (native-stack + bottom-tabs).
-- Alias d'import : `@/*` → `src/*` (résolu par TypeScript **et** Metro).
+- Frontend : Expo SDK 54, React Native 0.81, React 19, `@react-navigation`
+  (native-stack + bottom-tabs) et `react-native-svg`. L'alias `@/*` → `src/*`
+  est résolu par TypeScript **et** par Metro.
+- Backend : FastAPI, Pydantic, SQLAlchemy async. **Pas d'Alembic.**
 
 ```bash
-npm start          # démarre Metro (QR code)
-npm run ios        # build + simulateur iOS
-npm run android    # build + émulateur Android
-npx tsc --noEmit   # vérification de types (à lancer avant de conclure)
+# Frontend (racine)
+npm start                  # Metro (QR code, Expo Go / dev client)
+npm run ios                # expo run:ios : build dev client + simulateur
+npm run start:clear        # Metro sans cache
+npx tsc --noEmit           # vérification de types — à lancer avant de conclure
+npx expo export            # bundle : attrape les erreurs d'import/résolution
+
+# Backend (dans backend/, venv OBLIGATOIRE — sinon ModuleNotFoundError)
+source .venv/bin/activate
+pip install -e ".[dev]"
+uvicorn app.main:app --reload --host 0.0.0.0   # :8000/docs ; --host pour un iPhone physique
+pytest                                        # tests forcés sur le seed (conftest)
+python -m app.db.migrations                   # après un pull qui change db/models.py
 ```
 
-Pas de suite de tests côté frontend. Vérification = `tsc --noEmit` + `expo export`
-(le bundle Metro attrape les erreurs de résolution/import).
+Le frontend n'a **pas de suite de tests** : on le vérifie avec `tsc --noEmit` et
+`expo export`. L'URL de l'API est dérivée de l'hôte Metro (`src/api/config.ts`),
+surchargeable par `EXPO_PUBLIC_API_URL`. Le backend doit tourner pour le premier
+chargement, puis le cache AsyncStorage prend le relais hors-ligne.
 
-**Backend** (dans `backend/`, voir son README) :
+### Ingestion et rattrapages ciblés
 
-```bash
-cd backend && source .venv/bin/activate   # venv Python 3.12 (indispensable)
-pip install -e ".[dev]"                   # après un pull qui change pyproject (bcrypt, pyjwt)
-python -m app.db.migrations               # colonnes ET tables ajoutées au modèle (additif, idempotent)
-python -m app.ingestion.run --limit 300   # ingère l'open data AN + Sénat dans Postgres
-python -m app.ingestion.senat --limit 40  # sénateurs + scrutins du Sénat seuls (~10 s)
-python -m app.ingestion.deputes           # référentiel députés + votes nominatifs seuls
-python -m app.ingestion.reformater        # recalcule titre court + accroche en base (ni réseau ni LLM)
-python -m app.ingestion.revalider         # repasse les garde-fous sur les réponses en base, efface les fautives
-python -m app.ingestion.divisions         # recalcule l'indice de division (rangée « votes les plus disputés »)
-python -m app.ingestion.initiatives       # renseigne « qui porte le texte » en base (archive 10 Mo, ni PDF ni LLM)
-python -m app.ingestion.etats             # renseigne « où en est le texte » en base (même archive de 10 Mo)
-python -m app.ingestion.lois              # attache la LOI FINALE (texte voté) + réécrit la Q4 à l'indicatif
-python -m app.ingestion.sources           # rapports de commission + recompose « les documents du dossier »
-python -m app.ingestion.types_vote        # forme des scrutins (ordinaire/solennel/motion) + recompose la Q3
-python -m app.ingestion.motions          # classe les motions (rejet préalable, question préalable…) en base
-uvicorn app.main:app --reload             # http://localhost:8000/docs (sert la base via .env)
-pytest                                     # suite de tests (forcés sur seed)
+Le run complet (`python -m app.ingestion.run`) couvre AN + Sénat + LLM et dure
+des heures sur toute la législature. Il **committe par dossier** : on peut
+l'interrompre sans risque. Options : `--limit N`, `--sans-senat`.
+
+Les commandes ciblées ci-dessous évitent un run complet. Le README backend
+détaille ce que chacune télécharge.
+
+| Commande `python -m app.ingestion.…` | Fait | Réseau | LLM |
+|---|---|---|---|
+| `deputes` | référentiel députés + votes nominatifs | archives AN | – |
+| `senat --limit 40` | sénateurs + scrutins du Sénat (+ reclasse leurs motions) | senat.fr | – |
+| `reformater` | titre court + accroche | – | – |
+| `revalider` | repasse les garde-fous, efface les réponses fautives | – | – |
+| `divisions` | indice « votes les plus disputés » | – | – |
+| `motions` | classe les motions (ne déclasse jamais) | – | – |
+| `initiatives` / `etats` | qui porte le texte / où il en est | archive dossiers (10 Mo) | – |
+| `sources` | rapports de commission + « documents du dossier » | idem + HEAD | – |
+| `types_vote` | forme du scrutin + seuil, recompose la Q3 | archive scrutins | – |
+| `lois` | loi finale + Q4 à l'indicatif (`--dry-run`, `--sans-llm`) | archive + PDF | oui |
+
+## Architecture frontend
+
+```
+App.tsx                 Racine : ProfilProvider + RootNavigator (monté après polices + accueil + profil)
+src/theme/              Source unique du visuel : colors, spacing, typography
+src/types/index.ts      Contrat de données — miroir de backend/app/schemas/ (camelCase)
+src/api/                Client HTTP (timeout), endpoints, cache offline (cache.ts)
+src/hooks/              Un hook par ressource : chargement + cache + refresh (état `refreshing` distinct)
+src/session/            ProfilContext — le seul provider applicatif (session + préférences)
+src/storage/            Préférences du lecteur (≠ api/cache.ts, qui garde des données publiques)
+src/constants/          glossaire.ts (source unique, §8), motions.ts, themes.ts, sorts.ts
+src/utils/              format.ts (libellés, badgeDossier, voteDecisif), periodes.ts, validation.ts
+src/components/         Composants réutilisables (barrel index.ts)
+src/screens/            Un écran par fichier (barrel index.ts)
+src/navigation/         MainTabs (Accueil · Recherche · Députés · Assistant · Profil) + RootNavigator
 ```
 
-Piège fréquent : lancer une commande backend **sans** activer le venv → le Python
-système (sans les deps) est utilisé et échoue (`ModuleNotFoundError`).
+Les fiches (`DossierDetail`, `ScrutinDetail`, `DeputeDetail`, `Dossiers`,
+`Glossaire*`, `Onboarding`, `Connexion`) vivent dans le **stack racine** : on les
+atteint depuis plusieurs onglets et elles couvrent la tab bar.
 
-## Architecture du code
+| Écran | Hook → endpoint | À respecter |
+|---|---|---|
+| `HomeScreen` | `useAccueil` → `/accueil`, `useRecap` → `/recap` | Affichage **atomique** : une seule réponse, pas de remplissage progressif. Rangées vides masquées. Pas de défilement infini. La rangée « votes les plus disputés » vient de `app/domain/division.py`, de l'arithmétique sur les décomptes : chiffres affichés, motions de censure et votes de conduite de séance exclus. |
+| `DossierDetailScreen` | `useDossier` → `/dossiers/{id}` | Ordre : frise + « Où en est le texte » → loi → initiative → questions → votes (vote décisif mis en avant) → amendements → sous-amendements → **documents du dossier**. C'est le **seul** endroit de la fiche avec des liens vers des documents. |
+| `ScrutinDetailScreen` | `useScrutin` → `/scrutins/{id}` | Résultat **en tête**. Vote sur le texte : groupes + `LigneFracture` + nominatif. Vote d'amendement : `QuestionsAmendementCard` et **pas** de vote par groupe. |
+| `ExplorerScreen` | `useThemes` → `/themes` | Découverte uniquement : il **ouvre** `Dossiers`, il ne cherche jamais lui-même. |
+| `DossiersScreen` | `useRecherche` → `/recherche`, `/deputes?q=` | Demande `LIMITE_MAX` (100). Le tri et les groupes viennent du seul `utils/periodes.ts`. |
+| `Glossaire[Terme]Screen` | local + `useRecherche` | Un terme renvoie vers les dossiers où il apparaît. Un voisin sans fiche est atténué et non cliquable. |
+| `DeputesScreen` / `DeputeDetailScreen` | `useDeputes`, `useDepute` → `/deputes…`, `/groupes` | Effectif réellement servi, jamais « 577 » en dur. Pas de taux de participation. |
+| `Onboarding` / `Profile` / `Connexion` | `ProfilContext` → `/inscription`, `/connexion`, `/moi…` | Tout est facultatif, « Passer » partout. L'anneau du profil est une couverture de corpus, pas un score du lecteur. Pas de « mot de passe oublié ». |
+| `AssistantScreen` | — | Placeholder. Hors périmètre V1 (§2.3). |
+
+Points partagés à ne pas dupliquer :
+- **Badge de dossier** : `badgeDossier` (`format.ts`) est partagé par la carte,
+  la tuile, le hero et la fiche. Ordre : loi promulguée → « Promulguée » ; dernier
+  vote = motion → « Motion adoptée/rejetée » ; sinon le statut.
+- **Vote décisif** : `voteDecisif` est le miroir de `_vote_decisif` côté backend.
+  C'est le vote sur l'ensemble le plus récent ; s'il n'y en a pas, on ne désigne
+  rien.
+- **Titre d'un vote** : `libelleScrutin(objet, typeMotion)`. Un objet non
+  reconnu est restitué tel quel.
+- **Glossaire** : `constants/glossaire.ts` alimente les écrans dédiés **et**
+  l'aide en ligne (`DefinitionGlossaire`). La table `MOTIFS` est **ordonnée** :
+  le cas particulier passe avant le général. Un terme hors liste n'a pas d'aide.
+- **Frise et état du texte** : ils sont **servis par l'API**
+  (`Dossier.trajectoire`, `Dossier.etat`). Ne les dérive pas côté app : les
+  scrutins d'une chambre ne documentent pas l'autre.
+
+## Architecture backend
 
 ```
-App.tsx                      Racine : GestureHandlerRootView + SafeAreaProvider + ProfilProvider
-                             + RootNavigator (monté après polices + accueil + profil local)
-src/
-  theme/                     Design system (source unique de vérité visuelle)
-    colors.ts                Palette sombre éditoriale (prototype new_screens), statuts, couleurs de vote
-                             + états de formulaire (⚠️ distincts de adopte/rejete, cf. « Pièges »)
-    spacing.ts               Échelle d'espacement + rayons
-    typography.ts            Échelle typographique (serif titres · sans corps · mono métadonnées)
-  types/index.ts             Modèle de données (miroir des schémas backend, §5.3 MVP)
-  api/                       Client HTTP : config (URL), client (apiGet/apiPost/apiPut + timeout),
-                             dossiers+scrutins, deputes, comptes, cache offline
-  storage/preferences.ts     Choix du lecteur sur l'appareil (thèmes, département, alerte, jeton)
-                             — distinct de api/cache.ts, qui garde des données publiques
-  session/ProfilContext.tsx  Session + préférences : le seul provider applicatif de l'app
-  utils/validation.ts        Règles de saisie du compte (miroir de app/schemas/utilisateur.py)
-  hooks/                     useDossiers / useDossier / useScrutin / useRecherche + useThemes
-                             + useDeputes / useDepute (chargement + cache + états)
-  constants/themes.ts        Emoji + teintes par thème
-  constants/glossaire.ts     Glossaire : contenu + reconnaissance des libellés (§8)
-  constants/motions.ts       Ce qu'emporte l'adoption d'une motion (l'inversion de sens)
-  types/glossaire.ts         Types du glossaire (PAS un miroir backend — contenu local)
-  utils/format.ts            Formatage dates, libellés de statut/position/chambre, badge de
-                             dossier (`badgeDossier`), temps de lecture
-                             (⚠️ plus de `phasesNavette` : la trajectoire vient de l'API)
-  utils/periodes.ts          Groupage/tri par période de la chronologie (écran Dossiers)
-  components/                Composants réutilisables (DossierCard, StateViews…)
-                             + formulaires : BoutonPrincipal, ChampTexte, Interrupteur, Chip
-                               (partagé avec DeputesScreen), ProgressionEtapes
-                             + les 5 étapes Onboarding{Bienvenue,Compte,Themes,Departement,Alertes}
-  screens/                   Un écran par fichier (barrel dans index.ts)
-  navigation/
-    types.ts                 Types de navigation (RootStack + MainTabs)
-    MainTabs.tsx             Bottom tabs : Accueil · Recherche (→ ExplorerScreen) · Députés · Assistant · Profil
-    RootNavigator.tsx        Stack : MainTabs + DossierDetail + ScrutinDetail + DeputeDetail
-                             + Dossiers (résultats) + Glossaire + GlossaireTerme
-                             + Onboarding (route initiale au 1er lancement) + Connexion
+app/main.py            App FastAPI + routers
+app/api/routes/        dossiers.py (/dossiers, /scrutins, /recherche, /themes, /accueil, /recap),
+                       deputes.py (/deputes, /groupes), comptes.py, health.py
+app/schemas/           Pydantic — miroir de src/types (scrutin.py, depute.py, utilisateur.py)
+app/repositories/      DossierRepository (LECTURE seule) : memory.py (seed) | postgres.py ;
+                       UtilisateurRepository (protocole séparé) : utilisateurs.py
+app/db/                models.py, session.py, migrations.py (DDL additives et idempotentes)
+app/domain/            Règles pures : division.py, enums.py, recherche.py (search_index), sources.py
+app/ai/                Résumé déterministe (faits, rag, gabarit, guardrails) + tâches LLM validées
+                       (llm.py, questions.py, theme.py, publics.py)
+app/ingestion/         run.py → sync.py (SyncJob) + un module par source (cf. README backend)
+app/data/seed.py       Données FICTIVES (backend memory + tests) — ne jamais les présenter comme réelles
 ```
 
-Flux : `RootNavigator` → `MainTabs` (tabs) → `DossierDetail` puis `ScrutinDetail`
-sont au niveau du stack racine (accessibles depuis Accueil ET Explorer, couvrent
-la tab bar). `Dossiers` s'y trouve également : Explorer l'**ouvre** au lieu
-d'afficher les résultats sur place, de sorte que la page de découverte reste
-derrière et que le retour arrière y ramène.
-`Glossaire` / `GlossaireTerme` y sont aussi : on y entre par
-Explorer, mais également par l'aide en ligne d'une frise de dossier ou d'un titre
-de fiche vote — d'où le libellé de retour **« Retour »** sur la fiche d'un terme
-(plusieurs provenances) et « Explorer » sur l'index (une seule).
+- **`REPOSITORY_BACKEND`** vaut `memory` (seed, valeur par défaut) ou `postgres`.
+  En dev, `backend/.env` fixe `postgres`. Les tests forcent `memory`. Les comptes
+  suivent ce réglage : en `memory`, un compte est perdu à l'arrêt.
+- **Comptes**, les seules écritures de l'API :
+  - minimisation : prénom, nom, e-mail, empreinte bcrypt ;
+  - `Compte` n'expose **jamais** l'empreinte ;
+  - e-mail inconnu et mot de passe faux renvoient le **même** 401 avec le même
+    message ;
+  - l'e-mail est stocké en minuscules ;
+  - `JWT_SECRET` est obligatoire hors dev. En dev, le secret est éphémère, donc
+    il faut se reconnecter après un redémarrage, et ce n'est pas un bug ;
+  - les routes de lecture restent publiques, et un test le vérifie.
+- **Regroupement d'un vote en dossier**, en cascade : `dossierRef` officiel →
+  réconciliation par titre dans l'archive des dossiers législatifs (correspondance
+  exacte, puis par signature ; législature courante puis précédente) → dossier
+  reconstitué `TXT-…` (id dérivé de la signature du titre) → singleton
+  (`estEvenementAutonome` : motion de censure, déclaration). Le Sénat suit la même
+  logique : `senatChemin` publié par l'AN → lien inverse → titre → `SEN-{slug}` →
+  singleton.
+- **Préservation entre runs.** Un run sans archive n'efface pas ce qui est en
+  base : exposé, initiative, état, loi finale, réponses validées, enrichissement
+  des amendements. Le résumé n'est préservé que s'il est `relu_par_humain`.
+- **Champs dérivés** : `Dossier.sources` est recomposé à chaque écriture par
+  `domain/sources.py`. **N'y ajoute rien à la main**, ce serait perdu au run
+  suivant.
+- **Nouvelle colonne** : ajoute aussi l'énoncé dans `app/db/migrations.py`, car
+  `create_all` ne modifie jamais une table existante.
 
-## Règles produit qui contraignent le code
+## Modèle de données
 
-Ces règles viennent du MVP et **priment sur les préférences esthétiques**. Toute UI
-qui affiche du contenu de scrutin doit les respecter.
+Le contrat est `src/types/index.ts` ⇄ `backend/app/schemas/`, en camelCase des
+deux côtés. **Toute évolution se répercute des deux côtés.**
 
-1. **Neutralité (§2.5, §7).** On n'affiche jamais une phrase qui ne peut pas être
-   rattachée à une source officielle. Donnée manquante → on **masque le bloc** ou on
-   affiche « information non disponible », jamais une supposition. Voir les blocs
-   conditionnels dans `DossierDetailScreen` (`pourquoi`, `changement`,
-   `publicConcerne`, `amendements`).
-2. **Symétrie entre groupes (§7.4).** Même gabarit, même longueur pour tous les
-   groupes politiques. `GroupVoteRow` est identique pour chacun.
-3. **Statut jamais porté par la couleur seule (RGAA, §8).** Toujours icône + libellé
-   texte. Voir `StatusBadge` et `Legend` (carrés + labels).
-4. **Réversibilité (§7.5).** L'utilisateur atteint la source brute en 1 tap
-   (`SourceLink` ouvre l'URL officielle).
-5. **Transparence IA (§7.6).** Tout résumé affiche `AiNotice` (« généré
-   automatiquement… relu par un humain » + niveau de confiance + « signaler une
-   erreur »).
-6. **Scrutins publics uniquement pour le nominatif (§5.2).** Le champ
-   `scrutinPublic` (au niveau de chaque `Scrutin`) conditionne l'affichage du « vote
-   par groupe » ; sinon on explique l'absence de ventilation (vote à main levée).
-7. **Langue simple (§8).** Phrases courtes, pas de jargon non expliqué.
-   `constants/glossaire.ts` est la **source unique** du glossaire, pour ses
-   **deux surfaces** : les écrans dédiés (on vient y chercher un mot) et
-   l'**aide en ligne** là où le mot s'affiche sans être expliqué — une étape de
-   `TrajectoireNavette`, le titre d'une fiche vote —, dépliée par
-   `DefinitionGlossaire`, qui renvoie vers la fiche complète. Un seul fichier
-   pour les deux, sinon la même app explique un mot de deux façons. Les libellés
-   affichés ne sont pas les entrées du glossaire (« 1ère lecture (2ème assemblée
-   saisie) ») : la table `MOTIFS` fait le pont, **ordre significatif** (le cas
-   particulier avant le général), motifs pliés d'avance car la source mélange
-   les casses. Terme hors liste → aucune aide, on n'improvise pas d'explication
-   (§2.5). Ajouter un terme = une entrée dans ce fichier, jamais une définition
-   en dur dans un écran.
-8. **Mise à jour factuelle (§7.7).** Le badge « mis à jour » d'un dossier reste
-   descriptif (« Nouveau vote »), jamais évaluatif. Il signale qu'un scrutin s'est
-   ajouté, pas un jugement sur l'évolution du texte.
+- **`Dossier`** est l'entité centrale (un texte). Il porte :
+  - `resume`, avec `questions` et `publicConcerne` ;
+  - `scrutins` (des `ScrutinResume`), `amendements` (avec `sousAmendements`) ;
+  - `trajectoire`, `etat`, `initiative`, `texteAdopte` ;
+  - `exposeMotifs` (parole de l'auteur) et `dispositif` (fait officiel, jamais
+    affiché brut, source de la Q4) ;
+  - `titreOfficiel` (toujours affiché), `titreClair`, `accroche?` (tirée de la Q1 :
+    pas de Q1, pas d'accroche) ;
+  - `statutMotion?`, `miseAJour?`, `estEvenementAutonome` (posé à l'ingestion,
+    **jamais déduit de la forme de l'id**).
+- **`Scrutin`** est la fiche vote complète, servie par `/scrutins/{id}`. Il porte :
+  - `chambre`, `scrutinPublic`, `typeVote?`, `suffragesRequis?` (utile seulement
+    pour une motion de censure), `typeMotion?` ;
+  - `positionsGroupes` avec leurs `Votant` ;
+  - pour un amendement : `questions?`, `dispositif?`, `exposeSommaire?`, `cible?`.
+- **`DossierListItem`**, l'objet allégé du fil et de la recherche, porte
+  `natureTexte`, `chambres`, `statutMotion`, et le type de vote et de motion du
+  dernier scrutin. Sans ces champs, une carte trompe.
+- **`Votant.deputeId`** n'est posé **que si l'élu siège encore**. C'est la seule
+  clé qui rend un nom cliquable. On n'affiche jamais une référence machine
+  `PA…` en guise de nom.
+- **`Depute`** couvre **les deux chambres**. `chambre` est le discriminant, et les
+  ids du Sénat sont préfixés `SEN-…`. `commission` n'existe qu'au Sénat ;
+  `depuis` (début de mandat) qu'à l'Assemblée, parce que la source du Sénat n'a
+  aucune date. `PortraitVote` n'a pas de participation, et pas de cohésion au
+  Sénat.
+- **`Dossier.etat`** : **aucun champ ne décrit une étape à venir**, et un test
+  vérifie la liste des champs. N'en ajoute pas.
+- **Compte** : `Preferences` (`themes`, `departement`, `alertes`), `Compte`,
+  `SessionOuverte`. On ne stocke ni historique de lecture, ni téléphone, ni date
+  de naissance.
+
+## Pièges connus
+
+- **Une motion inverse la lecture de son résultat.** « Adopté » sur une motion de
+  rejet préalable veut dire que le **texte** est rejeté. Il faut donc toujours
+  **nommer** la motion (badge, titre, pastille dans l'historique d'un élu) ;
+  `constants/motions.ts` dit ce que le vote emporte. Dans `build_dossier`, **à
+  date égale, un vote sur le texte passe devant une motion**.
+- **La classification d'une motion se fait sur l'objet entier**, avant la
+  troncature à 120 caractères : au Sénat, la nature de la motion n'arrive
+  qu'après. `app.ingestion.motions` ne déclasse donc jamais.
+- **Motion de censure** : `contre` et `abstention` valent 0 **par construction**
+  (art. 49). Pas de barre pour/contre, pas d'écart, pas d'indice de division : on
+  compare à `suffragesRequis` (`phrase_motion_censure`).
+- **Sénat** :
+  - l'année dans l'URL d'un scrutin est celle du **début de session**
+    (oct.→sept.) : passe par `session_pour` ;
+  - la « législature » d'un scrutin du Sénat est une session. Pour une URL de
+    l'AN, utilise `legislature_du_ref(dossierRef)` ;
+  - deux amendements identiques ont plusieurs numéros : on n'en retient aucun.
+- **Titres cités** : retire **toutes** les mentions finales de procédure
+  (`_RE_MENTION_FINALE`, répétable). Sinon le texte se dédouble en un `TXT-…`
+  vide. Une parenthèse au milieu du titre reste.
+- **Textes trop longs** : au-delà de `_MAX_DISPOSITIF` (10 000 caractères), un
+  dispositif ou une loi n'est **pas stocké**. Un texte partiel ne doit jamais être
+  présenté comme le tout.
+- **URLs dérivées** (photo d'un député AN, rapport de commission) : vérifie-les
+  par HEAD avant de les attacher. Sinon, `null`.
+- **Loi finale** : une loi sans `texteLoiRef` n'est pas devinée. Une **initiative**
+  se lit sur le dépôt initial, jamais sur un document de navette.
+- **`colors.rejete` (#FF3040) veut dire « rejeté »**. Ce n'est pas une couleur
+  d'accent. L'accent est `colors.brand` (pervenche), et les formulaires ont leurs
+  propres tokens (`valide`, `invalide`, `champ*`).
+- **Animation sur un onglet jamais démonté** : n'anime jamais une prop SVG, cela
+  impose le driver JS et fige l'UI. Anime l'`opacity` d'une `View` avec
+  `useNativeDriver: true` (`ProfilCiel`).
 
 ## Conventions de code
 
-- **Langue.** Code, données et UI en **français** (identifiants, libellés, commentaires,
-  noms de champs de types type `titreClair`, `positionMajoritaire`). On reste cohérent
-  avec l'existant.
-- **Imports.** Toujours l'alias `@/…`, jamais de chemins relatifs profonds (`../../`).
-  Exports groupés via les `index.ts` de `components/` et `screens/`.
-- **Style.** `StyleSheet.create` en bas de fichier. **Aucune valeur codée en dur** pour
-  couleurs / espacements / typo — tout passe par `@/theme`. Ajouter une couleur = la
-  déclarer dans `colors.ts`.
-- **Accessibilité.** `accessibilityRole` / `accessibilityLabel` sur les éléments
-  interactifs et les badges ; `importantForAccessibility="no"` sur les emojis
+- **Tout en français** : identifiants, champs, libellés, commentaires. Reste
+  cohérent avec l'existant (`titreClair`, `positionMajoritaire`).
+- **Commentaires** : cite la section du MVP (`§2.5`, `§7.4`…) quand un choix en
+  découle, et explique le *pourquoi*, surtout ce qu'une donnée **ne** dit **pas**.
+- **Imports** : toujours via `@/…`, jamais `../../`. Exports groupés par les
+  `index.ts` de `components/`, `screens/` et `hooks/`.
+- **Style** : `StyleSheet.create` en bas de fichier. Aucune couleur, espacement
+  ou taille de police en dur : tout passe par `@/theme`. Une nouvelle couleur se
+  déclare dans `colors.ts`.
+- **Accessibilité** : `accessibilityRole` / `accessibilityLabel` sur tout élément
+  interactif ou badge ; `importantForAccessibility="no"` sur les emojis
   décoratifs.
-- **Safe area.** Les écrans gèrent eux-mêmes `useSafeAreaInsets` (padding top/bottom).
-- **Icônes.** Deux jeux maison, même grammaire (tracés SVG `react-native-svg`,
-  monochromes, la couleur vient de l'appelant) : `TabBarIcon` pour la **barre
-  d'onglets** (couleur = état actif/inactif) et `IconLigne` / `ThemeIcone` pour
-  les **écrans Explorer et Glossaire** (loupe, chevrons, portes d'entrée, et une
-  icône par thème qui remplace l'emoji de `themeEmoji` sur ces écrans). Partout
-  ailleurs, ce sont des emojis (thèmes, repères décoratifs →
-  `importantForAccessibility="no"`). Pas de librairie d'icônes : une nouvelle
-  icône se dessine dans l'un de ces deux fichiers.
-- **Commentaires.** Référencer la section du MVP concernée (`§3.2`, `§4.5`…) quand un
-  choix découle d'une règle produit — c'est la convention en place.
+- **Safe area** : chaque écran gère `useSafeAreaInsets`.
+- **Icônes** : pas de librairie. `TabBarIcon` sert la tab bar, `IconLigne` /
+  `ThemeIcone` servent Explorer et le Glossaire, et ailleurs on utilise des
+  emojis. Une nouvelle icône se dessine dans l'un de ces fichiers (SVG
+  monochrome, couleur fournie par l'appelant).
+- **Pas d'affordance vers le vide** : sans cible, pas de chevron et rien de
+  pressable. Une donnée absente masque le bloc.
 
-## Modèle de données (résumé)
+## Backlog priorisé (§10 MVP)
 
-Défini dans `src/types/index.ts`. **Entité centrale `Dossier`** (un texte de loi) :
-`resume` (résumé neutre ancré + confiance + `champsNonDocumentes`), `scrutins`
-(les **votes sur le texte**, résumés), `amendements` (les **votes d'amendement** :
-`numero?` + `auteur?` extraits de l'objet officiel quand sans ambiguïté, objet,
-sort, `cible?` (article visé) + `dispositif?` (ce que l'amendement change) +
-`exposeSommaire?` (le « pourquoi » côté auteur, non neutre) tirés de l'open data
-AN quand disponibles, `scrutinId` vers la fiche vote, et `sousAmendements?` — les
-**sous-amendements rattachés** à cet amendement, même forme), `sources` (**les
-documents du dossier**, dans l'ordre de la vie du texte — liste **dérivée**, cf.
-plus haut), `rapportsCommission?` (les rapports de commission, un par lecture,
-URL vérifiée à l'ingestion : ils **alimentent** `sources`, la fiche ne les rend
-pas à part), `statut`, `statutMotion?` (le vote qui a fixé `statut` est une
-**motion** de ce type — le badge la **nomme** alors, au lieu d'affirmer un sort
-du texte que ce seul vote ne décide pas), `theme`, `dateDernierScrutin`, `trajectoire` (les étapes du texte au
-Parlement, **les deux chambres**, calculées à l'ingestion — vide = frise
-masquée), `etat?` (**où en est le texte aujourd'hui**, la clôture de la frise :
-`etat` — `promulgue` | `resolution` | `retire` | `conseil_constitutionnel` |
-`en_navette` — plus `date` / `etape` / `chambre` / `statut`, et pour une loi
-`numeroLoi` / `dateJournalOfficiel` / `urlLegifrance`. ⚠️ **Aucun champ ne
-décrit une étape à venir** : n'en ajoutez pas, et ne composez pas de phrase au
-futur à partir de ceux-là), `miseAJour?` (badge §7.7),
-`exposeMotifs?` (parole de l'auteur, bloc attribué), `dispositif?` (les
-articles du texte **déposé** — fait officiel, jamais affiché brut, source de la
-Q4), `texteAdopte?` (la **loi finale**, « petite loi » : `source` **toujours** —
-le lien vers ce que le Parlement a voté — et `texte?` seulement sous le cap ;
-prime sur `dispositif` comme source de la Q4, car celui-ci décrit une version que
-la navette a modifiée. Jamais affiché brut non plus),
-`initiative?` (**qui porte le texte** : `origine` — `gouvernement` |
-`parlementaire` | `senat` — plus `nom` / `deputeId` / `groupeNom` /
-`groupeCouleur` / `portraitUrl` quand l'auteur est un parlementaire identifié ;
-`deputeId` suit la règle de `Votant`, posé **seulement s'il siège encore**),
-`titreOfficiel` (la formulation d'origine, toujours conservée et affichée sur la
-fiche §7.5), `titreClair` (titre d'affichage raccourci), `accroche?`
-(le but du texte, tiré de la Q1 — **optionnelle**, absente = ligne masquée §2.5)
-et `estEvenementAutonome` (motion de censure, déclaration : le dossier ne porte
-**aucun texte de loi**). Ce dernier n'est pas un détail : une motion n'a ni
-articles, ni exposé des motifs, ni trajectoire — non pas parce qu'on ne les a pas
-trouvés, mais parce qu'ils n'existent pas. `QuestionsCard` **retire** alors les
-questions sans objet (« pourquoi ce texte ? », « qu'est-ce que ça change ? ») et
-renumérote les restantes, au lieu d'afficher « information non disponible », qui
-ferait passer une absence de sens pour une lacune de nos données (§2.5). Le champ
-est posé à l'ingestion — **jamais déduit de la forme de l'id** (`VTA-…`) : un
-artefact d'ingestion n'est pas une sémantique. La partition
-texte / amendement / sous-amendement se fait à l'ingestion (`est_amendement`,
-`est_sous_amendement`, `numero_amendement_parent` sur l'objet du scrutin).
-Un `Scrutin` est **vote-niveau** : `dossierId`, `objet` (ce sur quoi on a voté),
-`statut`, `chambre` (`assemblee` | `senat` — un dossier agrège les votes des deux
-assemblées, et « 214 pour » n'a pas la même échelle selon l'hémicycle),
-`scrutinPublic`, `typeVote?` (`ordinaire` | `solennel` | `motion_censure` — la
-**forme** du scrutin, qui explique le nombre de votants ; absente au Sénat),
-`suffragesRequis?` (le seuil — **n'a d'intérêt que sur une motion de censure**),
-`typeMotion?` (`rejet_prealable` | `question_prealable` |
-`exception_irrecevabilite` | `renvoi_en_commission` | `referendaire` |
-`ajournement` — la **motion** dont l'adoption rejette, suspend ou reporte
-l'examen du texte. ⚠️ Elle **inverse la lecture du résultat** : posée, l'app
-affiche la mention qui dit ce que le vote emporte et nomme le vote ; absente,
-rien n'est affiché §2.5),
-`resultat`, `positionsGroupes` (avec `votantsPour` /
-`votantsContre` / `votantsAbstention` optionnels — le **nominatif**, absent =
-masqué, §2.5 ; chaque `Votant` porte son `nom` et, **uniquement s'il siège
-encore**, son `deputeId`, seule clé qui rend le nom cliquable vers sa fiche),
-`sousAmendements?` (pour le vote d'un amendement : ses sous-amendements),
-`cible?` / `dispositif?` / `exposeSommaire?` (pour un vote d'amendement : son
-contenu enrichi, cf. `amendements.py` — miroir des mêmes champs sur `Amendement`),
-`questions?` (`QuestionsAmendement` : les questions citoyennes du vote
-d'amendement — `pourquoi` / `changement` / `resultat`, générées à l'ingestion),
-`sources`. La fiche dossier n'embarque que des `ScrutinResume` (liste
-compacte) ; le `Scrutin` complet est servi par `GET /scrutins/{id}`. Le fil et la
-recherche renvoient un `DossierListItem` allégé (dont `nombreScrutins`,
-`miseAJour`, `accroche?`, `natureTexte?` et `chambres` — les chambres qui ont
-voté le texte, sans quoi une carte du fil se lirait comme un vote de
-l'Assemblée ; il ne porte PAS `titreOfficiel`, d'où la nature calculée côté API ;
-il porte en revanche `statutMotion?`, `typeMotionDernierScrutin?`,
-`typeVoteDernierScrutin?` / `suffragesRequisDernierScrutin?`,
-sans quoi une motion de censure se lirait « 267 pour, 0 contre » jusque dans le
-fil).
-Côté **parlementaires** : `Depute` (identité + `chambre` + groupe +
-circonscription + `commission?` + `depuis?` — le type garde son nom historique,
-`chambre` est le discriminant ; ⚠️ `commission` n'est servie qu'au **Sénat**
-(l'annuaire senat.fr la publie dans `organismes` : 346/348) et `depuis` qu'à
-l'**Assemblée** — l'annuaire du Sénat **ne publie aucune date de mandat**, ce
-n'est donc pas un trou d'ingestion à combler mais une absence de source),
-`DeputeListItem` (annuaire — **photo comprise**, la liste doit
-être identifiable sans charger chaque fiche), `DeputeDetail` (= `Depute` +
-`portrait` + `historique` paginé), `PortraitVote` (12 mois glissants : `votes`,
-`pour` / `contre` / `abstention`, `cohesionGroupe` — **pas de participation**, et
-jamais de cohésion au Sénat, cf. « État actuel ») et `VoteDepute` (`objetType`,
-`titre`, `dossierId?`, `position`, `typeMotion?` — la motion, quand le vote en
-est une : sans elle, « Pour » à côté du titre d'un texte se lit comme un soutien
-alors que le parlementaire en demandait le rejet —, `contreSonGroupe?`). Types clés :
-`StatutScrutin` (`adopte` | `rejete` | `en_cours`), `Chambre` (`assemblee` |
-`senat`), `TypeMotion`, `PositionVote`, `ObjetVote` (`dossier` | `amendement` |
-`sous_amendement`), `NiveauConfiance`. Ce modèle est le **contrat de l'API** (miroir
-camelCase des schémas Pydantic backend, à répercuter des deux côtés).
-
-Côté **compte** (miroir de `backend/app/schemas/utilisateur.py`) : `Preferences`
-(`themes` — ils **ordonnent** l'accueil, ils ne filtrent rien —, `departement`
-`string | null`, `alertes`), `Compte` (jamais de mot de passe) et
-`SessionOuverte` (`jeton` + `compte`). C'est **tout** ce qu'on stocke du
-lecteur : ni historique de lecture, ni recherches, ni téléphone, ni date de
-naissance — ces deux derniers, présents dans la maquette, n'auraient aucun usage.
-
-## Prochaines étapes (backlog priorisé, cf. §10 MVP)
-
-- **Afficher le résumé neutre déjà produit.** Le gabarit remplit
-  `ResumeScrutin.resume` (5 phrases sourcées) et **l'app ne le rend nulle part** :
-  `DossierDetailScreen` n'affiche que `contexte` / `objectif` / `historique`, que
-  seul le seed remplit. Sur données Postgres, la section « résumé » est donc vide
-  alors que tout `app/ai/` existe pour la remplir. C'est un manque de câblage
-  d'affichage, pas un manque de données. ⚠️ Ne PAS y répondre en branchant un LLM :
-  cf. la doctrine ci-dessus.
-- **Enrichissement ingestion** : Légifrance/PISTE pour le **texte consolidé** des
-  dossiers (ce que la loi change dans le code — l'**exposé des motifs** est déjà
-  couvert via le PDF AN, cf. `textes_an.py`, et le **contenu des amendements** via
-  l'open data AN, cf. `amendements.py`) ; planification du job de synchro
-  (plusieurs fois/jour). *(La classification de thème est déjà affinée par un LLM
-  local — cf. ci-dessous.)*
-- **Commission des députés** : `Depute.commission` n'est servie qu'au Sénat.
-  Côté AN, l'archive AMO porte les mandats d'organe `COMPER`, mais
-  `GroupResolver` ne garde que les organes `codeType == "GP"` — il faudrait
-  l'étendre pour résoudre un `organeRef` de commission en libellé. Tant que ce
-  n'est pas fait, la fiche d'un député masque simplement la ligne (§2.5).
-- **Dossiers `TXT-` restants** (44 après le correctif des mentions finales, qui
-  en a résorbé 10). Deux causes **mesurées**, de natures opposées :
-  - **32** dont le titre est réellement absent de l'archive, dont quelques
-    **coquilles de la source** (« de **ss**implification », « fin **des**
-    gestion ») que `signature_titre` ne rattrape pas. Une distance d'édition
-    tolérante à 1 caractère les récupérerait, au prix d'un risque de faux
-    appariement à évaluer (§2.5 : ne jamais deviner).
-  - **12** que l'archive contient pourtant, mais que le **garde-fou d'ambiguïté
-    entre législatures** écarte : le même titre existe en L17 et en L16 (cas
-    mesuré : « lutter contre la pédocriminalité » → `DLR5L17N50627` **et**
-    `DLR5L16N49866`), donc la table s'abstient. C'est le **prix du repli sur la
-    législature précédente** — il rattrape les textes reportés après une
-    dissolution, mais fait perdre ceux dont le titre a été réutilisé. Piste :
-    quand les candidats s'étalent sur plusieurs législatures, préférer la
-    **courante** — ce n'est pas deviner (un scrutin de la 17e vote un dossier de
-    la 17e ; un dossier L16 n'est pertinent que si AUCUN candidat L17 n'existe,
-    ce qui est justement le cas du report après dissolution).
-- **Sénat, suite** : les **comptes rendus** (`data.senat.fr/data/debats/cri.zip`,
-  schéma XML distinct de SyceronBrut) pour que la Q2 « principal désaccord »
-  existe aussi sur un dossier purement sénatorial ; l'enrichissement des
-  **amendements** du Sénat (base Ameli) ; **Monalisa**
-  (`senat.fr/akomantoso/{slug}.akn.xml`, XML structuré) qui remplacerait
-  avantageusement le grattage PDF pour les textes déposés depuis déc. 2019.
-- **V1.1** : filtres de recherche, partage. *(La fiche parlementaire en lecture
-  seule est faite — cf. « État actuel ».)*
-- **V2** : assistant IA en questions pré-cadrées.
-
-## Pièges à éviter
-
-- Le suivi de dossier (badge « mis à jour ») est **intégré en V1** — c'était une
-  levée assumée du verrou §2.4. Le **compte utilisateur** l'est aussi (parcours
-  d'accueil + `POST /inscription`), mais **facultatif** : il ne conditionne
-  aucune lecture. Restent hors périmètre V1 : notifications push, suivi de
-  député, comparateur, assistant à champ libre, prédiction d'impact.
-- ⚠️ **`colors.rejete` (#FF3040) veut dire « rejeté »**, ce n'est pas un accent
-  d'interface. La maquette `onboarding-v3` en faisait sa couleur d'action
-  (boutons, points de progression, sélection) : transposé tel quel, un CTA se
-  serait lu comme un verdict de vote. L'accent de l'app est **`colors.brand`**
-  (pervenche). Même raison pour les **états de formulaire**, qui ont leurs
-  propres tokens (`valide`, `invalide`, `champ*`) : un champ correctement rempli
-  n'est pas un texte adopté.
-- ⚠️ **Une préférence ordonne, elle ne filtre jamais.** Les thèmes choisis
-  remontent les rangées de l'accueil (`ordonnerSections`) et n'en masquent
-  aucune — cacher un vote parce qu'il n'a pas été coché serait précisément ce
-  que §2.5 interdit. Et l'écran **dit** que l'ordre a été modifié, sans quoi il
-  se lirait comme celui de la source.
-- ⚠️ **Ne rien promettre que l'app ne fasse.** La maquette annonçait les votes
-  « en direct » (l'ingestion est par lots) et des alertes push (aucune n'est
-  envoyée, hors périmètre V1) : les deux libellés ont été réécrits, et l'étape
-  « alertes » ne demande **pas** la permission système — elle retient un choix
-  et le dit. Ne pas rebrancher `expo-notifications` tant que rien n'émet.
-- ⚠️ **Le compte ne collecte que ce qui sert** : prénom, nom, e-mail, mot de
-  passe. Le téléphone et la date de naissance de la maquette n'ont été repris
-  nulle part, et `Compte` n'expose jamais l'empreinte du mot de passe. À la
-  connexion, e-mail inconnu et mot de passe faux doivent garder le **même**
-  401 et le **même** message.
-- Ne pas introduire d'adjectifs évaluatifs ou de jugements dans les données seed ou
-  les libellés (« ambitieux », « insuffisant », « controversé »… interdits, §4.3).
-  Cela vaut aussi pour le label de `miseAJour` (rester factuel).
-- Les données de `backend/app/data/seed.py` sont **fictives et illustratives** — ne
-  pas les présenter comme réelles.
-- ⚠️ **Ne jamais calculer « contre son groupe », de cohésion ou de dissidence au
-  Sénat.** Le nominatif y est formellement par sénateur mais résulte d'une
-  **délégation de vote par groupe**, et la source ne dit pas quels scrutins y
-  échappent (ceux « à la tribune »). Le chiffre existerait, il ne voudrait rien
-  dire — c'est exactement le piège que §7.4 interdit. Même famille de raisonnement
-  que le refus du taux de participation côté AN.
-- ⚠️ **Une MOTION inverse la lecture de son résultat** : « Adopté » sur une
-  motion de rejet préalable veut dire que le **texte** a été rejeté. Ne jamais
-  afficher son sort sans le nommer. Vécu : 8 dossiers annonçaient « Adopté » sur
-  un texte rejeté (dont un dont c'était l'unique vote), 16 autres — dont
-  **14 lois promulguées** — annonçaient « Rejeté » parce qu'une motion rejetée
-  était passée devant l'adoption du texte le même jour dans `tous[0]`. D'où la
-  règle de tri de `build_dossier` : **à date égale, un vote sur le texte passe
-  devant une motion**. Et 23 350 votes nominatifs affichaient une pastille
-  « Pour » qui signifiait « pour le rejet ».
-- ⚠️ **Le classement d'une motion se fait sur l'objet ENTIER**, avant la
-  troncature à 120 caractères. Un objet du Sénat ne dit qu'au 135e caractère ce
-  qu'est la motion : le reclasser depuis la base ne retrouve rien, et
-  `app.ingestion.motions` **préserve** donc ce que l'ingestion a posé plutôt que
-  de l'effacer (même doctrine que l'exposé et l'initiative entre runs).
-- ⚠️ **Sur une motion de censure, `contre` et `abstention` valent 0 par
-  construction** (art. 49 de la Constitution : seules les voix favorables sont
-  recensées). Vérifié sur les 23 motions de la législature. Toute formule
-  générique « X voix contre Y », tout écart pour/contre, toute barre pour/contre
-  et tout indice de division y disent le contraire du fait — la comparer au
-  **seuil** (`suffragesRequis`) est la seule lecture juste. Vécu : la Q3
-  annonçait « rejeté par 0 voix contre 267 » sur les 23 motions.
-- ⚠️ **`JWT_SECRET` absent en dev = secret éphémère** : les sessions ne
-  survivent pas à un redémarrage d'`uvicorn`, et il faut se reconnecter. Ce
-  n'est pas un bug. Hors dev, l'application refuse de démarrer sans lui.
-- ⚠️ **Pas d'Alembic** : ajouter une colonne à `db/models.py` ne suffit pas, la
-  base existante ne la verra jamais (`create_all` ne modifie pas une table). Il
-  faut un énoncé dans `app/db/migrations.py` (additif et idempotent).
-- Le nom `Depute` / `deputeId` / table `depute` couvre **les deux chambres** :
-  c'est historique, `chambre` est le discriminant. Ne pas en déduire qu'un
-  `Votant.deputeId` désigne un député — il peut valoir `SEN-…`.
-- ⚠️ La « législature » d'un `ScrutinParse` **sénatorial** est en réalité une
-  **session** (le Sénat ne numérote pas par législature). Ne jamais s'en servir
-  pour bâtir une URL de l'Assemblée : utiliser `legislature_du_ref(dossierRef)`,
-  qui la lit dans le `dossierRef` lui-même (`DLR5L17N…` → 17). Régression vécue :
-  13 dossiers pointaient vers `/dyn/2025/dossiers/…`, une URL morte.
-- L'URL d'un scrutin du Sénat prend l'année de **début de session**
-  (oct.→sept.) : `scr2025-340` date du 21 juillet **2026**, et `scr2026.html`
-  répond 404. Passer par `session_pour(annee, mois)`.
-- ⚠️ Le fichier `MVP_Assemblee_Nationale_v2.md` est désormais **versionné** (commit
-  `ff9c2a1`) : les `§x.y` y renvoient et sont vérifiables. Mais il n'a **pas** été
-  mis à jour du décalage introduit ici (dossier-centré + §7.7 + levée §2.4) — sur
-  ces trois points, c'est ce fichier-ci qui décrit le produit réel.
+- **Afficher le résumé neutre.** Le gabarit remplit `resume.resume`, mais
+  `DossierDetailScreen` ne rend que `contexte` / `objectif` / `historique`, que
+  seul le seed remplit. Il manque le câblage d'affichage, **pas un LLM**.
+- **« Signaler une erreur »** : `AiNotice` accepte `onSignaler`, mais aucun écran
+  ne le lui passe.
+- **Planifier la synchro** (plusieurs fois par jour), et Légifrance/PISTE pour le
+  texte consolidé.
+- **Commission des députés AN** : `GroupResolver` ne garde que les organes `GP`.
+  Il faudrait résoudre les mandats `COMPER`.
+- **Dossiers `TXT-` restants**, deux causes :
+  - des coquilles de la source : une distance d'édition à 1 caractère les
+    rattraperait, mais le risque de faux appariement est à mesurer ;
+  - des titres présents en L16 et L17, que le garde-fou d'ambiguïté écarte.
+    Piste : préférer la législature courante quand elle a un candidat.
+- **Sénat** : comptes rendus (`cri.zip`) pour avoir une Q2 sur les textes
+  sénatoriaux, amendements (Ameli), Monalisa (XML structuré) à la place du grattage
+  PDF.
+- **V1.1** : filtres de recherche, partage. **V2** : assistant à questions
+  pré-cadrées. Restent hors V1 : notifications push, suivi de député,
+  comparateur, assistant à champ libre, prédiction d'impact.
