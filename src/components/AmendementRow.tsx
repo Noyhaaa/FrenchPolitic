@@ -172,9 +172,9 @@ export function AmendementRow({ amendement: a, onOpenScrutin }: Props) {
         onPress={toggle}
         style={styles.entete}
         accessibilityRole="button"
-        accessibilityLabel={`${a.objet}. ${sort.label}. ${
-          ouvert ? 'Masquer' : 'Voir'
-        } le détail.`}
+        accessibilityLabel={`${a.objet}. ${sort.label}${
+          a.modalite ? ' à main levée' : ''
+        }. ${ouvert ? 'Masquer' : 'Voir'} le détail.`}
       >
         <View style={styles.enteteHaut}>
           <View style={[styles.verdict, { backgroundColor: sort.fond }]}>
@@ -226,7 +226,12 @@ export function AmendementRow({ amendement: a, onOpenScrutin }: Props) {
               contre) vit sur `ScrutinDetail` — l'objet `Amendement` ne le porte
               pas ; on n'invente pas de chiffres (§2.5). */}
           <View style={styles.piedVote}>
-            <Text style={styles.statut}>{sort.label}</Text>
+            {/* Sans scrutin public, le décompte n'existe pas : on le dit ici,
+                la fiche vote explique pourquoi (§5.2). */}
+            <Text style={styles.statut}>
+              {sort.label}
+              {a.modalite ? ' à main levée' : ''}
+            </Text>
             {a.scrutinId && onOpenScrutin ? (
               <Pressable
                 onPress={() => onOpenScrutin(a.scrutinId!)}
@@ -261,6 +266,7 @@ export function AmendementRow({ amendement: a, onOpenScrutin }: Props) {
                       <Text style={styles.sousTexte}>{resumeLigne(sa)}</Text>
                       <Text style={typography.meta}>
                         n° {sa.numero ?? '—'} · {s.label.toLowerCase()}
+                        {sa.modalite ? ' à main levée' : ''}
                       </Text>
                     </View>
                   </View>

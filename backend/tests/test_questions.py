@@ -523,7 +523,10 @@ def test_resultat_sous_amendement_sujet_adapte():
 
 def test_resultat_amendement_main_levee():
     p = phrase_resultat_amendement(_scrutin_amendement(public=False))
-    assert p == "L'amendement a été adopté à main levée (pas de décompte des voix)."
+    assert p == (
+        "L'amendement a été adopté à main levée, sans scrutin public : il n'y a "
+        "pas eu de décompte des voix."
+    )
 
 
 def test_resultat_amendement_absent_si_en_cours():
@@ -805,8 +808,17 @@ def test_examine_par_assemblee_lit_les_votes_et_la_trajectoire():
 
     dossier = _dossier_senat()
     assert not examine_par_assemblee(dossier)
-    # Adopté à main levée à l'Assemblée : pas de scrutin, mais l'étape existe.
+    # Transmis par le Sénat, déposé à l'Assemblée sans décision : la
+    # transmission n'est pas un examen.
     dossier.trajectoire = [
         PhaseScrutin(label="1ère lecture", chambre="assemblee", date="2025-05-01")
+    ]
+    assert not examine_par_assemblee(dossier)
+    # Adopté à main levée à l'Assemblée : pas de scrutin, mais l'étape est
+    # conclue par une décision.
+    dossier.trajectoire = [
+        PhaseScrutin(
+            label="1ère lecture", chambre="assemblee", statut="adopte", date="2025-05-01"
+        )
     ]
     assert examine_par_assemblee(dossier)

@@ -13,6 +13,7 @@ from pydantic.alias_generators import to_camel
 
 from app.domain.enums import (
     Chambre,
+    ModaliteVote,
     NiveauConfiance,
     PositionVote,
     SortAmendement,
@@ -94,8 +95,13 @@ class Amendement(CamelModel):
     # Exposé sommaire = le « pourquoi », côté AUTEUR (non neutre, §4.3) : à
     # afficher en bloc cité et attribué, jamais fondu dans le résumé neutre.
     expose_sommaire: str | None = None
-    # Scrutin public de l'amendement, si mis aux voix (détail + nominatif là-bas).
+    # La fiche du vote de l'amendement (détail, et nominatif s'il est public).
+    # Elle existe aussi pour un vote sans scrutin public : elle y explique
+    # l'absence de décompte et porte le contenu de l'amendement.
     scrutin_id: str | None = None
+    # Voté SANS scrutin public (`ModaliteVote.main_levee`) : la ligne le dit, le
+    # lecteur ne cherche pas un décompte qui n'existe pas. None = scrutin public.
+    modalite: ModaliteVote | None = None
     # Sous-amendements rattachés (« … à l'amendement n° X »). Un sous-amendement
     # dont le parent n'est pas identifiable reste au niveau amendement du dossier.
     sous_amendements: list["Amendement"] = []
@@ -281,6 +287,17 @@ class Scrutin(CamelModel):
     # l'envers : la fiche vote porte alors la mention qui dit ce que le résultat
     # emporte. Absente = vote ordinaire, aucune mention (§2.5).
     type_motion: TypeMotion | None = None
+    # Décision prise SANS scrutin public (main levée, 49.3, art. 151-7) : il n'y
+    # a ni décompte ni ventilation, et `resultat` vaut 0 partout — à ne JAMAIS
+    # afficher comme des voix. `scrutin_public` est alors faux. Ce champ dit
+    # pourquoi, pour que l'app l'explique au lieu de laisser un vide (§5.2).
+    modalite: ModaliteVote | None = None
+    # Pour une décision sur le texte : l'étape de la navette, telle que
+    # l'archive la nomme (« 1ère lecture (2ème assemblée saisie) »), et la
+    # conclusion officielle, verbatim (« adopté sans modification »). Ce sont
+    # les seuls faits que la source donne sur une décision sans scrutin.
+    etape: str | None = None
+    conclusion: str | None = None
     resultat: ResultatGlobal
     positions_groupes: list[PositionGroupe] = []
     # Pour un vote d'amendement/sous-amendement : son contenu enrichi (open data
@@ -315,6 +332,11 @@ class ScrutinResume(CamelModel):
     # compacte des votes nomme alors le vote (« Motion de rejet préalable »)
     # au lieu de restituer l'objet officiel tronqué.
     type_motion: TypeMotion | None = None
+    # Repris du scrutin complet : une décision sans scrutin public se raconte
+    # sans chiffres, et la liste des votes doit le savoir (cf. `Scrutin`).
+    modalite: ModaliteVote | None = None
+    etape: str | None = None
+    conclusion: str | None = None
     resultat: ResultatGlobal
 
     @classmethod
@@ -329,6 +351,9 @@ class ScrutinResume(CamelModel):
             type_vote=s.type_vote,
             suffrages_requis=s.suffrages_requis,
             type_motion=s.type_motion,
+            modalite=s.modalite,
+            etape=s.etape,
+            conclusion=s.conclusion,
             resultat=s.resultat,
         )
 
@@ -529,8 +554,9 @@ class DossierListItem(CamelModel):
     # fil doit dire d'où vient le vote qu'elle résume : sans ça, un texte encore
     # au Sénat se lirait comme un vote de l'Assemblée (§2.5).
     chambres: list[Chambre] = []
-    # Résultat du dernier scrutin **public** (voix pour/contre) pour la barre de
-    # la carte. None si le dernier vote n'est pas nominatif (§5.2, §2.5).
+    # Résultat du dernier vote sur le texte (voix pour/contre) pour la barre de
+    # la carte. None quand ce vote n'a pas de décompte — décision sans scrutin
+    # public, cf. `modalite_dernier_scrutin` (§5.2, §2.5).
     resultat_dernier_scrutin: ResultatGlobal | None = None
     # Forme de ce même scrutin. Sans elle, une motion de censure se lirait
     # « 267 pour, 0 contre » jusque dans le fil, alors que ses opposants ne
@@ -540,6 +566,9 @@ class DossierListItem(CamelModel):
     # Motion du même scrutin — le fil et la recherche nomment ainsi un vote dont
     # l'objet officiel est tronqué (tous ceux du Sénat le sont).
     type_motion_dernier_scrutin: TypeMotion | None = None
+    # Le dernier vote sur le texte s'est fait SANS scrutin public : la carte dit
+    # comment (« à main levée », « sans vote, 49.3 ») au lieu d'une barre.
+    modalite_dernier_scrutin: ModaliteVote | None = None
 
     @staticmethod
     def _chambres(scrutins: list[ScrutinResume]) -> list[Chambre]:
@@ -554,22 +583,42 @@ class DossierListItem(CamelModel):
                 ordre.append(s.chambre)
         return ordre
 
-    @staticmethod
-    def _dernier_public(scrutins: list[ScrutinResume]) -> ScrutinResume | None:
-        # `scrutins` est ordonné du plus récent au plus ancien : on prend le
-        # premier vote nominatif (les votes à main levée n'ont pas de décompte
-        # affichable, §5.2). On renvoie le scrutin entier et non son seul
-        # résultat : le décompte ne se lit pas sans savoir de quel scrutin il
-        # sort (cf. `type_vote_dernier_scrutin`).
-        for s in scrutins:
-            if s.scrutin_public:
-                return s
-        return None
+    @classmethod
+    def depuis(
+        cls,
+        scrutins: list[ScrutinResume],
+        **champs: object,
+    ) -> "DossierListItem":
+        """Construit l'item à partir des votes sur le texte du dossier.
+
+        La carte résume le **dernier** vote sur le texte (`scrutins` arrive du
+        plus récent au plus ancien). Quand il n'a pas de décompte — décision
+        sans scrutin public —, on ne remonte PAS au dernier scrutin public : la
+        carte afficherait les voix d'un vote plus ancien, souvent de l'autre
+        chambre, sous la chambre du dernier vote (vécu : « Sénat · 312 pour »
+        sur un décompte de l'Assemblée). Elle dit alors comment la décision a
+        été prise (§5.2, §2.5).
+        """
+        dernier = scrutins[0] if scrutins else None
+        public = dernier if dernier is not None and dernier.scrutin_public else None
+        return cls(
+            chambres=cls._chambres(scrutins),
+            resultat_dernier_scrutin=public.resultat if public else None,
+            type_vote_dernier_scrutin=public.type_vote if public else None,
+            suffrages_requis_dernier_scrutin=(
+                public.suffrages_requis if public else None
+            ),
+            type_motion_dernier_scrutin=public.type_motion if public else None,
+            modalite_dernier_scrutin=(
+                dernier.modalite if dernier is not None and public is None else None
+            ),
+            **champs,
+        )
 
     @classmethod
     def from_dossier(cls, d: Dossier) -> "DossierListItem":
-        dernier = cls._dernier_public(d.scrutins)
-        return cls(
+        return cls.depuis(
+            d.scrutins,
             id=d.id,
             date=d.date_dernier_scrutin,
             titre_clair=d.titre_clair,
@@ -581,13 +630,6 @@ class DossierListItem(CamelModel):
             temps_lecture_sec=d.temps_lecture_sec,
             nombre_scrutins=len(d.scrutins),
             mise_a_jour=d.mise_a_jour,
-            chambres=cls._chambres(d.scrutins),
-            resultat_dernier_scrutin=dernier.resultat if dernier else None,
-            type_vote_dernier_scrutin=dernier.type_vote if dernier else None,
-            suffrages_requis_dernier_scrutin=(
-                dernier.suffrages_requis if dernier else None
-            ),
-            type_motion_dernier_scrutin=dernier.type_motion if dernier else None,
         )
 
 

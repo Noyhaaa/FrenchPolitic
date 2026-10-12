@@ -83,20 +83,21 @@ def _to_depute_item(row: DeputeRow) -> DeputeListItem:
 
 
 def _to_list_item(row: DossierRow) -> DossierListItem:
-    # Le payload (déjà chargé avec la ligne) porte les scrutins : on en tire le
-    # résultat du dernier vote nominatif pour la barre de la carte (§5.2, §2.5).
+    # Le payload (déjà chargé avec la ligne) porte les votes sur le texte : la
+    # carte en résume le dernier (`DossierListItem.depuis`, §5.2, §2.5).
     scrutins = [
         ScrutinResume.model_validate(s) for s in row.payload.get("scrutins", [])
     ]
-    dernier = DossierListItem._dernier_public(scrutins)
-    return DossierListItem(
+    return DossierListItem.depuis(
+        scrutins,
         id=row.id,
         date=row.date,
         titre_clair=row.titre_clair,
         # Colonne NOT NULL : la chaîne vide signifie « pas d'accroche » (§2.5).
         accroche=row.accroche or None,
         nature_texte=nature_texte(row.titre_officiel),
-        statut=row.statut,  # type: ignore[arg-type]  (str -> enum coercé)
+        statut=row.statut,
+        statut_motion=row.payload.get("statutMotion"),
         theme=row.theme,
         temps_lecture_sec=row.temps_lecture_sec,
         nombre_scrutins=row.nombre_scrutins,
@@ -104,12 +105,6 @@ def _to_list_item(row: DossierRow) -> DossierListItem:
             MiseAJourDossier.model_validate(row.mise_a_jour)
             if row.mise_a_jour
             else None
-        ),
-        chambres=DossierListItem._chambres(scrutins),
-        resultat_dernier_scrutin=dernier.resultat if dernier else None,
-        type_vote_dernier_scrutin=dernier.type_vote if dernier else None,
-        suffrages_requis_dernier_scrutin=(
-            dernier.suffrages_requis if dernier else None
         ),
     )
 

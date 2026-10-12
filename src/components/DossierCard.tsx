@@ -8,7 +8,7 @@ import {
 } from '@/utils/format';
 import { StatusBadge } from './StatusBadge';
 import { ThemeAvatar } from './ThemeAvatar';
-import { MiniResultat } from './MiniResultat';
+import { MentionSansScrutin, MiniResultat } from './MiniResultat';
 
 interface Props {
   dossier: DossierListItem;
@@ -74,6 +74,10 @@ export function DossierCard({ dossier, onPress }: Props) {
             typeVote={dossier.typeVoteDernierScrutin}
             suffragesRequis={dossier.suffragesRequisDernierScrutin}
           />
+        </View>
+      ) : dossier.modaliteDernierScrutin ? (
+        <View style={styles.result}>
+          <MentionSansScrutin modalite={dossier.modaliteDernierScrutin} />
         </View>
       ) : null}
 

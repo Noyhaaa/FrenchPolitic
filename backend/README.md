@@ -187,8 +187,110 @@ qui deviendrait un dossier à lui seul est **écarté du fil** — il ne décide
 et n'a ni texte ni trajectoire. Même prédicat que la rangée « votes les plus
 disputés » (`est_vote_de_conduite_de_seance`). Le même vote formulé pendant
 l'examen d'un texte reste un vote de ce dossier.
-L'archive sert **uniquement** à retrouver le `dossierRef` : ses titres (en
-minuscules, fragmentés) ne sont pas importés.
+Les titres des **documents** de l'archive (en minuscules, fragmentés) ne sont
+pas importés : ils servent à retrouver le `dossierRef`, et à vérifier qu'un titre
+cité désigne bien un dossier. Seul le titre du **dossier** (`titreDossier.titre`,
+bien casé) nomme un dossier qu'aucun scrutin public ne nomme (ci-dessous).
+
+### Ce qui se décide sans scrutin public (`app/ingestion/decisions.py`, `amendements.py`)
+
+Un dossier n'existait que si un **scrutin public** le créait. Or l'essentiel de
+ce que le Parlement décide ne passe pas par là : un texte s'adopte d'ordinaire
+**à main levée**, une convention internationale en procédure simplifiée, une
+résolution européenne sans même venir en séance. Mesuré avant ce chantier :
+une centaine de textes absents de l'app (dont des conventions promulguées), et
+la plupart des amendements de séance invisibles. Le modèle prévoyait le cas
+(`scrutinPublic=false`), l'ingestion ne l'alimentait pas.
+
+**Les décisions sur le texte** viennent des actes de décision des dossiers
+législatifs (`…-DEBATS-DEC`, `CMP-DEBATS-AN|SN-DEC`) : chambre, date, étape et
+conclusion officielle. La conclusion est lue sur une **liste fermée**
+(`lire_conclusion`) qui donne le sort et la **modalité** (`ModaliteVote`) :
+
+| Conclusion officielle | Sort | Modalité |
+|---|---|---|
+| « adopté », « modifiée », « adoptée, dans les conditions prévues à l'article 45, alinéa 3… » | adopté | `main_levee` |
+| « rejeté(e) » | rejeté | `main_levee` |
+| « considéré comme adopté / rejeté … article 49, alinéa 3 » | adopté / rejeté | `article_49_3` |
+| « considérée comme définitive en application de l'article 151-7 du Règlement » | adopté | `article_151_7` |
+
+Tout autre libellé ne produit **rien** (« rejet du texte par la commission
+préalable », avis du Conseil constitutionnel). La décision de la CMP elle-même
+(`CMP-DEC`) et celles des commissions ne sont pas des votes d'une assemblée.
+
+Une décision `main_levee` est **écartée** quand un scrutin public la raconte
+déjà : l'acte le cite (`voteRefs`), ou un scrutin public **conclusif** du même
+dossier, dans la même chambre, tombe le même jour (à deux jours près — séance
+levée après minuit — sauf si une autre décision du dossier occupe ce jour-là).
+Un 49.3 ou un article 151-7 est toujours retenu : aucun vote n'a eu lieu sur
+le texte. Les scrutins publics consultés sont ceux du run **et** ceux de la
+base : avec `--limit`, un vote d'il y a un an passerait sinon pour un vote à
+main levée — et un run partiel ne touche qu'aux dossiers qu'il a relus.
+
+Une décision devient un `Scrutin` **sans décompte** : `scrutinPublic=false`,
+`modalite`, `etape` et `conclusion` (verbatim), `resultat` à 0 parce que le
+contrat l'exige — rien ne doit l'afficher comme des voix. Son objet compose les
+deux seuls libellés de la source (« 1ère lecture (2ème assemblée saisie) —
+adopté sans modification »), sa source est la page du dossier **dans la chambre
+qui a décidé** (`senatChemin` pour le Sénat). Q3, phrase 3 du résumé, vote
+décisif (`tranche_le_texte`) la prennent comme un vote sur l'ensemble, sans
+chiffre (`phrase_decision`). Elle n'ancre jamais un désaccord (Q2) : elle n'a
+pas de positions de groupe.
+
+**Un dossier reconstitué que désigne une décision** rejoint son dossier
+officiel (`rattacher_par_decisions`). Un texte que la correspondance de titre
+n'a pas retrouvé vit dans un `TXT-…` ou un `SEN-…`, pendant que l'archive
+enregistre, ce jour-là, la décision de son dossier officiel sans citer le
+scrutin. Trois faits doivent concorder : même chambre, même jour, titre
+concordant (au moins 80 % des mots significatifs du titre cité se retrouvent
+dans les titres du dossier et de ses textes). Une décision qui désigne deux
+dossiers reconstitués, ou l'inverse, ne déplace rien. Vécu : une résolution
+dont le titre avait changé en commission (« appelant à la régulation des
+réseaux sociaux » ↔ « rappelant l'urgence démocratique d'appliquer… le
+règlement sur les services numériques ») — c'est le titre de son **texte
+adopté** qui concordait.
+
+**Les amendements votés à main levée** viennent de l'archive des amendements,
+déjà téléchargée pour enrichir les votes publics (`lire_archive`) : sort
+« Adopté » ou « Rejeté » (« Tombé », « Non soutenu », « Retiré » ne sont pas des
+votes), date du sort, premier signataire, amendement parent, groupe
+d'amendements identiques. Le **dossier** est celui sous lequel l'archive range
+le fichier (`json/{dossierRef}/…`) : un fait, pas une correspondance. Un
+amendement est **couvert** par un scrutin public quand un vote d'amendement de
+l'Assemblée porte son numéro, à trois jours près, dans son dossier — ou dans un
+`TXT-…`, dont on ne sait pas s'il est le même texte (dans le doute, on ne dit
+pas « main levée »). Des amendements **identiques** sont mis aux voix
+ensemble, et l'objet du scrutin n'en cite souvent qu'un (« l'amendement
+n° 1964 du Gouvernement et les amendements identiques suivants ») : si l'un
+est couvert, tous le sont (`discussionIdentique`). L'objet est écrit comme
+l'Assemblée l'écrit (« l'amendement n° 9 de M. Girard », `build_civilites_from_amo`),
+la source est la page de l'amendement (`/dyn/{leg}/amendements/{uid}`, que le
+site résout lui-même depuis l'identifiant de l'archive). Un sous-amendement se
+range sous son parent **par l'identifiant** de l'archive, pas par le numéro :
+les numéros repartent de 1 à chaque lecture. Ses questions (pourquoi,
+changement) passent par le même LLM que celles d'un vote public ;
+`--plafond-amendements-sans-scrutin N` borne le nombre de ces votes interrogés
+par run (~9 000 au total, deux appels chacun), les suivants reprennent où le
+run s'est arrêté.
+
+Trois règles en découlent ailleurs :
+
+- **Le sort d'un dossier est celui du dernier vote sur le texte**, jamais d'un
+  amendement. Des amendements votés après le dernier vote sur le texte (ou sans
+  vote sur le texte) : l'examen est en cours, le dossier est `en_cours`.
+- **Un vote découvert n'est pas un « nouveau vote »** (§7.7) : un vote sans
+  scrutin public vu pour la première fois ne pose le badge que s'il a eu lieu
+  depuis la synchronisation précédente (`sync_run`) **et** après le dernier vote
+  connu du dossier. Sans cette règle, l'arrivée des votes à main levée aurait
+  marqué presque tous les dossiers d'un coup ; avec la seule seconde condition,
+  13 dossiers l'étaient encore, pour des décisions vieilles d'un an.
+- **La carte résume le dernier vote sur le texte** (`DossierListItem.depuis`) :
+  s'il n'a pas de décompte, elle dit comment il a été pris
+  (`modaliteDernierScrutin`) au lieu d'afficher les voix d'un vote plus ancien,
+  souvent de l'autre chambre.
+
+L'API compresse ses réponses (`GZipMiddleware`) : la fiche d'un dossier très
+amendé porte plusieurs milliers d'amendements avec leur contenu.
 
 ### Le Sénat (`app/ingestion/senat.py`, `senateurs.py`)
 

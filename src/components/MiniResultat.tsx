@@ -1,6 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
-import { colors, mono, spacing } from '@/theme';
-import { ResultatGlobal, TypeVote } from '@/types';
+import { MODALITES } from '@/constants/modalites';
+import { colors, mono, spacing, typography } from '@/theme';
+import { ModaliteVote, ResultatGlobal, TypeVote } from '@/types';
 import { ResultBar, segmentsMotionCensure } from './ResultBar';
 
 interface Props {
@@ -89,7 +90,25 @@ export function MiniResultat({
   );
 }
 
+/**
+ * À la place de la barre, quand le dernier vote s'est fait SANS scrutin public
+ * (main levée, 49.3, art. 151-7) : il n'y a pas de voix à montrer, et une carte
+ * sans rien laisserait croire à une donnée manquante de notre côté. La mention
+ * dit comment la décision a été prise (§5.2) ; le détail vit sur la fiche vote.
+ */
+export function MentionSansScrutin({ modalite }: { modalite: ModaliteVote }) {
+  return (
+    <Text style={styles.mention} numberOfLines={1}>
+      {MODALITES[modalite].mention}
+    </Text>
+  );
+}
+
 const styles = StyleSheet.create({
+  mention: {
+    ...typography.meta,
+    color: colors.textSecondary,
+  },
   wrap: {
     gap: spacing.xs,
   },

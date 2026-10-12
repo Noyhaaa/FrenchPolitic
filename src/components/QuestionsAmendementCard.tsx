@@ -62,6 +62,12 @@ export function QuestionsAmendementCard({
           <View style={styles.fracture}>
             <LigneFracture positionsGroupes={positionsGroupes} afficherUnanimite />
           </View>
+        ) : scrutinPublic ? (
+          // Scrutin public dont la source ne ventile pas les voix : on ne
+          // l'attribue pas pour autant à une main levée (§2.5).
+          <Text style={stylesQA.reponse}>
+            Le détail par groupe n'est pas disponible pour ce vote.
+          </Text>
         ) : (
           <Text style={stylesQA.reponse}>
             Ce vote s'est fait à main levée : il n'existe pas de ventilation par

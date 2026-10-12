@@ -11,7 +11,12 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { termeGlossaire, termeTypeVote } from '@/constants/glossaire';
+import {
+  GLOSSAIRE_PAR_ID,
+  termeGlossaire,
+  termeTypeVote,
+} from '@/constants/glossaire';
+import { MODALITES } from '@/constants/modalites';
 import { consequenceMotion, motion } from '@/constants/motions';
 import { colors, mono, radius, serif, spacing, typography } from '@/theme';
 import {
@@ -188,7 +193,12 @@ export function ScrutinDetailScreen() {
   const { resultat } = scrutin;
   // Titre = type du vote en clair ; l'objet officiel complet (le sujet exact)
   // reste affiché dessous — rien n'est perdu, tout reste sourcé (§2.5).
-  const lib = libelleScrutin(scrutin.objet, scrutin.typeMotion);
+  const lib = libelleScrutin(
+    scrutin.objet,
+    scrutin.typeMotion,
+    scrutin.modalite,
+    scrutin.etape,
+  );
   // Le titre est-il un terme de procédure défini par le glossaire ? On cherche
   // sur le TITRE (« Motion de rejet préalable »), pas sur l'objet officiel : lui
   // contient le texte visé, dont les mots déclencheraient des définitions sans
@@ -209,7 +219,15 @@ export function ScrutinDetailScreen() {
   // porte la phrase à afficher, ici et au-dessus des groupes.
   const laMotion = motion(scrutin.typeMotion);
   const consequence = consequenceMotion(scrutin.typeMotion, scrutin.statut);
-  const termeType = termeTypeVote(scrutin.typeVote);
+  // Vote sans scrutin public (main levée, 49.3, art. 151-7) : ni décompte, ni
+  // groupes, ni noms. La fiche dit comment la décision a été prise et pourquoi
+  // ce détail n'existe pas — au lieu d'afficher des zéros (§5.2).
+  const sansScrutin = scrutin.scrutinPublic
+    ? undefined
+    : MODALITES[scrutin.modalite ?? 'main_levee'];
+  const termeType = sansScrutin
+    ? GLOSSAIRE_PAR_ID[sansScrutin.glossaireId]
+    : termeTypeVote(scrutin.typeVote);
   // Fracture à montrer seulement si les groupes ne sont pas unanimes.
   const campsDistincts = new Set(
     scrutin.positionsGroupes.map((g) => g.positionMajoritaire),
@@ -259,7 +277,13 @@ export function ScrutinDetailScreen() {
         {termeTitre && definitionOuverte === 'titre' ? (
           <DefinitionGlossaire terme={termeTitre} />
         ) : null}
-        {lib.titre !== scrutin.objet ? (
+        {/* Décision sans scrutin : pas d'objet de vote officiel, mais la
+            conclusion que l'archive publie, citée telle quelle. */}
+        {scrutin.conclusion && !estAmendement ? (
+          <Text style={[typography.readingBody, styles.objetOfficiel]}>
+            Conclusion officielle : « {scrutin.conclusion} »
+          </Text>
+        ) : lib.titre !== scrutin.objet ? (
           <Text style={[typography.readingBody, styles.objetOfficiel]}>
             {scrutin.objet}
           </Text>
@@ -278,7 +302,29 @@ export function ScrutinDetailScreen() {
             sur toutes les fiches vote, quel que soit le type. Tout est factuel :
             décomptes officiels. */}
         <SectionCard title="Résultat du vote" flat>
-          {estMotionCensure ? (
+          {sansScrutin ? (
+            <>
+              <VerdictCard statut={scrutin.statut} resultat={resultat} sansEcart />
+              <Text style={typography.readingBody}>
+                {sansScrutin.explication(scrutin.statut)}
+              </Text>
+              {termeType ? (
+                <Pressable
+                  onPress={() => basculerDefinition('type')}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: definitionOuverte === 'type' }}
+                  accessibilityLabel={`Définition : ${termeType.libelle}`}
+                  style={styles.ligneTypeVote}
+                >
+                  <Text style={styles.typeVoteTexte}>{termeType.libelle}</Text>
+                  <MarqueurGlossaire />
+                </Pressable>
+              ) : null}
+              {termeType && definitionOuverte === 'type' ? (
+                <DefinitionGlossaire terme={termeType} />
+              ) : null}
+            </>
+          ) : estMotionCensure ? (
             /* ⚠️ Une motion de censure ne se raconte PAS pour/contre : l'article
                49 de la Constitution ne fait recenser que les voix FAVORABLES,
                si bien que « contre » et « abstention » y valent 0 par
@@ -442,7 +488,7 @@ export function ScrutinDetailScreen() {
             amendement, le « qui était pour / contre » vit dans la carte des
             4 questions. Scrutins publics seulement (§3.2, §5.2).
             Tap sur un groupe (si nominatif dispo) → noms des votants. */}
-        {estAmendement ? null : scrutin.scrutinPublic ? (
+        {estAmendement || sansScrutin ? null : (
           <SectionCard title="Vote par groupe" flat>
             {/* Ligne de fracture : qui s'est opposé à qui, en un coup d'œil.
                 Position majoritaire de chaque groupe — factuel, sourcé par le
@@ -536,14 +582,6 @@ export function ScrutinDetailScreen() {
                 pas nécessairement le vote personnel de chaque sénateur.
               </Text>
             )}
-          </SectionCard>
-        ) : (
-          <SectionCard title="Vote par groupe">
-            <Text style={typography.readingBody}>
-              Ce vote s'est fait à main levée : il n'existe pas de ventilation
-              par groupe ni par parlementaire. Seul le résultat global est
-              disponible.
-            </Text>
           </SectionCard>
         )}
 

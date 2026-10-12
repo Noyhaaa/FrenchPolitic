@@ -8,7 +8,7 @@ import {
   formatDateRelative,
   libelleChambreCourt,
 } from '@/utils/format';
-import { MiniResultat } from './MiniResultat';
+import { MentionSansScrutin, MiniResultat } from './MiniResultat';
 
 interface Props {
   dossier: DossierListItem;
@@ -95,6 +95,10 @@ export function HeroDossier({ dossier, onPress, topInset }: Props) {
               typeVote={dossier.typeVoteDernierScrutin}
               suffragesRequis={dossier.suffragesRequisDernierScrutin}
             />
+          </View>
+        ) : dossier.modaliteDernierScrutin ? (
+          <View style={styles.barWrap}>
+            <MentionSansScrutin modalite={dossier.modaliteDernierScrutin} />
           </View>
         ) : null}
 

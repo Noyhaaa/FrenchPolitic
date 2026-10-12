@@ -20,6 +20,21 @@ export type Chambre = 'assemblee' | 'senat';
 
 export type NiveauConfiance = 'haute' | 'moyenne' | 'faible';
 
+/**
+ * Comment une décision a été prise quand il n'y a PAS eu de scrutin public
+ * (§5.2). Absente = scrutin public, avec décompte et nominatif.
+ *
+ * - `main_levee` : vote en séance à main levée (ou par assis et levé) — ni
+ *   décompte des voix, ni liste des votants ;
+ * - `article_49_3` : texte « considéré comme adopté » (ou rejeté, si une
+ *   motion de censure a été adoptée) sans vote sur le texte ;
+ * - `article_151_7` : résolution européenne adoptée en commission et devenue
+ *   définitive sans examen en séance.
+ *
+ * Ce que l'app en dit vit dans `constants/modalites.ts`.
+ */
+export type ModaliteVote = 'main_levee' | 'article_49_3' | 'article_151_7';
+
 // Miroir de `THEMES` dans backend/app/ingestion/normalize.py — à garder synchronisé.
 export type ThemeScrutin =
   | 'Logement'
@@ -157,8 +172,13 @@ export interface Amendement {
    * des motifs du dossier).
    */
   exposeSommaire?: string;
-  /** Scrutin public correspondant, si l'amendement a été mis aux voix. */
+  /**
+   * La fiche du vote de l'amendement. Elle existe aussi pour un vote sans
+   * scrutin public : elle y explique l'absence de décompte.
+   */
   scrutinId?: string;
+  /** Voté sans scrutin public (à main levée) — la ligne le dit. Absent = scrutin public. */
+  modalite?: ModaliteVote;
   /**
    * Sous-amendements rattachés (« … à l'amendement n° X »). Affichés dans leur
    * propre section de la fiche dossier ET sur la fiche vote de leur parent.
@@ -332,8 +352,18 @@ export interface Scrutin {
    * deux assemblées, et « 214 pour » n'a pas le même sens selon l'hémicycle.
    */
   chambre: Chambre;
-  /** true = scrutin public (vote nominatif dispo), false = à main levée (§5.2). */
+  /** true = scrutin public (vote nominatif dispo), false = sans scrutin public (§5.2). */
   scrutinPublic: boolean;
+  /**
+   * Décision prise sans scrutin public : `resultat` vaut alors 0 partout et ne
+   * doit JAMAIS s'afficher comme des voix — l'écran dit comment la décision a
+   * été prise (`constants/modalites.ts`).
+   */
+  modalite?: ModaliteVote;
+  /** Décision sur le texte : l'étape, telle que l'archive la nomme. */
+  etape?: string;
+  /** Décision sur le texte : la conclusion officielle, verbatim (« adopté sans modification »). */
+  conclusion?: string;
   /**
    * Forme du scrutin — ce qui explique le nombre de votants. Absente au Sénat,
    * dont la page ne nomme pas le type : on n'affiche alors aucun libellé (§2.5).
@@ -389,6 +419,10 @@ export interface ScrutinResume {
    * votes nomme alors le vote au lieu de restituer l'objet officiel tronqué.
    */
   typeMotion?: TypeMotion;
+  /** Décision sans scrutin public : pas de décompte (cf. `Scrutin.modalite`). */
+  modalite?: ModaliteVote;
+  etape?: string;
+  conclusion?: string;
   resultat: ResultatGlobal;
 }
 
@@ -609,9 +643,9 @@ export interface DossierListItem {
    */
   chambres: Chambre[];
   /**
-   * Résultat du dernier scrutin **public** du dossier (voix pour/contre) —
-   * alimente la barre de résultat de la carte. Absent si le dernier vote n'est
-   * pas nominatif (à main levée) : on n'affiche alors pas de barre (§2.5, §5.2).
+   * Résultat du dernier vote sur le texte (voix pour/contre) — alimente la
+   * barre de résultat de la carte. Absent si ce vote n'a pas de décompte : la
+   * carte dit alors comment il a été pris (`modaliteDernierScrutin`, §5.2).
    */
   resultatDernierScrutin?: ResultatGlobal;
   /**
@@ -626,6 +660,8 @@ export interface DossierListItem {
    * l'objet officiel est tronqué (tous ceux du Sénat le sont).
    */
   typeMotionDernierScrutin?: TypeMotion;
+  /** Le dernier vote sur le texte s'est fait sans scrutin public (main levée, 49.3…). */
+  modaliteDernierScrutin?: ModaliteVote;
 }
 
 /** Une rangée thématique de l'accueil (façon « catégorie » Netflix). */

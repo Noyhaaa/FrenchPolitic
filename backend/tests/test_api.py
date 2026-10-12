@@ -428,3 +428,11 @@ def test_une_motion_de_rejet_dit_qu_elle_inverse_le_sens(client):
     carte = next(d for d in fil if d["id"] == "dos-comptes-2026")
     assert carte["statutMotion"] == "rejet_prealable"
     assert carte["typeMotionDernierScrutin"] == "rejet_prealable"
+
+
+def test_reponses_compressees(client):
+    # La fiche d'un dossier très amendé pèse plusieurs Mo de JSON : l'API la
+    # compresse pour le réseau mobile, le client la décompresse de lui-même.
+    r = client.get("/dossiers", headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200
+    assert r.headers.get("content-encoding") == "gzip"

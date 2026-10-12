@@ -22,7 +22,11 @@ from app.ingestion.sync import SyncJob
 
 
 async def _main(
-    limit: int | None, legislature: int, session_senat: int | None, avec_senat: bool
+    limit: int | None,
+    legislature: int,
+    session_senat: int | None,
+    avec_senat: bool,
+    plafond_sans_scrutin: int | None,
 ) -> None:
     engine = make_engine()
     await init_models(engine)
@@ -50,6 +54,7 @@ async def _main(
             SenatOpenDataClient(session=sessions_senat[0]) if avec_senat else None
         ),
         sessions_senat=sessions_senat,
+        plafond_questions_sans_scrutin=plafond_sans_scrutin,
     )
     llm_info = f"LLM={settings.llm_provider}:{settings.llm_model}" if llm else "LLM=off"
     senat_info = (
@@ -90,6 +95,20 @@ async def _main(
         print(
             f"  {report.votes_rattaches_officiellement} vote(s) rangé(s) dans le "
             "dossier que les actes législatifs désignent (voteRefs)."
+        )
+    if report.decisions_sans_scrutin or report.amendements_sans_scrutin:
+        print(
+            f"  Sans scrutin public : {report.decisions_sans_scrutin} décision(s) "
+            f"de séance (main levée, 49.3, art. 151-7) et "
+            f"{report.amendements_sans_scrutin} amendement(s) voté(s) à main "
+            f"levée ; {report.dossiers_sans_scrutin_public} dossier(s) n'ont "
+            "aucun scrutin public."
+        )
+    if report.votes_rattaches_par_decision:
+        print(
+            f"  {report.votes_rattaches_par_decision} vote(s) d'un dossier "
+            "reconstitué rangé(s) sous le dossier qu'une décision de séance "
+            "désigne (même chambre, même jour, titre concordant)."
         )
     if report.elus_retires:
         print(
@@ -156,9 +175,25 @@ def main() -> None:
         action="store_true",
         help="N'ingérer que l'Assemblée nationale",
     )
+    parser.add_argument(
+        "--plafond-amendements-sans-scrutin",
+        type=int,
+        default=None,
+        help=(
+            "Nombre maximal d'amendements votés à main levée dont on interroge "
+            "le LLM ce run (~10 000 au total) ; les suivants reprennent où "
+            "celui-ci s'arrête. Par défaut, sans limite."
+        ),
+    )
     args = parser.parse_args()
     asyncio.run(
-        _main(args.limit, args.legislature, args.session_senat, not args.sans_senat)
+        _main(
+            args.limit,
+            args.legislature,
+            args.session_senat,
+            not args.sans_senat,
+            args.plafond_amendements_sans_scrutin,
+        )
     )
 
 

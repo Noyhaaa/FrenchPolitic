@@ -9,7 +9,7 @@ import {
   libelleChambreCourt,
 } from '@/utils/format';
 import { StatusBadge } from './StatusBadge';
-import { MiniResultat } from './MiniResultat';
+import { MentionSansScrutin, MiniResultat } from './MiniResultat';
 
 interface Props {
   dossier: DossierListItem;
@@ -68,6 +68,8 @@ export function DossierTile({ dossier, onPress }: Props) {
             typeVote={dossier.typeVoteDernierScrutin}
             suffragesRequis={dossier.suffragesRequisDernierScrutin}
           />
+        ) : dossier.modaliteDernierScrutin ? (
+          <MentionSansScrutin modalite={dossier.modaliteDernierScrutin} />
         ) : null}
         <View style={styles.footer}>
           {/* Chambre(s) qui ont voté — pas « Assemblée nat. » en dur : un texte

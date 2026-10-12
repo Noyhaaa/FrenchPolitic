@@ -2,6 +2,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { colors, mono, radius, serifDisplaySemi, spacing } from '@/theme';
 import { DossierListItem, StatutScrutin } from '@/types';
+import { MODALITES } from '@/constants/modalites';
 import { formatDateRelative, libelleChambreCourt } from '@/utils/format';
 import { ResultBar, segmentsMotionCensure } from './ResultBar';
 
@@ -44,10 +45,14 @@ export function DossierChronoRow({ dossier, premier, dernier, onPress }: Props) 
       ? dossier.suffragesRequisDernierScrutin
       : undefined;
 
-  const mention =
-    dossier.nombreScrutins === 0
-      ? 'Pas encore mis aux voix'
-      : 'Vote à main levée — pas de nominatif';
+  // Pas de barre : on dit pourquoi. Le dernier vote s'est fait sans scrutin
+  // public (main levée, 49.3…), ou le texte n'a pas encore été voté en entier
+  // — seuls des amendements l'ont été (§5.2, §2.5).
+  const mention = dossier.modaliteDernierScrutin
+    ? MODALITES[dossier.modaliteDernierScrutin].mention
+    : dossier.nombreScrutins === 0
+      ? 'Texte pas encore mis aux voix'
+      : 'Pas de décompte publié pour ce vote';
 
   return (
     <Pressable

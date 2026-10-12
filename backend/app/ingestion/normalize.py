@@ -249,6 +249,18 @@ def numero_amendement(objet: str) -> str | None:
     return m.group(1) if m else None
 
 
+def numeros_amendements_votes(objet: str) -> list[str]:
+    """Tous les numéros d'amendement que ce vote tranche.
+
+    À la différence de `numero_amendement`, qui n'en retient aucun quand ils
+    sont plusieurs, on les veut tous ici : un vote sur des amendements
+    identiques (« les amendements identiques n° 154, n° 207 et n° 410 ») les a
+    tous mis aux voix publiquement. La référence à un AUTRE amendement (« … à
+    l'amendement n° 80 » d'un sous-amendement) est exclue."""
+    zone = _RE_RENVOI_AMENDEMENT.split(objet, maxsplit=1)[0]
+    return re.findall(r"n[°o]\s*(\d+)", fold(zone))
+
+
 def numero_amendement_parent(objet: str) -> str | None:
     """Pour un sous-amendement : numéro de l'amendement visé
     (« le sous-amendement n° 3 … à l'amendement n° 80 » → « 80 »)."""

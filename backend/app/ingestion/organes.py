@@ -83,6 +83,24 @@ def build_acteurs_from_amo(acteur_wrappers: list[dict]) -> dict[str, str]:
     return acteurs
 
 
+def build_civilites_from_amo(acteur_wrappers: list[dict]) -> dict[str, str]:
+    """Annuaire `acteurRef` → « M. Nom » / « Mme Nom », la forme sous laquelle
+    l'Assemblée désigne l'auteur d'un amendement dans l'objet d'un scrutin
+    (« l'amendement n° 80 de M. Girard »). Sert à écrire l'objet d'un amendement
+    voté sans scrutin public dans les mêmes termes que les autres."""
+    civilites: dict[str, str] = {}
+    for wrapper in acteur_wrappers:
+        acteur = wrapper.get("acteur", wrapper)
+        uid = acteur.get("uid")
+        if isinstance(uid, dict):
+            uid = uid.get("#text")
+        ident = (acteur.get("etatCivil") or {}).get("ident") or {}
+        civ, nom = ident.get("civ"), ident.get("nom")
+        if uid and civ in ("M.", "Mme") and nom:
+            civilites[uid] = f"{civ} {nom}"
+    return civilites
+
+
 def build_resolver_from_organes(organe_wrappers: list[dict]) -> GroupResolver:
     """Construit le résolveur à partir des JSON d'organes (clé « organe »).
 

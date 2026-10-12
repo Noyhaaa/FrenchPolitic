@@ -94,6 +94,32 @@ class TypeMotion(str, Enum):
     ajournement = "ajournement"
 
 
+class ModaliteVote(str, Enum):
+    """Comment une décision a été prise quand il n'y a **pas** eu de scrutin
+    public (§5.2). Absente = scrutin public, avec décompte et nominatif.
+
+    Sans elle, un texte adopté sans scrutin n'existait pas pour l'app : un
+    dossier n'était créé que par un scrutin public (mesuré : 103 textes, dont
+    des conventions promulguées, et ~10 000 amendements de séance absents).
+
+    Liste **fermée**, lue sur le `statutConclusion` officiel de l'acte de
+    décision (`app.ingestion.decisions`) : un libellé non reconnu ne produit
+    aucune décision plutôt qu'une modalité devinée (§2.5).
+    """
+
+    # Vote en séance sans scrutin public : à main levée, ou par assis et levé
+    # si le résultat est douteux (art. 64 RAN). Ni décompte des voix, ni liste
+    # des votants — le président constate le résultat.
+    main_levee = "main_levee"
+    # Texte « considéré comme adopté » (ou rejeté, si une motion de censure a
+    # été adoptée) : le Gouvernement a engagé sa responsabilité, et AUCUN vote
+    # n'a eu lieu sur le texte (art. 49, alinéa 3, de la Constitution).
+    article_49_3 = "article_49_3"
+    # Résolution européenne adoptée en commission et « considérée comme
+    # définitive » sans examen en séance (art. 151-7 RAN).
+    article_151_7 = "article_151_7"
+
+
 class ObjetVote(str, Enum):
     """Nature de ce sur quoi portait un vote, pour situer une entrée
     d'historique de député (§5.2)."""

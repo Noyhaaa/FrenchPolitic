@@ -13,9 +13,14 @@ const SEGMENTS = [
   { k: 'retire', couleur: colors.textTertiary, label: 'retirés' },
 ] as const;
 
-/** Nombre d'amendements montrés avant le bouton « Voir les N autres »
+/** Nombre d'amendements montrés avant le bouton « Voir plus »
  *  (3 = ce que présente l'écran 2a ; monte-le si tu veux en montrer plus). */
 const APERCU = 3;
+
+/** Amendements ajoutés à chaque « Voir plus ». Un dossier peut en compter
+ *  plusieurs milliers (budget, aide à mourir) : tout déplier d'un coup
+ *  rendrait des milliers de lignes et figerait l'écran. */
+const PAGE = 30;
 
 interface Props {
   amendements: Amendement[];
@@ -52,18 +57,19 @@ function Chip({
  * + des compteurs donnent l'ensemble d'un coup d'œil, des filtres réduisent la
  * liste, et chaque amendement tient sur une ligne calme (voir `AmendementRow`)
  * qui se déplie à la demande — sous-amendements révélés au dépliage, pas de
- * seconde liste. Les longues listes sont écrêtées à `APERCU` (« Voir les N
- * autres »). Aucune couleur ne porte seule l'information (§8/RGAA).
+ * seconde liste. Les longues listes sont écrêtées à `APERCU`, puis dévoilées
+ * par pages de `PAGE`. Aucune couleur ne porte seule l'information (§8/RGAA).
  */
 export function AmendementsSection({ amendements, onOpenScrutin }: Props) {
   const [filtre, setFiltre] = useState<Filtre>('tous');
-  const [tout, setTout] = useState(false);
+  const [nbVisibles, setNbVisibles] = useState(APERCU);
 
   const compte = useMemo(
     () => ({
       adopte: amendements.filter((a) => a.sort === 'adopte').length,
       rejete: amendements.filter((a) => a.sort === 'rejete').length,
       retire: amendements.filter((a) => a.sort === 'retire').length,
+      mainLevee: amendements.filter((a) => a.modalite === 'main_levee').length,
     }),
     [amendements],
   );
@@ -74,7 +80,12 @@ export function AmendementsSection({ amendements, onOpenScrutin }: Props) {
     filtre === 'tous'
       ? amendements
       : amendements.filter((a) => a.sort === filtre);
-  const visibles = tout ? filtree : filtree.slice(0, APERCU);
+  const visibles = filtree.slice(0, nbVisibles);
+  const reste = filtree.length - visibles.length;
+  const choisirFiltre = (f: Filtre) => {
+    setFiltre(f);
+    setNbVisibles(APERCU);
+  };
 
   return (
     <View style={styles.card}>
@@ -106,24 +117,35 @@ export function AmendementsSection({ amendements, onOpenScrutin }: Props) {
         )}
       </View>
 
+      {/* Comment ces amendements ont été votés : la plupart l'ont été à main
+          levée, sans décompte — le lecteur doit le savoir avant d'ouvrir une
+          fiche et de chercher des voix qui n'existent pas (§5.2). */}
+      {compte.mainLevee ? (
+        <Text style={styles.modalites}>
+          {compte.mainLevee === amendements.length
+            ? 'Tous votés à main levée, sans décompte des voix.'
+            : `${amendements.length - compte.mainLevee} votés par scrutin public, ${compte.mainLevee} à main levée (sans décompte des voix).`}
+        </Text>
+      ) : null}
+
       {/* Filtres */}
       <View style={styles.filtres}>
         <Chip
           actif={filtre === 'tous'}
-          onPress={() => setFiltre('tous')}
+          onPress={() => choisirFiltre('tous')}
           label={`Tous · ${amendements.length}`}
         />
         {compte.adopte ? (
           <Chip
             actif={filtre === 'adopte'}
-            onPress={() => setFiltre('adopte')}
+            onPress={() => choisirFiltre('adopte')}
             label="Adoptés"
           />
         ) : null}
         {compte.rejete ? (
           <Chip
             actif={filtre === 'rejete'}
-            onPress={() => setFiltre('rejete')}
+            onPress={() => choisirFiltre('rejete')}
             label="Rejetés"
           />
         ) : null}
@@ -138,21 +160,26 @@ export function AmendementsSection({ amendements, onOpenScrutin }: Props) {
         ))}
       </View>
 
-      {filtree.length > APERCU ? (
+      {reste > 0 ? (
         <Pressable
-          onPress={() => setTout((v) => !v)}
+          onPress={() => setNbVisibles((n) => n + PAGE)}
           accessibilityRole="button"
-          accessibilityLabel={
-            tout
-              ? 'Réduire la liste des amendements'
-              : `Voir les ${filtree.length - APERCU} autres amendements`
-          }
+          accessibilityLabel={`Voir ${Math.min(PAGE, reste)} amendements de plus, sur ${reste} restants`}
         >
           <Text style={styles.voirPlus}>
-            {tout
-              ? 'Réduire la liste ▲'
-              : `Voir les ${filtree.length - APERCU} autres ▼`}
+            {reste > PAGE
+              ? `Voir ${PAGE} de plus · ${reste} restants ▼`
+              : `Voir les ${reste} autres ▼`}
           </Text>
+        </Pressable>
+      ) : null}
+      {nbVisibles > APERCU && filtree.length > APERCU ? (
+        <Pressable
+          onPress={() => setNbVisibles(APERCU)}
+          accessibilityRole="button"
+          accessibilityLabel="Réduire la liste des amendements"
+        >
+          <Text style={styles.voirPlus}>Réduire la liste ▲</Text>
         </Pressable>
       ) : null}
     </View>
@@ -195,6 +222,11 @@ const styles = StyleSheet.create({
   legTexte: {
     ...typography.meta,
     color: colors.textSecondary,
+  },
+  modalites: {
+    ...typography.meta,
+    color: colors.textSecondary,
+    marginTop: spacing.sm,
   },
   filtres: {
     flexDirection: 'row',

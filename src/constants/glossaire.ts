@@ -405,6 +405,31 @@ export const GLOSSAIRE: TermeGlossaire[] = [
     voisins: ['Lecture unique', 'Promulgation'],
   },
   {
+    id: 'resolution-europeenne',
+    libelle: 'Résolution européenne',
+    nature: 'n.f.',
+    categorie: 'procedure',
+    definition:
+      'Une résolution par laquelle une assemblée prend position sur un projet de texte ou une question de l’Union européenne.',
+    etapes: [
+      {
+        titre: 'Une commission l’examine et l’adopte',
+        detail:
+          'La commission des affaires européennes, puis la commission compétente sur le sujet.',
+      },
+      {
+        titre: 'Sans demande d’examen en séance, elle devient définitive',
+        detail:
+          'À l’Assemblée, c’est l’article 151-7 du Règlement : le texte de la commission devient la résolution de l’Assemblée, sans vote en séance.',
+      },
+      {
+        titre: 'Elle exprime une position',
+        detail: 'Comme toute résolution, elle n’est pas une loi et n’oblige personne.',
+      },
+    ],
+    voisins: ['Résolution', 'Séance publique'],
+  },
+  {
     id: 'scrutin-public',
     libelle: 'Scrutin public',
     nature: 'n.m.',
@@ -475,6 +500,32 @@ export const GLOSSAIRE: TermeGlossaire[] = [
     voisins: ['Commission'],
   },
   {
+    id: 'vote-a-main-levee',
+    libelle: 'Vote à main levée',
+    nature: 'loc.',
+    categorie: 'vote',
+    definition:
+      'Un vote sans scrutin public : les parlementaires lèvent la main et le président de séance constate le résultat, sans compter les voix.',
+    etapes: [
+      {
+        titre: 'C’est la façon ordinaire de voter',
+        detail:
+          'Un texte ou un amendement se vote à main levée, sauf si un scrutin public est demandé (par le Gouvernement, la commission ou un président de groupe).',
+      },
+      {
+        titre: 'En cas de doute, on vote par assis et levé',
+        detail:
+          'Les parlementaires se lèvent pour que le résultat se voie mieux. Les voix ne sont pas comptées pour autant.',
+      },
+      {
+        titre: 'Seul le résultat est publié',
+        detail:
+          'Adopté ou rejeté : il n’existe ni décompte des voix, ni position des groupes, ni liste des votants.',
+      },
+    ],
+    voisins: ['Scrutin public', 'Vote sur l’ensemble'],
+  },
+  {
     id: 'vote-sur-l-ensemble',
     libelle: 'Vote sur l’ensemble',
     nature: 'loc.',
@@ -513,6 +564,11 @@ export function trouveParLibelle(libelle: string): TermeGlossaire | undefined {
 // apparaîtrait sur « Sous-amendement n° 12 », qui est autre chose, et la fiche
 // d'un vote d'amendement porte déjà sa propre carte d'explication.
 const MOTIFS: readonly { motif: string; id: string }[] = [
+  // Titres que `libelleScrutin` donne aux décisions sans scrutin public
+  // (`constants/modalites.ts`) — avant « resolution », plus général.
+  { motif: 'main levee', id: 'vote-a-main-levee' },
+  { motif: '49.3', id: 'article-49-3' },
+  { motif: '151-7', id: 'resolution-europeenne' },
   { motif: 'lecture definitive', id: 'lecture-definitive' },
   { motif: 'lecture unique', id: 'lecture-unique' },
   { motif: 'nouvelle lecture', id: 'nouvelle-lecture' },

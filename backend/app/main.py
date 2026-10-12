@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from app.api.routes import comptes, deputes, dossiers, health
 from app.config import settings
@@ -62,6 +63,11 @@ def create_app() -> FastAPI:
         summary="Le traducteur neutre et mobile des décisions de l'Assemblée nationale.",
     )
 
+    # Réponses compressées : la fiche d'un dossier très amendé (budget, aide à
+    # mourir) porte plusieurs milliers d'amendements avec leur contenu, soit
+    # quelques Mo de JSON, qui se compriment d'un facteur 5 à 8 sur le réseau
+    # mobile. Le client (fetch de React Native) décompresse de lui-même.
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.api_cors_origins,

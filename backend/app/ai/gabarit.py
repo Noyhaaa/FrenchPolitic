@@ -13,7 +13,7 @@ interface, sans changer ce contrat.
 from __future__ import annotations
 
 from app.ai.faits import FaitsDossier, date_fr
-from app.ai.questions import phrase_motion_censure
+from app.ai.questions import phrase_decision, phrase_motion_censure
 from app.ai.rag import RagContext
 from app.domain.enums import TypeVote
 from app.schemas import PhraseSourcee, ResumeScrutin
@@ -58,6 +58,10 @@ def phrase_vote_decisif(d) -> str | None:
     statut = _STATUT_FR.get(d.statut.value)
     if not statut:
         return None
+    if d.modalite is not None:
+        # Décision sans scrutin public : il n'y a pas de voix à citer, et
+        # « par 0 voix contre 0 » serait un décompte inventé (§2.5).
+        return phrase_decision(d)
     if d.type_vote is TypeVote.motion_censure:
         # Une motion de censure ne se raconte pas pour/contre : l'article 49 ne
         # fait recenser que les voix favorables, si bien que « contre » y vaut 0

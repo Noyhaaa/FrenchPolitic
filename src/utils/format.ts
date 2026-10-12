@@ -1,6 +1,7 @@
 import {
   Amendement,
   Chambre,
+  ModaliteVote,
   ObjetVote,
   PositionVote,
   ScrutinResume,
@@ -8,6 +9,7 @@ import {
   TypeMotion,
   TypeVote,
 } from '@/types';
+import { MODALITES } from '@/constants/modalites';
 import { MOTIONS } from '@/constants/motions';
 
 /** Libellé texte du statut (jamais la couleur seule — RGAA §8). */
@@ -172,9 +174,19 @@ const MENTIONS_SCRUTIN: ReadonlyArray<[RegExp, string]> = [
 export function libelleScrutin(
   objet: string,
   typeMotion?: TypeMotion,
+  modalite?: ModaliteVote,
+  etape?: string,
 ): LibelleScrutin {
   const t = plier(objet);
   const numero = (re: RegExp) => t.match(re)?.[1];
+
+  // Décision sur le texte prise sans scrutin public : il n'y a pas d'objet
+  // officiel de vote, le titre dit COMMENT elle a été prise et le complément,
+  // à quelle étape (libellé de l'archive). Un amendement voté à main levée
+  // garde son titre d'amendement, plus bas.
+  if (modalite && !t.includes('amendement')) {
+    return { titre: MODALITES[modalite].libelle, complement: etape };
+  }
 
   // Le classement fait à l'ingestion PRIME sur l'heuristique de texte : il a lu
   // l'objet ENTIER, là où celui qu'on reçoit est tronqué à 120 caractères. Un
@@ -259,14 +271,20 @@ export function libelleChambreCourt(chambre: Chambre): string {
 }
 
 /**
- * Le vote DÉCISIF d'un dossier : le vote sur l'ensemble du texte le plus
- * récent (la liste arrive triée du plus récent au plus ancien) — c'est lui qui
- * scelle l'adoption ou le rejet, contrairement aux votes d'articles ou aux
- * motions. Miroir de `_vote_decisif` côté backend. undefined si le texte n'a
- * pas (encore) été voté dans son ensemble — on ne désigne alors rien (§2.5).
+ * Le vote DÉCISIF d'un dossier : la décision sur le texte entier la plus
+ * récente (la liste arrive triée du plus récent au plus ancien) — vote sur
+ * l'ensemble ou décision sans scrutin public. C'est elle qui scelle l'adoption
+ * ou le rejet, contrairement aux votes d'articles ou aux motions. Miroir de
+ * `_vote_decisif` côté backend. undefined si le texte n'a pas (encore) été
+ * tranché dans son ensemble — on ne désigne alors rien (§2.5).
  */
 export function voteDecisif(scrutins: ScrutinResume[]): ScrutinResume | undefined {
-  return scrutins.find((s) => plier(s.objet).includes('ensemble'));
+  // Une décision sans scrutin public (texte adopté à main levée, 49.3,
+  // résolution devenue définitive) tranche le texte entier, comme le vote sur
+  // l'ensemble — miroir de `questions.tranche_le_texte`.
+  return scrutins.find(
+    (s) => s.modalite !== undefined || plier(s.objet).includes('ensemble'),
+  );
 }
 
 /** Le vote porte-t-il sur un amendement (ou sous-amendement) ? Miroir de

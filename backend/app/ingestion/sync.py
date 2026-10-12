@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 
 import httpx
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -33,7 +33,23 @@ from app.ingestion.assemblee import (
     parse_scrutin,
     rattacher_par_votes_officiels,
 )
-from app.ingestion.amendements import AmendementEnrichi, enrichir as enrichir_amendement
+from app.ingestion.amendements import (
+    AmendementEnrichi,
+    ArchiveAmendements,
+    amendements_sans_scrutin,
+    enrichir as enrichir_amendement,
+    parse_amendement_seance,
+)
+from app.ingestion.decisions import (
+    DecisionSeance,
+    TitresDossiers,
+    VotePublic,
+    construire_titres,
+    decisions_sans_scrutin,
+    extraire_decisions,
+    parse_decision,
+    rattacher_par_decisions,
+)
 from app.ingestion.deputes import (
     attacher_portraits,
     build_deputes_from_amo,
@@ -43,7 +59,7 @@ from app.ingestion.deputes import (
     votes_du_scrutin,
 )
 from app.domain.division import division
-from app.domain.enums import Chambre
+from app.domain.enums import Chambre, StatutScrutin
 from app.domain.recherche import index_recherche
 from app.domain.sources import dedupe_sources, documents_du_dossier
 from app.ingestion.debats import IndexDebats, url_compte_rendu
@@ -113,6 +129,7 @@ from app.ingestion.organes import (
     GroupInfo,
     GroupResolver,
     build_acteurs_from_amo,
+    build_civilites_from_amo,
     build_resolver_from_organes,
 )
 from app.ai.faits import construire_faits
@@ -202,6 +219,16 @@ class SyncReport:
     # Votes rangés dans le dossier que les actes législatifs désignent
     # (`voteRefs`), à la place de celui qu'une correspondance de titre donnait.
     votes_rattaches_officiellement: int = 0
+    # Votes publics d'un dossier reconstitué (`TXT-…`, `SEN-…`) rangés sous le
+    # dossier officiel qu'une décision de séance du même jour désigne.
+    votes_rattaches_par_decision: int = 0
+    # Décisions SANS scrutin public versées au fil (main levée, 49.3, art.
+    # 151-7) et amendements de séance votés à main levée (§5.2).
+    decisions_sans_scrutin: int = 0
+    amendements_sans_scrutin: int = 0
+    # Dossiers dont aucun vote n'est un scrutin public : ils n'existaient pas
+    # dans l'app avant que les décisions sans scrutin y entrent.
+    dossiers_sans_scrutin_public: int = 0
     portraits: int = 0
     votes_deputes: int = 0
     # Sénat : scrutins publics lus sur senat.fr et référentiel des sénateurs.
@@ -263,9 +290,11 @@ _RE_MOTION = re.compile(r"^la motion\b")
 
 def examine_par_assemblee(dossier: Dossier) -> bool:
     """L'Assemblée a-t-elle examiné le texte ? Un de ses votes, ou une étape de
-    la trajectoire officielle à l'Assemblée (un texte adopté à main levée n'a
-    pas de scrutin, mais son étape figure dans les actes). Sinon, seul le Sénat
-    l'a examiné."""
+    la trajectoire officielle à l'Assemblée **conclue** par une décision (un
+    texte adopté à main levée n'a pas de scrutin, mais sa décision figure dans
+    les actes). Une étape ouverte par le seul dépôt d'un texte transmis par le
+    Sénat ne compte pas : la transmission n'est pas un examen. Sinon, seul le
+    Sénat l'a examiné."""
     if any(s.chambre is Chambre.assemblee for s in dossier.scrutins):
         return True
     if any(
@@ -274,7 +303,36 @@ def examine_par_assemblee(dossier: Dossier) -> bool:
         for am in (a, *a.sous_amendements)
     ):
         return True
-    return any(e.chambre is Chambre.assemblee for e in dossier.trajectoire)
+    return any(
+        e.chambre is Chambre.assemblee and e.statut is not None
+        for e in dossier.trajectoire
+    )
+
+
+def statut_au_vu_des_actes(dossier: Dossier) -> None:
+    """Corrige un statut « en cours » que les actes officiels contredisent.
+
+    Les votes laissent un dossier `en_cours` quand des amendements ont été
+    votés après le dernier vote sur le texte. Mais le vote qui a tranché peut
+    manquer à la liste — rattaché ailleurs, ou cité par un acte qu'on ne peut
+    pas corroborer. Si la loi est **promulguée**, ou si la dernière étape
+    conclue de la trajectoire officielle date du dernier vote ou d'après, c'est
+    cet acte qui dit le sort (vécu : la loi sur la parité dans les communes,
+    promulguée, annoncée « en discussion » à cause des amendements votés le
+    jour de son adoption définitive). Ne touche jamais un statut que les votes
+    tranchent déjà.
+    """
+    if dossier.statut is not StatutScrutin.en_cours:
+        return
+    if dossier.etat is not None and dossier.etat.etat == "promulgue":
+        dossier.statut = StatutScrutin.adopte
+        return
+    conclues = [e for e in dossier.trajectoire if e.statut is not None and e.date]
+    if not conclues:
+        return
+    derniere = max(conclues, key=lambda e: e.date or "")
+    if (derniere.date or "") >= dossier.date_dernier_scrutin[:10]:
+        dossier.statut = derniere.statut
 
 
 def _vote_conclusif(votes_texte: list[Scrutin]) -> Scrutin | None:
@@ -302,7 +360,9 @@ def _vote_conclusif(votes_texte: list[Scrutin]) -> Scrutin | None:
         lambda o: est_texte_procedural(o),
         lambda o: _RE_MOTION.match(o) is not None,
     )
-    plies = [(s, fold(s.objet)) for s in votes_texte]
+    # Une décision sans scrutin public n'a pas de positions de groupe : elle ne
+    # peut pas ancrer un désaccord, qui juxtapose ces positions.
+    plies = [(s, fold(s.objet)) for s in votes_texte if s.scrutin_public]
     for critere in criteres:
         for scrutin, objet in plies:
             if critere(objet):
@@ -375,6 +435,13 @@ def _amendement_from_scrutin(
     """
     numero = numero_amendement(scrutin.objet)
     cible = dispositif = expose = None
+    if scrutin.modalite is not None:
+        # Voté sans scrutin public : le vote vient de l'archive des amendements
+        # elle-même et porte déjà son contenu — rien à apparier.
+        cible = scrutin.cible
+        dispositif = scrutin.dispositif
+        expose = scrutin.expose_sommaire
+        index = None
     # L'archive ne contient que les amendements de séance de l'ASSEMBLÉE. Un vote
     # du Sénat sur « l'amendement n° 1343 » du même dossier désigne un autre
     # amendement que le n° 1343 de l'Assemblée : vécu, un amendement « présenté
@@ -403,29 +470,37 @@ def _amendement_from_scrutin(
         dispositif=dispositif,
         expose_sommaire=expose,
         scrutin_id=scrutin.id,
+        modalite=scrutin.modalite,
     )
 
 
 def _structurer_amendements(
-    votes: list[Scrutin], index: IndexAmendements | None = None
+    votes: list[Scrutin],
+    index: IndexAmendements | None = None,
+    parents: dict[str, str] | None = None,
 ) -> list[Amendement]:
     """Structure les votes d'amendement d'un dossier.
 
-    Les sous-amendements sont rattachés à leur amendement parent (identifié par
-    « … à l'amendement n° X ») ; un sous-amendement sans parent identifiable
-    reste au niveau du dossier (factuel, rien n'est déduit).
+    Les sous-amendements sont rattachés à leur amendement parent : par l'id que
+    l'archive donne (`parents`, votes sans scrutin public) quand ce parent est
+    là, sinon par « … à l'amendement n° X » ; un sous-amendement sans parent
+    identifiable reste au niveau du dossier (factuel, rien n'est déduit).
     """
+    parents = parents or {}
     amendements = [
         _amendement_from_scrutin(s, index)
         for s in votes
         if not est_sous_amendement(s.objet)
     ]
     par_numero = {a.numero: a for a in amendements if a.numero}
+    par_id = {a.id: a for a in amendements}
     for s in votes:
         if not est_sous_amendement(s.objet):
             continue
         sous = _amendement_from_scrutin(s, index)
-        parent = par_numero.get(numero_amendement_parent(s.objet) or "")
+        parent = par_id.get(parents.get(s.id, "")) or par_numero.get(
+            numero_amendement_parent(s.objet) or ""
+        )
         if parent is not None:
             parent.sous_amendements.append(sous)
         else:
@@ -461,8 +536,14 @@ def build_dossier(
     # législature) — la prendre pour une législature fabriquerait une URL de
     # dossier fausse. Un dossier purement sénatorial n'a pas de `dossier_ref`
     # AN, donc pas d'URL AN à bâtir.
+    #
+    # Un scrutin PUBLIC d'abord : une décision sans scrutin ou un amendement
+    # voté à main levée viennent de l'archive, dont le titre de dossier n'est
+    # pas celui que les votes affichaient jusqu'ici. Sans cette préférence, un
+    # dossier connu changerait de titre le jour où il reçoit une décision.
+    publics = [p for p in parses if p.scrutin.scrutin_public] or parses
     ref = next(
-        (p for p in parses if p.scrutin.chambre is Chambre.assemblee), parses[0]
+        (p for p in publics if p.scrutin.chambre is Chambre.assemblee), publics[0]
     )
     # Titre d'affichage : sans la nature (rendue en label à part), sans troncature
     # en plein mot — l'app clampe elle-même sur 2 lignes (§8).
@@ -470,6 +551,17 @@ def build_dossier(
 
     votes_texte = [s for s in tous if not est_amendement(s.objet)]
     votes_amendement = [s for s in tous if est_amendement(s.objet)]
+
+    # Le sort du dossier est celui du dernier vote sur le TEXTE — pas d'un
+    # amendement : « Adopté » sur un dossier dont on vient d'adopter un
+    # amendement se lisait comme l'adoption du texte. Si des amendements ont
+    # été votés APRÈS le dernier vote sur le texte (ou sans qu'il y en ait eu),
+    # l'examen est en cours, et c'est ce que le badge dit (§2.5).
+    decisif_du_statut = votes_texte[0] if votes_texte else None
+    if decisif_du_statut is None or tous[0].date[:10] > decisif_du_statut.date[:10]:
+        statut, statut_motion = StatutScrutin.en_cours, None
+    else:
+        statut, statut_motion = decisif_du_statut.statut, decisif_du_statut.type_motion
 
     # Sources de NIVEAU DOSSIER uniquement : la page du dossier législatif.
     # Chaque vote (texte, amendement, sous-amendement) garde sa source sur sa
@@ -496,21 +588,26 @@ def build_dossier(
         # Posée plus tard dans le run, une fois la Q1 disponible
         # (`SyncJob._composer_accroche`) — sinon rien (§2.5).
         accroche=None,
-        # Statut / date du dossier = scrutin le plus récent, amendements compris.
-        statut=tous[0].statut,
+        # Statut = dernier vote sur le texte (cf. plus haut) ; date = dernier
+        # vote, amendements compris.
+        statut=statut,
         # …et c'est bien le problème quand ce vote est une MOTION : son sort dit
         # l'inverse de ce qui arrive au texte (une motion de rejet adoptée le
         # rejette). On retient le type de motion pour que le badge nomme le vote
         # au lieu d'affirmer un sort du texte (§7.4). Lu sur l'objet du scrutin,
         # qui porte déjà le classement fait à l'ingestion.
-        statut_motion=tous[0].type_motion,
+        statut_motion=statut_motion,
         phase=None,
         theme=ref.theme,
         temps_lecture_sec=30,
         date_dernier_scrutin=tous[0].date,
         mise_a_jour=None,
         scrutins=[ScrutinResume.from_scrutin(s) for s in votes_texte],
-        amendements=_structurer_amendements(votes_amendement, index_amendements),
+        amendements=_structurer_amendements(
+            votes_amendement,
+            index_amendements,
+            {p.scrutin.id: p.parent_id for p in parses if p.parent_id},
+        ),
         # Une URL, une entrée, la première vue gagne — même règle que la
         # composition des documents du dossier (`app.domain.sources`).
         sources=dedupe_sources(sources),
@@ -536,6 +633,7 @@ def _merge_avec_existant(
     incoming: Dossier,
     dossier_de: dict[str, str] | None = None,
     deplaces: set[str] | None = None,
+    dates_sans_scrutin: dict[str, str] | None = None,
 ) -> Dossier:
     """Fusionne un dossier fraîchement construit avec sa version en base.
 
@@ -548,12 +646,19 @@ def _merge_avec_existant(
     que ce run n'a pas lu (`--limit`) reste où il était. `deplaces` (votes déjà
     en base sous un autre dossier) ne compte pas comme un « nouveau vote » : un
     vote ancien qui change de dossier n'en est pas un.
+
+    `dates_sans_scrutin` (vote sans scrutin public → date) : un tel vote vu
+    pour la première fois n'est « nouveau » que s'il est postérieur au dernier
+    vote connu du dossier. Sinon c'est un vote ANCIEN que l'ingestion découvre
+    (vécu : l'arrivée des votes à main levée aurait marqué « Nouveau vote »
+    presque tous les dossiers d'un coup), pas un événement (§7.7).
     """
     def _ids(liste: list[Amendement]) -> set[str]:
         return {a.id for a in liste} | {sa.id for a in liste for sa in a.sous_amendements}
 
     dossier_de = dossier_de or {}
     deplaces = deplaces or set()
+    dates_sans_scrutin = dates_sans_scrutin or {}
 
     def _ici(scrutin_id: str) -> bool:
         return dossier_de.get(scrutin_id, incoming.id) == incoming.id
@@ -629,7 +734,11 @@ def _merge_avec_existant(
     # « mis à jour » (§7.7) : un vote vu ce run et inconnu jusqu'ici (dans l'une
     # ou l'autre liste). Une simple reclassification n'est pas un nouveau vote.
     prev_ids = {s.id for s in prev.scrutins} | _ids(prev.amendements)
-    nouveaux = bool((texte_ids_frais | am_ids_frais) - prev_ids - deplaces)
+    nouveaux = any(
+        i not in dates_sans_scrutin
+        or dates_sans_scrutin[i][:10] > prev.date_dernier_scrutin[:10]
+        for i in (texte_ids_frais | am_ids_frais) - prev_ids - deplaces
+    )
 
     incoming.scrutins = scrutins
     incoming.amendements = amendements
@@ -747,12 +856,15 @@ async def _upsert_dossier(
     desaccord_sources: dict[str, str] | None = None,
     dossier_de: dict[str, str] | None = None,
     deplaces: set[str] | None = None,
+    dates_sans_scrutin: dict[str, str] | None = None,
 ) -> Dossier:
     """Upsert du dossier ; renvoie la version effectivement écrite (fusionnée)."""
     existing = await session.get(DossierRow, dossier.id)
     if existing is not None:
         prev = Dossier.model_validate(existing.payload)
-        dossier = _merge_avec_existant(prev, dossier, dossier_de, deplaces)
+        dossier = _merge_avec_existant(
+            prev, dossier, dossier_de, deplaces, dates_sans_scrutin
+        )
     # Les documents du dossier (§7.5) : recomposés ICI, tout à la fin — après la
     # fusion et après la génération des questions, dont sort le lien du compte
     # rendu. `sources` est une **vue** de ce que le dossier porte, pas un
@@ -834,6 +946,7 @@ class SyncJob:
         on_progress: Callable[[int, int, str], None] | None = None,
         client_senat: SenatOpenDataClient | None = None,
         sessions_senat: list[int] | None = None,
+        plafond_questions_sans_scrutin: int | None = None,
     ) -> None:
         self._sf = session_factory
         self._client = client or AssembleeOpenDataClient()
@@ -888,6 +1001,13 @@ class SyncJob:
         # référentiel servi par l'API : c'est la même frontière que celle qui
         # rend un votant cliquable (§5.2) — hors de là, pas d'identifiant.
         self._identite_par_acteur: dict[str, IdentiteAuteur] = {}
+        # Les amendements votés à main levée se comptent par milliers (~10 000
+        # en 17e législature), et chacun peut demander deux appels au modèle.
+        # Ce plafond borne le nombre de ces votes interrogés par run (None =
+        # sans limite) : les réponses validées sont gardées d'un run à l'autre,
+        # si bien que les suivants reprennent là où celui-ci s'est arrêté.
+        self._plafond_sans_scrutin = plafond_questions_sans_scrutin
+        self._interroges_sans_scrutin = 0
 
     # Abréviations de groupe divergentes entre le compte rendu et l'annuaire AMO
     # (fold appliqué de part et d'autre). À compléter si de nouveaux cas surgissent.
@@ -1572,9 +1692,20 @@ class SyncJob:
             (prev.pourquoi or not scrutin.expose_sommaire)
             and (prev.changement or not scrutin.dispositif)
         )
-        questions = await generer_questions_amendement(
-            scrutin, None if deja_completes else self._llm
-        )
+        llm = None if deja_completes else self._llm
+        if (
+            llm is not None
+            and scrutin.modalite is not None
+            and (scrutin.expose_sommaire or scrutin.dispositif)
+        ):
+            if (
+                self._plafond_sans_scrutin is not None
+                and self._interroges_sans_scrutin >= self._plafond_sans_scrutin
+            ):
+                llm = None
+            else:
+                self._interroges_sans_scrutin += 1
+        questions = await generer_questions_amendement(scrutin, llm)
         if questions.pourquoi or questions.changement:
             report.questions_amendements_generees += 1
         if prev is not None:
@@ -1583,6 +1714,104 @@ class SyncJob:
             questions.pourquoi = questions.pourquoi or prev.pourquoi
             questions.changement = questions.changement or prev.changement
         scrutin.questions = questions
+
+    async def _ajouter_votes_sans_scrutin(
+        self,
+        parses: list[ScrutinParse],
+        decisions: list[DecisionSeance],
+        titres: TitresDossiers,
+        archive: ArchiveAmendements | None,
+        civilites: dict[str, str],
+        depuis: str,
+        limit: int | None,
+        report: SyncReport,
+    ) -> dict[str, str]:
+        """Verse dans `parses` les votes sans scrutin public ; renvoie, par id,
+        la date de ceux qui peuvent être un « nouveau vote » (cf.
+        `_merge_avec_existant`), et une chaîne vide pour les autres.
+
+        Un vote sans scrutin n'est un événement que s'il a eu lieu depuis la
+        synchronisation précédente : sinon, c'est un vote ancien que
+        l'ingestion découvre (vécu : une adoption au Sénat de juillet 2025,
+        postérieure au dernier scrutin public de son dossier, marquait le
+        dossier « Nouveau vote » en octobre 2026). Sans run précédent, aucun
+        ne l'est (§7.7).
+
+        Un scrutin public connu suffit à écarter une décision ou un amendement :
+        on consulte ceux de ce run ET ceux de la base. Avec `--limit`, le run ne
+        relit qu'une partie des scrutins ; sans la base, un amendement voté au
+        scrutin public il y a un an passerait pour un vote à main levée. Pour la
+        même raison, un run partiel ne touche qu'aux dossiers qu'il a relus.
+        """
+        vus = {p.scrutin.id for p in parses}
+        en_base: list[VotePublic] = []
+        async with self._sf() as session:
+            dernier_run = (
+                await session.execute(
+                    select(func.max(SyncRunRow.started_at)).where(
+                        SyncRunRow.finished_at.is_not(None)
+                    )
+                )
+            ).scalar()
+            lignes = (
+                await session.execute(
+                    select(
+                        ScrutinRow.id,
+                        ScrutinRow.dossier_id,
+                        ScrutinRow.chambre,
+                        ScrutinRow.date,
+                        ScrutinRow.payload["objet"].astext,
+                        ScrutinRow.payload["scrutinPublic"].astext,
+                    )
+                )
+            ).all()
+        for identifiant, dossier_id, chambre, jour, objet, public in lignes:
+            if identifiant not in vus and public == "true":
+                en_base.append(VotePublic(dossier_id, Chambre(chambre), jour, objet or ""))
+
+        def connus() -> list[VotePublic]:
+            # Recalculé après le rattachement, qui change le dossier de votes.
+            return en_base + [
+                VotePublic(p.dossier_id, p.scrutin.chambre, p.scrutin.date, p.scrutin.objet)
+                for p in parses
+                if p.scrutin.scrutin_public
+            ]
+
+        report.votes_rattaches_par_decision = rattacher_par_decisions(
+            parses, decisions, titres, connus()
+        )
+        votes = connus()
+        relus = {p.dossier_id for p in parses}
+        dates: dict[str, str] = {}
+
+        seuil = dernier_run.date().isoformat() if dernier_run else None
+
+        def verser(parse: ScrutinParse | None) -> bool:
+            if parse is None or (limit is not None and parse.dossier_id not in relus):
+                return False
+            parses.append(parse)
+            jour = parse.scrutin.date[:10]
+            dates[parse.scrutin.id] = jour if seuil and jour >= seuil else ""
+            return True
+
+        for decision in decisions_sans_scrutin(decisions, votes):
+            if verser(parse_decision(decision, titres)):
+                report.decisions_sans_scrutin += 1
+
+        if archive is not None:
+            publics_an = [
+                (v.dossier_id, v.date, v.objet)
+                for v in votes
+                if v.chambre is Chambre.assemblee
+            ]
+            for amendement in amendements_sans_scrutin(archive.seance, publics_an, depuis):
+                titre = titres.titre.get(amendement.dossier_ref)
+                if not titre:
+                    continue
+                parse = parse_amendement_seance(amendement, archive, titre, civilites)
+                if verser(parse):
+                    report.amendements_sans_scrutin += 1
+        return dates
 
     async def run(self, limit: int | None = None) -> SyncReport:
         report = SyncReport(started_at=datetime.now(timezone.utc))
@@ -1595,16 +1824,20 @@ class SyncJob:
         # votes passés. L'annuaire des mandats en cours complète et prime.
         # Best-effort : sans elle, on retombe sur les seuls députés en exercice.
         acteurs: dict[str, str] = {}
+        historiques: list[dict] = []
         try:
-            acteurs = build_acteurs_from_amo(
-                await self._client.download_acteurs_historiques()
-            )
+            historiques = await self._client.download_acteurs_historiques()
+            acteurs = build_acteurs_from_amo(historiques)
         except (httpx.HTTPError, zipfile.BadZipFile) as exc:
             report.anomalies.append(
                 f"annuaire historique des députés non téléchargé "
                 f"({type(exc).__name__}) : les députés partis restent sans nom ce run"
             )
         acteurs.update(build_acteurs_from_amo(acteurs_bruts))
+        # « M. Girard » : l'auteur d'un amendement voté sans scrutin, écrit comme
+        # l'Assemblée l'écrit dans l'objet de ses scrutins.
+        civilites = build_civilites_from_amo(historiques)
+        civilites.update(build_civilites_from_amo(acteurs_bruts))
         self._indexer_groupes(resolver)
         async with self._sf() as session:
             report.groupes = await _upsert_groupes(session, resolver)
@@ -1704,12 +1937,15 @@ class SyncJob:
                     "désaccords non régénérés ce run (existants préservés)"
                 )
 
-        #       Amendements (contenu + exposé sommaire) : archive très lourde
-        #       (~300 Mo). Best-effort (§2.5) : un échec de téléchargement ne tue
-        #       pas le run — les amendements gardent leur enrichissement déjà en
-        #       base (préservé à la fusion), l'index reste simplement vide.
+        #       Amendements (contenu + exposé sommaire + sort) : archive très
+        #       lourde (~300 Mo). Best-effort (§2.5) : un échec de
+        #       téléchargement ne tue pas le run — les amendements gardent leur
+        #       enrichissement déjà en base (préservé à la fusion), et ceux votés
+        #       à main levée restent ceux des runs précédents.
+        archive_amendements: ArchiveAmendements | None = None
         try:
-            self._index_amendements = await self._client.download_amendements()
+            archive_amendements = await self._client.download_amendements()
+            self._index_amendements = archive_amendements.index
         except (httpx.HTTPError, zipfile.BadZipFile) as exc:
             report.anomalies.append(
                 f"amendements non téléchargés ({type(exc).__name__}) : "
@@ -1755,6 +1991,14 @@ class SyncJob:
         # qui range un vote sénatorial dans le dossier où vivent déjà les votes
         # de l'Assemblée, plutôt que d'ouvrir un second dossier pour le même texte.
         jointure_senat = construire_jointure_senat(dossiers_parlementaires)
+        # Les décisions de séance (adopté, rejeté, 49.3…) que les actes publient,
+        # avec ou sans scrutin public, et les titres de chaque dossier — pour
+        # nommer un dossier qu'aucun scrutin ne nomme, et vérifier qu'un titre
+        # cité désigne bien un dossier (`app.ingestion.decisions`).
+        debut = DEBUT_LEGISLATURE.get(self._client.legislature)
+        depuis = debut.isoformat() if debut else ""
+        titres = construire_titres(dossiers_parlementaires, documents)
+        decisions = extraire_decisions(dossiers_parlementaires, legislatures, depuis)
         # Actes législatifs par dossier : la trajectoire officielle du texte au
         # Parlement (lectures AN ET Sénat, CMP, Conseil constitutionnel) et,
         # dans les mêmes actes, où en est le texte aujourd'hui. La procédure
@@ -1842,8 +2086,6 @@ class SyncJob:
         report.votes_rattaches_officiellement = rattacher_par_votes_officiels(
             parses_an, votes_officiels
         )
-        for parse in parses_an:
-            par_dossier.setdefault(parse.dossier_id, []).append(parse)
 
         # 2bis) Scrutins du Sénat, versés dans le MÊME regroupement par dossier.
         #       C'est ce qui fait qu'un texte examiné dans les deux chambres est
@@ -1860,10 +2102,42 @@ class SyncJob:
         )
         for parse in parses_senat:
             report.anomalies.extend(controles_coherence(parse.scrutin))
+        parses = parses_an + parses_senat
+
+        # 2ter) Ce que le Parlement décide SANS scrutin public (§5.2) : les
+        #       décisions de séance que les actes publient (texte adopté à main
+        #       levée, 49.3, résolution européenne devenue définitive) et les
+        #       amendements de séance votés à main levée. Sans eux, un texte
+        #       adopté sans scrutin n'existait pas dans l'app.
+        dates_sans_scrutin = await self._ajouter_votes_sans_scrutin(
+            parses,
+            decisions,
+            titres,
+            archive_amendements,
+            civilites,
+            depuis,
+            limit,
+            report,
+        )
+
+        for parse in parses:
             par_dossier.setdefault(parse.dossier_id, []).append(parse)
         report.dossiers_sans_ref_an = sum(
             1 for cle in par_dossier if cle.startswith("SEN-")
         )
+        report.dossiers_sans_scrutin_public = sum(
+            1
+            for votes in par_dossier.values()
+            if not any(p.scrutin.scrutin_public for p in votes)
+        )
+        # Texte d'origine sénatoriale sans scrutin au Sénat : son exposé des
+        # motifs est sur senat.fr, à l'adresse du dossier que l'archive cite
+        # (`senatChemin`). Seulement quand l'Assemblée n'a aucun texte déposé :
+        # sinon le PDF du Sénat serait celui d'un texte transmis, pas déposé.
+        for cle in par_dossier:
+            slug = titres.slug_senat(cle)
+            if slug and not index_textes.get(cle):
+                self._slug_senat_par_dossier.setdefault(cle, slug)
 
         # 3) Upsert des dossiers (fusion avec l'existant → badge « mis à jour »)
         #    et du détail de chaque vote (table scrutin). Un COMMIT PAR DOSSIER
@@ -1913,6 +2187,7 @@ class SyncJob:
                     self._actes_par_ref.get(ref_dossier),
                     self._procedure_par_ref.get(ref_dossier),
                 )
+                statut_au_vu_des_actes(dossier)
                 # Qui porte le texte — même archive, même document de dépôt que
                 # l'exposé des motifs. Absente pour un dossier sans `dossierRef`
                 # (« TXT-… », « SEN-… », motion) : la ligne disparaît (§2.5).
@@ -1946,7 +2221,12 @@ class SyncJob:
                 # Après les questions : l'accroche en est tirée.
                 self._composer_accroche(dossier)
                 dossier = await _upsert_dossier(
-                    session, dossier, desaccord_sources, dossier_de, deplaces
+                    session,
+                    dossier,
+                    desaccord_sources,
+                    dossier_de,
+                    deplaces,
+                    dates_sans_scrutin,
                 )
                 # Compté sur le dossier FUSIONNÉ : une initiative acquise à un
                 # run précédent compte toujours, même si ce run n'a rien relu.

@@ -4,7 +4,7 @@ export { DossierCard } from './DossierCard';
 export { DossierTile } from './DossierTile';
 export { VoteDisputeTile } from './VoteDisputeTile';
 export { HeroDossier } from './HeroDossier';
-export { MiniResultat } from './MiniResultat';
+export { MentionSansScrutin, MiniResultat } from './MiniResultat';
 export { RecapVotes } from './RecapVotes';
 export { ResultBar, segmentsMotionCensure } from './ResultBar';
 export { GroupVoteRow } from './GroupVoteRow';

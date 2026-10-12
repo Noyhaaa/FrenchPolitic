@@ -37,7 +37,7 @@ import re
 
 from app.ai.guardrails import LEXIQUE_ORIENTE
 from app.ai.llm import LLMClient
-from app.domain.enums import TypeVote
+from app.domain.enums import Chambre, ModaliteVote, TypeVote
 from app.ingestion.normalize import deposant, truncate_mots
 from app.schemas import (
     ArgumentGroupe,
@@ -476,11 +476,20 @@ def accroche_depuis_q1(pourquoi: str | None) -> str | None:
     return None
 
 
+def tranche_le_texte(s) -> bool:
+    """Ce vote décide-t-il du texte entier ? Le vote sur l'ensemble — ou une
+    décision sans scrutin public (texte adopté à main levée, 49.3, résolution
+    devenue définitive), qui n'est jamais rien d'autre qu'une décision sur le
+    texte. Accepte un `Scrutin` comme un `ScrutinResume`."""
+    return s.modalite is not None or "ensemble" in fold(s.objet)
+
+
 def _vote_decisif(scrutins: list[ScrutinResume]) -> ScrutinResume | None:
-    """Le vote sur l'ensemble si présent, sinon le plus récent (liste triée
-    du plus récent au plus ancien) — même règle que `faits._vote_decisif`."""
+    """Le vote qui tranche le texte le plus récent (`tranche_le_texte`), sinon le
+    plus récent des votes (liste triée du plus récent au plus ancien) — même
+    règle que `faits._vote_decisif`."""
     for s in scrutins:
-        if "ensemble" in fold(s.objet):
+        if tranche_le_texte(s):
             return s
     return scrutins[0] if scrutins else None
 
@@ -505,11 +514,51 @@ def phrase_resultat(scrutins: list[ScrutinResume]) -> str | None:
         if "ensemble" in fold(d.objet)
         else "Le dernier vote sur le texte a été"
     )
+    if d.modalite is not None:
+        return phrase_decision(d)
     if not d.scrutin_public:
         return f"{sujet} {statut} à main levée (pas de décompte des voix)."
     if d.type_vote is TypeVote.motion_censure:
         return phrase_motion_censure(d)
     return _decompte(sujet, statut, d.statut.value, d.resultat)
+
+
+def phrase_decision(d) -> str | None:
+    """Le résultat d'une décision prise SANS scrutin public — sans un chiffre,
+    puisque la source n'en a pas, et en disant où et comment (§5.2).
+
+    Chaque phrase dit un fait de procédure que la conclusion officielle porte
+    elle-même : « considéré comme adopté… en application de l'article 49,
+    alinéa 3 » implique, par la Constitution, qu'aucune motion de censure n'a
+    été adoptée ; « considéré comme rejeté », qu'une l'a été. None si le sort
+    n'est pas tranché (§2.5)."""
+    statut = _STATUT_FR.get(d.statut.value)
+    if statut is None:
+        return None
+    if d.modalite is ModaliteVote.article_151_7:
+        return (
+            "La résolution a été considérée comme définitive sans examen en "
+            "séance, en application de l'article 151-7 du Règlement de "
+            "l'Assemblée nationale."
+        )
+    if d.modalite is ModaliteVote.article_49_3:
+        if d.statut.value == "adopte":
+            return (
+                "Le texte a été considéré comme adopté par l'Assemblée nationale "
+                "sans être voté : le Gouvernement a engagé sa responsabilité "
+                "(article 49, alinéa 3, de la Constitution) et aucune motion de "
+                "censure n'a été adoptée."
+            )
+        return (
+            "Le texte a été considéré comme rejeté par l'Assemblée nationale : "
+            "le Gouvernement avait engagé sa responsabilité (article 49, alinéa "
+            "3, de la Constitution) et une motion de censure a été adoptée."
+        )
+    lieu = "au Sénat" if d.chambre is Chambre.senat else "à l'Assemblée nationale"
+    return (
+        f"Le texte a été {statut} {lieu} à main levée, sans scrutin public : "
+        "il n'y a pas eu de décompte des voix."
+    )
 
 
 def phrase_motion_censure(s) -> str:
@@ -674,7 +723,10 @@ def phrase_resultat_amendement(scrutin: Scrutin) -> str | None:
         else "L'amendement a été"
     )
     if not scrutin.scrutin_public:
-        return f"{sujet} {statut} à main levée (pas de décompte des voix)."
+        return (
+            f"{sujet} {statut} à main levée, sans scrutin public : il n'y a pas "
+            "eu de décompte des voix."
+        )
     # Pas de branche « motion de censure » ici : un amendement n'en est jamais
     # une (le type `MOC` ne porte que sur la motion elle-même).
     return _decompte(sujet, statut, scrutin.statut.value, scrutin.resultat)

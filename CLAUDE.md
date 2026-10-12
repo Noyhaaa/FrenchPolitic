@@ -34,7 +34,10 @@ Ces règles priment sur toute préférence esthétique ou technique.
 4. **Réversibilité (§7.5).** La source officielle est à un tap (`SourceLink`).
 5. **Transparence IA (§7.6).** Tout contenu généré affiche `AiNotice`.
 6. **Nominatif réservé aux scrutins publics (§5.2).** C'est `scrutinPublic` qui
-   le conditionne. Sinon, on explique l'absence (vote à main levée).
+   le conditionne. Sinon, on explique l'absence : `modalite` dit comment la
+   décision a été prise (main levée, 49.3, art. 151-7), et
+   `constants/modalites.ts` écrit la phrase. Le `resultat` d'un tel vote vaut 0
+   par contrat : **ne l'affiche jamais comme des voix**.
 7. **Langue simple (§8).** Un terme de jargon s'explique via le glossaire,
    jamais par une définition écrite en dur dans un écran.
 8. **Mise à jour factuelle (§7.7).** Le badge dit « Nouveau vote ». Il n'évalue
@@ -131,7 +134,9 @@ chargement, puis le cache AsyncStorage prend le relais hors-ligne.
 
 Le run complet (`python -m app.ingestion.run`) couvre AN + Sénat + LLM et dure
 des heures sur toute la législature. Il **committe par dossier** : on peut
-l'interrompre sans risque. Options : `--limit N`, `--sans-senat`.
+l'interrompre sans risque. Options : `--limit N`, `--sans-senat`,
+`--plafond-amendements-sans-scrutin N` (borne les ~9 000 amendements votés à
+main levée dont on interroge le LLM ce run ; les suivants reprennent).
 
 Les commandes ciblées ci-dessous évitent un run complet. Le README backend
 détaille ce que chacune télécharge.
@@ -236,11 +241,24 @@ app/data/seed.py       Données FICTIVES (backend memory + tests) — ne jamais 
   (`rattacher_par_votes_officiels`) : un vote cité rejoint son dossier, les
   autres votes du même texte le suivent si leur date tombe dans la vie du
   dossier. Le Sénat suit la même logique : `senatChemin` publié par l'AN → lien
-  inverse → titre → `SEN-{slug}` → singleton.
+  inverse → titre → `SEN-{slug}` → singleton. Enfin, un dossier reconstitué
+  (`TXT-…`, `SEN-…`) rejoint le dossier officiel qu'une **décision de séance**
+  désigne : même chambre, même jour, titre concordant (`rattacher_par_decisions`).
+- **Décisions sans scrutin public** (`app/ingestion/decisions.py`). Les actes de
+  décision de l'archive (`…-DEBATS-DEC`) deviennent des votes sans décompte
+  (`scrutinPublic=false`, `modalite`, `etape`, `conclusion` verbatim) quand
+  aucun scrutin public ne les raconte. Les **amendements** votés à main levée
+  viennent de l'archive des amendements, rangés dans le dossier où elle les
+  range. Conclusion inconnue → rien ; scrutin public possible → rien (§2.5).
+  Détail et règles de couverture : README backend.
 - **Élus en exercice / élus partis.** Le référentiel servi (`depute`) est
   **taillé** à chaque run sur l'annuaire du jour (`retirer_hors_referentiel`).
   Les **noms** des votants viennent d'annuaires historiques (`AMO30`,
   `ODSEN_GENERAL.csv`) : un élu parti reste nommé sur ses votes, sans lien.
+- **Statut d'un dossier** = sort du dernier vote **sur le texte** (jamais d'un
+  amendement) ; des amendements votés après lui → `en_cours`. Un vote sans
+  scrutin public **découvert** (antérieur à la synchronisation précédente ou
+  au dernier vote connu) ne pose pas le badge « Nouveau vote » (§7.7).
 - **Préservation entre runs.** Un run sans archive n'efface pas ce qui est en
   base : exposé, initiative, état, loi finale, réponses validées, enrichissement
   des amendements. Le résumé n'est préservé que s'il est `relu_par_humain`.
@@ -268,11 +286,15 @@ deux côtés. **Toute évolution se répercute des deux côtés.**
 - **`Scrutin`** est la fiche vote complète, servie par `/scrutins/{id}`. Il porte :
   - `chambre`, `scrutinPublic`, `typeVote?`, `suffragesRequis?` (utile seulement
     pour une motion de censure), `typeMotion?` ;
+  - sans scrutin public : `modalite` (`main_levee`, `article_49_3`,
+    `article_151_7`), `etape?` et `conclusion?` (libellés de l'archive) ;
   - `positionsGroupes` avec leurs `Votant` ;
   - pour un amendement : `questions?`, `dispositif?`, `exposeSommaire?`, `cible?`.
 - **`DossierListItem`**, l'objet allégé du fil et de la recherche, porte
-  `natureTexte`, `chambres`, `statutMotion`, et le type de vote et de motion du
-  dernier scrutin. Sans ces champs, une carte trompe.
+  `natureTexte`, `chambres`, `statutMotion`, et le résultat, le type de vote et
+  de motion du **dernier vote sur le texte** — ou `modaliteDernierScrutin` s'il
+  s'est fait sans scrutin public (jamais les voix d'un vote plus ancien). Sans
+  ces champs, une carte trompe.
 - **`Votant.deputeId`** n'est posé **que si l'élu siège encore**. C'est la seule
   clé qui rend un nom cliquable. On n'affiche jamais une référence machine
   `PA…` en guise de nom.
@@ -370,14 +392,16 @@ deux côtés. **Toute évolution se répercute des deux côtés.**
   texte consolidé.
 - **Commission des députés AN** : `GroupResolver` ne garde que les organes `GP`.
   Il faudrait résoudre les mandats `COMPER`.
-- **Dossiers `TXT-` restants** (18) : aucun de leurs votes n'est cité par les
-  actes législatifs. Restent des coquilles de la source (une distance
-  d'édition à 1 caractère, risque de faux appariement à mesurer) et des titres
-  présents en L16 et L17 (piste : préférer la législature courante).
-- **Décisions sans scrutin public** (P2 de l'audit d'oct. 2026) : ~130 textes
-  décidés sans scrutin public (25 conventions promulguées, résolutions, textes
-  sénatoriaux) et ~14 000 amendements de séance votés à main levée sont absents.
-  Le modèle (`scrutinPublic=false`) est prêt, l'ingestion ne l'alimente pas.
+- **Dossiers `TXT-` restants** (11) : ni cités par les actes législatifs, ni
+  désignés par une décision du même jour. Restent des coquilles de la source
+  (une distance d'édition à 1 caractère, risque de faux appariement à mesurer)
+  et des titres présents en L16 et L17 (piste : préférer la législature
+  courante).
+- **Questions des amendements votés à main levée** (~9 000, deux appels LLM
+  chacun) : le code les génère comme pour un vote public, mais le run d'oct.
+  2026 s'est fait sans serveur mistral. À faire tourner par tranches
+  (`--plafond-amendements-sans-scrutin`) quand il répond. Leur contenu officiel
+  (dispositif, exposé sommaire) s'affiche déjà.
 - **Sénat** : comptes rendus (`cri.zip`) pour avoir une Q2 sur les textes
   sénatoriaux, amendements (Ameli), Monalisa (XML structuré) à la place du grattage
   PDF.

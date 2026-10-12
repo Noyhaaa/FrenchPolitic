@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from app.ai.questions import tranche_le_texte
 from app.ingestion.normalize import nature_texte
 from app.schemas import ResultatGlobal, Scrutin
 from app.utils.text import fold
@@ -91,10 +92,11 @@ class FaitsDossier:
 
 
 def _vote_decisif(votes_texte: list[Scrutin]) -> Scrutin | None:
-    """Le vote sur l'ensemble si on le repère, sinon le plus récent des votes
-    sur le texte (liste déjà triée du plus récent au plus ancien)."""
+    """Le vote qui tranche le texte (`questions.tranche_le_texte` : l'ensemble,
+    ou une décision sans scrutin public) si on le repère, sinon le plus récent
+    des votes sur le texte (liste déjà triée du plus récent au plus ancien)."""
     for s in votes_texte:
-        if "ensemble" in fold(s.objet):
+        if tranche_le_texte(s):
             return s
     return votes_texte[0] if votes_texte else None
 
@@ -106,13 +108,15 @@ def construire_faits(
     votes_texte: list[Scrutin],
     votes_amendement: list[Scrutin],
 ) -> FaitsDossier:
-    dates = sorted(s.date for s in votes_texte if s.date)
+    # « N scrutins sur le texte » : une décision sans scrutin public n'en est
+    # pas un, et ne se compte donc pas (elle reste le vote décisif).
+    dates = sorted(s.date for s in votes_texte if s.date and s.scrutin_public)
     return FaitsDossier(
         titre_clair=titre_clair,
         titre_officiel=titre_officiel,
         theme=theme,
         nature=nature_texte(titre_officiel) or nature_texte(titre_clair),
-        nb_votes_texte=len(votes_texte),
+        nb_votes_texte=sum(1 for s in votes_texte if s.scrutin_public),
         date_premier=dates[0] if dates else None,
         date_dernier=dates[-1] if dates else None,
         decisif=_vote_decisif(votes_texte),

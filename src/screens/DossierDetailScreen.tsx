@@ -29,6 +29,7 @@ import {
   StatusBadge,
   TrajectoireNavette,
 } from '@/components';
+import { modalite } from '@/constants/modalites';
 import { useDossier } from '@/hooks';
 import type { ScrutinResume } from '@/types';
 import {
@@ -87,11 +88,16 @@ function MiniLabel({ children, color }: { children: string; color?: string }) {
 
 /**
  * Le VOTE DÉCISIF du dossier, mis en avant en tête de la section des votes :
- * le vote sur l'ensemble du texte — celui qui scelle l'adoption ou le rejet,
+ * la décision sur le texte entier — celle qui scelle l'adoption ou le rejet,
  * à distinguer des votes d'articles et des motions pour que l'utilisateur
  * sache d'un coup d'œil quel vote a tranché (§2.2). Purement factuel : même
  * contenu qu'une ligne de vote, présentation accentuée + une phrase
  * explicative descriptive.
+ *
+ * Quand la décision s'est prise SANS scrutin public (main levée, 49.3,
+ * article 151-7), il n'y a pas de voix à montrer : la carte dit comment elle a
+ * été prise et pourquoi le détail n'existe pas, au lieu d'une barre vide
+ * (§5.2, `constants/modalites.ts`).
  */
 function VoteDecisifCard({
   scrutin,
@@ -100,60 +106,82 @@ function VoteDecisifCard({
   scrutin: ScrutinResume;
   onPress: () => void;
 }) {
-  const lib = libelleScrutin(scrutin.objet, scrutin.typeMotion);
+  const lib = libelleScrutin(
+    scrutin.objet,
+    scrutin.typeMotion,
+    scrutin.modalite,
+    scrutin.etape,
+  );
   const { resultat } = scrutin;
   const estMotion = scrutin.typeVote === 'motion_censure';
+  const sansScrutin = modalite(scrutin.modalite);
+  const meta = [
+    libelleChambre(scrutin.chambre),
+    formatDateLong(scrutin.date),
+    lib.complement,
+  ]
+    .filter(Boolean)
+    .join(' · ');
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [styles.decisifCard, pressed && { opacity: 0.7 }]}
       accessibilityRole="button"
-      accessibilityLabel={`Vote décisif : ${scrutin.objet}. ${statutLabel(
+      accessibilityLabel={`Vote décisif : ${lib.titre}. ${meta}. ${statutLabel(
         scrutin.statut,
-      )}, ${formatMicroResultat(
-        resultat.pour,
-        resultat.contre,
-        scrutin.typeVote,
-        scrutin.suffragesRequis,
-      )}. Voir le détail du vote.`}
+      )}, ${
+        sansScrutin
+          ? sansScrutin.mention
+          : formatMicroResultat(
+              resultat.pour,
+              resultat.contre,
+              scrutin.typeVote,
+              scrutin.suffragesRequis,
+            )
+      }. Voir le détail du vote.`}
     >
       <Text style={styles.decisifLabel}>Vote décisif</Text>
       <Text style={styles.voteObjet}>{lib.titre}</Text>
       <View style={styles.voteMeta}>
         <StatusBadge statut={scrutin.statut} />
-        <Text style={typography.meta}>
-          {formatDateLong(scrutin.date)}
-          {lib.complement ? ` · ${lib.complement}` : ''}
-        </Text>
+        <Text style={[typography.meta, styles.metaSouple]}>{meta}</Text>
       </View>
-      <Text style={typography.meta}>
-        {formatMicroResultat(
-          resultat.pour,
-          resultat.contre,
-          scrutin.typeVote,
-          scrutin.suffragesRequis,
-        )}
-      </Text>
-      {/* ⚠️ Sur une motion de censure, la barre pour/contre s'afficherait pleine
-          (l'article 49 ne recense pas les opposants) : on la mesure contre le
-          seuil, seul rapport qui décide. */}
-      <ResultBar
-        height={6}
-        segments={
-          estMotion && scrutin.suffragesRequis
-            ? segmentsMotionCensure(resultat.pour, scrutin.suffragesRequis)
-            : [
-                { value: resultat.pour, color: colors.pour },
-                { value: resultat.abstention, color: colors.abstention },
-                { value: resultat.contre, color: colors.contre },
-                { value: resultat.nonVotants, color: colors.nonVotant },
-              ]
-        }
-      />
-      <Text style={[typography.meta, styles.decisifExplication]}>
-        C'est ce vote, sur l'ensemble du texte, qui décide de son adoption ou
-        de son rejet.
-      </Text>
+      {sansScrutin ? (
+        <Text style={[typography.meta, styles.decisifExplication]}>
+          {sansScrutin.explication(scrutin.statut)}
+        </Text>
+      ) : (
+        <>
+          <Text style={typography.meta}>
+            {formatMicroResultat(
+              resultat.pour,
+              resultat.contre,
+              scrutin.typeVote,
+              scrutin.suffragesRequis,
+            )}
+          </Text>
+          {/* ⚠️ Sur une motion de censure, la barre pour/contre s'afficherait
+              pleine (l'article 49 ne recense pas les opposants) : on la mesure
+              contre le seuil, seul rapport qui décide. */}
+          <ResultBar
+            height={6}
+            segments={
+              estMotion && scrutin.suffragesRequis
+                ? segmentsMotionCensure(resultat.pour, scrutin.suffragesRequis)
+                : [
+                    { value: resultat.pour, color: colors.pour },
+                    { value: resultat.abstention, color: colors.abstention },
+                    { value: resultat.contre, color: colors.contre },
+                    { value: resultat.nonVotants, color: colors.nonVotant },
+                  ]
+            }
+          />
+          <Text style={[typography.meta, styles.decisifExplication]}>
+            C'est ce vote, sur l'ensemble du texte, qui décide de son adoption
+            ou de son rejet.
+          </Text>
+        </>
+      )}
     </Pressable>
   );
 }
@@ -459,7 +487,8 @@ export function DossierDetailScreen() {
             // Titre = type du vote en clair (« Vote sur l'ensemble », « Motion
             // de censure »…) — le sujet, c'est le dossier lui-même ; l'objet
             // officiel complet reste sur la fiche vote (§7.5).
-            const lib = libelleScrutin(s.objet, s.typeMotion);
+            const lib = libelleScrutin(s.objet, s.typeMotion, s.modalite, s.etape);
+            const sansScrutin = modalite(s.modalite);
             return (
               <Pressable
                 key={s.id}
@@ -470,9 +499,13 @@ export function DossierDetailScreen() {
                   pressed && { opacity: 0.7 },
                 ]}
                 accessibilityRole="button"
-                accessibilityLabel={`${libelleChambre(s.chambre)} : ${s.objet}. ${statutLabel(
+                accessibilityLabel={`${libelleChambre(s.chambre)} : ${lib.titre}. ${statutLabel(
                   s.statut
-                )}, ${s.resultat.pour} pour, ${s.resultat.contre} contre. Voir le détail du vote.`}
+                )}, ${
+                  sansScrutin
+                    ? sansScrutin.mention
+                    : `${s.resultat.pour} pour, ${s.resultat.contre} contre`
+                }. Voir le détail du vote.`}
               >
                 <View style={styles.voteInfo}>
                   <Text style={styles.voteObjet} numberOfLines={2}>
@@ -483,18 +516,22 @@ export function DossierDetailScreen() {
                     {/* La chambre est écrite : un dossier mêle les votes des
                         deux assemblées, et les décomptes n'ont pas la même
                         échelle (577 députés vs 348 sénateurs). */}
-                    <Text style={typography.meta}>
+                    <Text style={[typography.meta, styles.metaSouple]}>
                       {libelleChambre(s.chambre)} · {formatDateLong(s.date)}
                       {lib.complement ? ` · ${lib.complement}` : ''}
                     </Text>
                   </View>
+                  {/* Sans scrutin public, pas de voix : on dit comment le vote
+                      s'est fait, jamais « 0 pour · 0 contre » (§5.2). */}
                   <Text style={typography.meta}>
-                    {formatMicroResultat(
-                      s.resultat.pour,
-                      s.resultat.contre,
-                      s.typeVote,
-                      s.suffragesRequis,
-                    )}
+                    {sansScrutin
+                      ? sansScrutin.mention
+                      : formatMicroResultat(
+                          s.resultat.pour,
+                          s.resultat.contre,
+                          s.typeVote,
+                          s.suffragesRequis,
+                        )}
                   </Text>
                 </View>
                 <Text style={styles.voteChevron} importantForAccessibility="no">
@@ -674,6 +711,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
+  },
+  // Chambre · date · étape : l'étape officielle peut être longue (« 1ère
+  // lecture (2ème assemblée saisie) ») et doit passer à la ligne.
+  metaSouple: {
+    flexShrink: 1,
   },
   voteChevron: {
     color: colors.textTertiary,

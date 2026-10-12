@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 import httpx
 
 if TYPE_CHECKING:
-    from app.ingestion.amendements import AmendementEnrichi
+    from app.ingestion.amendements import ArchiveAmendements
 
 from app.ingestion.normalize import (
     as_list,
@@ -112,6 +112,11 @@ class ScrutinParse:
     # Signature du texte cité par l'objet du vote : elle regroupe les votes d'un
     # même texte (articles, amendements) autour du vote décisif cité par l'archive.
     cle_titre: str | None = None
+    # Sous-amendement voté sans scrutin public : l'id du vote de l'amendement
+    # qu'il vise, connu par l'archive (`amendementParentRef`). Les numéros
+    # repartent de 1 à chaque lecture : le numéro seul désignerait parfois
+    # l'amendement d'une autre lecture.
+    parent_id: str | None = None
 
 
 class AssembleeOpenDataClient:
@@ -274,22 +279,21 @@ class AssembleeOpenDataClient:
                     out.append(f.read().decode("utf-8"))
         return out
 
-    async def download_amendements(
-        self,
-    ) -> "dict[tuple[str, str], list[AmendementEnrichi]]":
-        """Télécharge l'archive des amendements et en construit l'index.
+    async def download_amendements(self) -> "ArchiveAmendements":
+        """Télécharge l'archive des amendements et la lit (`lire_archive`).
 
         Best-effort au niveau de l'appelant : l'archive est très volumineuse
-        (~300 Mo) et n'enrichit que le contenu des votes d'amendement (§2.5) —
-        un échec ne doit pas tuer le run. On indexe en flux (sans tout garder
-        décompressé en mémoire) via `amendements.construire_index`.
+        (~300 Mo). Elle enrichit le contenu des votes d'amendement publics ET
+        donne le sort des amendements votés sans scrutin public (§2.5) — un
+        échec ne doit pas tuer le run. Lue en flux, sans tout garder
+        décompressé en mémoire.
         """
-        from app.ingestion.amendements import construire_index
+        from app.ingestion.amendements import lire_archive
 
         zf = await self._download_zip_resumable(
             AMENDEMENTS_URL.format(leg=self.legislature)
         )
-        return construire_index(zf)
+        return lire_archive(zf)
 
     async def download_amo(self) -> tuple[list[dict], list[dict]]:
         """Télécharge l'archive AMO une seule fois : (organes, acteurs).
