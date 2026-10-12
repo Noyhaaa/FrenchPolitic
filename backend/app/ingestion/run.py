@@ -17,7 +17,7 @@ from app.ai.llm import get_llm_client
 from app.config import settings
 from app.db.session import init_models, make_engine, make_session_factory
 from app.ingestion.assemblee import AssembleeOpenDataClient
-from app.ingestion.senat import SenatOpenDataClient, session_pour
+from app.ingestion.senat import SenatOpenDataClient, sessions_de_la_legislature
 from app.ingestion.sync import SyncJob
 
 
@@ -33,19 +33,30 @@ async def _main(
     def _on_progress(i: int, total: int, titre: str) -> None:
         print(f"  [{i}/{total}] {titre[:70]}")
 
-    if session_senat is None:
-        aujourdhui = date.today()
-        session_senat = session_pour(aujourdhui.year, aujourdhui.month)
+    # Sans `--session-senat`, toutes les sessions du Sénat qui recouvrent la
+    # législature : la session en cours seule laissait les précédentes de côté.
+    sessions_senat = (
+        [session_senat]
+        if session_senat is not None
+        else sessions_de_la_legislature(legislature, date.today())
+    )
 
     job = SyncJob(
         make_session_factory(engine),
         client=AssembleeOpenDataClient(legislature=legislature),
         llm=llm,
         on_progress=_on_progress,
-        client_senat=SenatOpenDataClient(session=session_senat) if avec_senat else None,
+        client_senat=(
+            SenatOpenDataClient(session=sessions_senat[0]) if avec_senat else None
+        ),
+        sessions_senat=sessions_senat,
     )
     llm_info = f"LLM={settings.llm_provider}:{settings.llm_model}" if llm else "LLM=off"
-    senat_info = f"Sénat=session {session_senat}" if avec_senat else "Sénat=off"
+    senat_info = (
+        f"Sénat=sessions {', '.join(map(str, sessions_senat))}"
+        if avec_senat
+        else "Sénat=off"
+    )
     print(
         f"Ingestion (législature {legislature}, limit={limit}, "
         f"{llm_info}, {senat_info})…"
@@ -75,6 +86,16 @@ async def _main(
         f"(dont {report.lois_lues} lues, source de la Q4), "
         f"{report.rapports} rapports de commission liés."
     )
+    if report.votes_rattaches_officiellement:
+        print(
+            f"  {report.votes_rattaches_officiellement} vote(s) rangé(s) dans le "
+            "dossier que les actes législatifs désignent (voteRefs)."
+        )
+    if report.elus_retires:
+        print(
+            f"  {report.elus_retires} élu(s) qui ne siège(nt) plus retiré(s) du "
+            "référentiel (leurs votes passés restent)."
+        )
     if report.scrutins_senat or report.senateurs:
         print(
             f"  Sénat : {report.scrutins_senat} scrutins "
@@ -125,7 +146,10 @@ def main() -> None:
         "--session-senat",
         type=int,
         default=None,
-        help="Année de DÉBUT de session du Sénat (oct.→sept.) ; par défaut, la session en cours",
+        help=(
+            "Année de DÉBUT de session du Sénat (oct.→sept.) ; par défaut, "
+            "toutes celles de la législature"
+        ),
     )
     parser.add_argument(
         "--sans-senat",

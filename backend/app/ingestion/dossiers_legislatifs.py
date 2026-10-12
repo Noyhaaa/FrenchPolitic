@@ -38,6 +38,10 @@ La même archive sert enfin à **joindre les deux chambres** (`JointureSenat`) :
 ses `dossierParlementaire` portent le chemin du dossier Sénat correspondant, ce
 qui permet de ranger un scrutin sénatorial dans le dossier où vivent déjà les
 votes de l'Assemblée — sans quoi un même texte apparaîtrait deux fois dans le fil.
+
+Et ses actes législatifs **citent les scrutins** qui les ont décidés
+(`voteRefs`) : c'est le lien officiel vote → dossier, qui prime sur toute
+correspondance de titre (`VotesOfficiels`).
 """
 from __future__ import annotations
 
@@ -291,4 +295,109 @@ def construire_jointure_senat(dossiers: list[dict]) -> JointureSenat:
     return JointureSenat(
         _ref_par_slug_senat=_sans_ambiguite(refs_par_slug_senat),
         _ref_par_slug_an=_sans_ambiguite(refs_par_slug_an),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Votes cités par les actes législatifs (`voteRefs`)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class VotesOfficiels:
+    """Ce que les actes législatifs disent eux-mêmes des scrutins d'un dossier.
+
+    Un acte de décision (« AN1-DEBATS-DEC », « CMP-DEBATS-AN-DEC »…) cite le
+    scrutin qui l'a tranché dans `voteRefs`. C'est le **seul lien officiel**
+    entre un vote et son dossier quand le scrutin ne porte pas de `dossierRef` :
+    la réconciliation par titre n'est qu'une déduction, et elle se trompe sur les
+    textes dont le titre revient d'une année à l'autre (vécu : les votes de la
+    loi spéciale de décembre 2025 rangés dans le dossier de celle de 2024, au
+    titre presque identique ; les comptes 2023 rangés dans la copie de
+    16e législature de leur dossier).
+
+    Seuls les votes **décisifs** sont cités (284 sur 8 672 en 17e législature).
+    `periode` permet d'étendre le lien aux autres votes du même texte sans
+    deviner : un vote n'appartient à un dossier que si sa date tombe entre le
+    premier et le dernier acte du dossier.
+    """
+
+    _ref_par_vote: dict[str, str]
+    # dossierRef → (date du premier acte, date du dernier acte), ISO.
+    _periode_par_ref: dict[str, tuple[str, str]]
+
+    def ref_pour_vote(self, uid: str | None) -> str | None:
+        return self._ref_par_vote.get(uid) if uid else None
+
+    def couvre(self, ref: str, date: str) -> bool:
+        """La date du vote tombe-t-elle dans la vie documentée du dossier ?"""
+        periode = self._periode_par_ref.get(ref)
+        if periode is None or not date:
+            return False
+        jour = date[:10]
+        return periode[0] <= jour <= periode[1]
+
+    def __len__(self) -> int:
+        return len(self._ref_par_vote)
+
+
+def _refs_de_votes(acte: dict) -> list[str]:
+    bloc = acte.get("voteRefs")
+    if isinstance(bloc, dict):
+        bloc = bloc.get("voteRef")
+    if isinstance(bloc, str):
+        return [bloc]
+    if isinstance(bloc, list):
+        return [r for r in bloc if isinstance(r, str)]
+    return []
+
+
+def construire_votes_officiels(
+    dossiers: list[dict], legislatures: tuple[int, ...]
+) -> VotesOfficiels:
+    """Index scrutin → dossierRef depuis les `actesLegislatifs` (fonction pure).
+
+    Restreint aux dossiers des législatures données, comme la réconciliation :
+    l'archive de la 17e contient aussi des dossiers plus anciens, et l'un d'eux
+    (une proposition de 15e législature) y cite un scrutin de la 17e — un
+    rattachement que rien d'autre ne corrobore. Un scrutin cité par plusieurs
+    dossiers est écarté plutôt que départagé (§2.5). Quand un même dossier figure
+    dans les deux archives, ses deux copies citent les mêmes votes : ce n'est pas
+    une ambiguïté.
+    """
+    prefixes = tuple(f"DLR5L{leg}N" for leg in legislatures)
+    refs_par_vote: dict[str, set[str]] = defaultdict(set)
+    dates_par_ref: dict[str, list[str]] = defaultdict(list)
+
+    def parcourir(actes: object, uid: str) -> None:
+        for acte in actes if isinstance(actes, list) else [actes]:
+            if not isinstance(acte, dict):
+                continue
+            date = str(acte.get("dateActe") or "")[:10]
+            if date:
+                dates_par_ref[uid].append(date)
+            for vote in _refs_de_votes(acte):
+                refs_par_vote[vote].add(uid)
+            sous = (acte.get("actesLegislatifs") or {}).get("acteLegislatif")
+            if sous:
+                parcourir(sous, uid)
+
+    for brut in dossiers:
+        dp = brut.get("dossierParlementaire") or brut
+        uid = dp.get("uid") or ""
+        if not uid.startswith(prefixes):
+            continue
+        actes = (dp.get("actesLegislatifs") or {}).get("acteLegislatif")
+        if actes:
+            parcourir(actes, uid)
+
+    return VotesOfficiels(
+        _ref_par_vote={
+            vote: next(iter(refs))
+            for vote, refs in refs_par_vote.items()
+            if len(refs) == 1
+        },
+        _periode_par_ref={
+            ref: (min(dates), max(dates)) for ref, dates in dates_par_ref.items()
+        },
     )

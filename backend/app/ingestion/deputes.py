@@ -39,7 +39,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import DeputeRow, VoteDeputeRow
-from app.domain.enums import PositionVote
+from app.domain.enums import Chambre, PositionVote
 from app.ingestion.normalize import as_list, map_position
 from app.ingestion.organes import GroupResolver
 from app.schemas import Depute
@@ -301,6 +301,31 @@ async def upsert_deputes(session: AsyncSession, deputes: list[Depute]) -> int:
     return total
 
 
+async def retirer_hors_referentiel(
+    session: AsyncSession, chambre: Chambre, presents: set[str]
+) -> int:
+    """Retire du référentiel servi les élus d'une chambre qui n'y siègent plus.
+
+    L'upsert seul ne retirait jamais personne : après le renouvellement du
+    Sénat de septembre 2026, l'API servait 416 sénateurs pour 348 sièges, et
+    585 députés pour 577 — chacun avec une fiche et des liens comme s'il
+    siégeait encore. `presents` est l'annuaire du jour, complet : un annuaire
+    vide (source injoignable) ne retire rien (§2.5, on ne déduit pas une
+    absence d'une panne).
+
+    Leurs votes passés (`vote_depute`) restent : ce sont des faits. Leur nom
+    reste sur les scrutins, sans lien — c'est la règle des anciens élus.
+    """
+    if not presents:
+        return 0
+    resultat = await session.execute(
+        delete(DeputeRow).where(
+            DeputeRow.chambre == chambre.value, DeputeRow.id.not_in(presents)
+        )
+    )
+    return resultat.rowcount or 0
+
+
 async def remplacer_votes_du_scrutin(
     session: AsyncSession, scrutin_id: str, date: str, votes: list[VoteActeur]
 ) -> int:
@@ -350,10 +375,14 @@ async def _main(limit: int | None, legislature: int) -> None:
     nb_photos = await attacher_portraits(deputes, legislature)
     async with sf() as session:
         nb_deputes = await upsert_deputes(session, deputes)
+        nb_partis = await retirer_hors_referentiel(
+            session, Chambre.assemblee, {d.id for d in deputes}
+        )
         await session.commit()
     print(
         f"  {nb_deputes} députés (référentiel AMO, {len(resolver)} groupes), "
-        f"{nb_photos} photos officielles vérifiées."
+        f"{nb_photos} photos officielles vérifiées, "
+        f"{nb_partis} ancien(s) député(s) retiré(s) du référentiel."
     )
 
     bruts = await client.download_scrutins(limit=limit)

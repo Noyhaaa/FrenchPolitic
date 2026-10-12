@@ -86,6 +86,16 @@ _SYS_POURQUOI = (
     "exposé des motifs (écrit par l'auteur du texte).\n" + _CONSIGNES_COMMUNES
 )
 
+# Même consigne pour un texte que SEUL le Sénat a examiné (aucun vote ni aucune
+# étape à l'Assemblée) : y faire dire « les députés ont examiné ce texte »
+# affirmerait un fait faux. Depuis l'ingestion de toutes les sessions du Sénat,
+# ces dossiers entrent dans le fil (§2.5).
+_SYS_POURQUOI_SENAT = (
+    "Tu expliques à un citoyen pourquoi les sénateurs ont examiné un texte au "
+    "Sénat, uniquement à partir du titre du texte et de son exposé des motifs "
+    "(écrit par l'auteur du texte).\n" + _CONSIGNES_COMMUNES
+)
+
 _SYS_CHANGEMENT = (
     "Tu expliques à un citoyen ce qu'un texte de loi changerait concrètement, "
     "uniquement à partir de son exposé des motifs (écrit par l'auteur du texte, "
@@ -400,11 +410,11 @@ _RE_FIN_PHRASE = re.compile(r"(?<![A-ZÀÂÉÈÊËÎÏÔÙÛÜÇ])[.!?](?:\s|$)"
 # l'absence d'accents ; les deux apostrophes (droite et courbe) sont acceptées,
 # `fold` ne les normalise pas.
 _RE_AMORCE_Q1 = re.compile(
-    r"^les deputes\s+(?:ont examine|examinent|ont debattu de|ont vote sur|"
+    r"^les (?:deputes|senateurs)\s+(?:ont examine|examinent|ont debattu de|ont vote sur|"
     r"ont etudie|se sont penches sur)\s+"
     r"(?:ce|cette|le|la)\s+(?:texte|projet|proposition|resolution|dossier)"
     r"(?:\s+de\s+(?:loi|resolution))?(?:\s+organique)?"
-    r"(?:\s+a l['’]assemblee nationale)?"
+    r"(?:\s+(?:a l['’]assemblee nationale|au senat))?"
     r"(?:\s+(?:pour|car|afin d['’e]|parce qu['’e]|puisqu['’e]))?\s*"
 )
 
@@ -423,6 +433,12 @@ def _phrases(texte: str) -> list[str]:
     if len(reste) >= _MIN_PHRASE:
         phrases.append(reste)
     return phrases or [texte]
+
+
+def amorce_q1_deputes(pourquoi: str | None) -> bool:
+    """La Q1 s'ouvre-t-elle sur « les députés … » ? Sert à écarter une Q1 qui
+    attribuerait aux députés l'examen d'un texte que seul le Sénat a examiné."""
+    return bool(pourquoi) and fold(pourquoi).startswith("les deputes")
 
 
 def _sans_amorce(phrase: str) -> str:
@@ -579,6 +595,7 @@ async def generer_questions(
     llm: LLMClient | None,
     dispositif: DispositifTexte | None = None,
     texte_adopte: TexteAdopte | None = None,
+    examine_par_assemblee: bool = True,
 ) -> QuestionsCitoyennes:
     """Compose les 4 réponses. Sans LLM (ni exposé ni dispositif), seule la Q3
     (déterministe) est renseignée — les autres restent « information non
@@ -626,7 +643,11 @@ async def generer_questions(
     # « l'auteur du texte », ne doit pas en faire un député.
     qui_depose = deposant(titre_officiel)
 
-    reponse = await llm.generate_text(_SYS_POURQUOI, user)
+    # La Q1 dit QUI a examiné le texte : les sénateurs, quand l'Assemblée ne
+    # l'a jamais examiné (cf. `_SYS_POURQUOI_SENAT`).
+    reponse = await llm.generate_text(
+        _SYS_POURQUOI if examine_par_assemblee else _SYS_POURQUOI_SENAT, user
+    )
     questions.pourquoi = valider_reponse(reponse, sources)
 
     # Repli seulement : le fait officiel prime sur la parole de l'auteur.

@@ -48,7 +48,8 @@ createdb frenchpolitics
 python -m app.db.migrations                 # --dry-run pour voir sans écrire
 
 # Ingère les scrutins publics de la 17e législature (open data AN) ET les
-# scrutins publics du Sénat de la session en cours.
+# scrutins publics du Sénat de TOUTES les sessions qui la recouvrent
+# (--session-senat 2025 pour n'en lire qu'une).
 python -m app.ingestion.run --limit 300     # 300 récents (~4 s) ; sans --limit = tout
 python -m app.ingestion.run --sans-senat    # Assemblée seule
 
@@ -56,7 +57,7 @@ python -m app.ingestion.run --sans-senat    # Assemblée seule
 # scrutins) : ni LLM, ni dossiers, ni amendements, ni débats. ~10 s pour
 # 40 scrutins. La jointure vers les dossiers de l'Assemblée est faite, mais
 # les dossiers ne sont pas reconstruits — c'est le rôle de `run`.
-python -m app.ingestion.senat --limit 40    # --session 2025 pour forcer la session
+python -m app.ingestion.senat --limit 40    # --session 2025 pour une seule session
 
 # Députés + votes nominatifs UNIQUEMENT (référentiel AMO + ventilations des
 # scrutins) : ni LLM, ni dossiers, ni amendements, ni débats. ~7 min sur toute
@@ -160,11 +161,26 @@ fil : une fiche complète et un `TXT-…` vide à côté. Mesuré sur la base de
 **10 dossiers `TXT-` sur 54** ont rejoint leur dossier officiel au run suivant
 (dont l'aide à mourir, le PLF 2026, le PLFSS 2025 et 2026, Mayotte, le
 narcotrafic) — « aide à mourir » est passé de 66 à **69 scrutins**, la somme
-exacte des deux fragments. Les 44 restants se répartissent en **32** dont le
-titre est absent de l'archive (dont des coquilles de la source : « de
-**ss**implification », « fin **des** gestion ») et **12** que l'archive contient
-mais que le garde-fou d'ambiguïté écarte, le même titre existant en L17 et en L16
-(cf. le backlog de `CLAUDE.md`).
+exacte des deux fragments.
+
+**Les votes cités par l'archive priment sur le titre** (`VotesOfficiels`,
+`rattacher_par_votes_officiels`). Les actes législatifs de décision
+(« AN1-DEBATS-DEC », « CMP-DEBATS-AN-DEC »…) citent le scrutin qui les a
+tranchés (`voteRefs`) : c'est le lien officiel vote → dossier, là où la
+correspondance de titre n'est qu'une déduction. Elle se trompait sur les textes
+dont le titre revient d'une année à l'autre (les votes de la loi spéciale de
+décembre 2025 étaient rangés dans le dossier de celle de 2024, les comptes 2023
+dans la copie L16 de leur dossier) et ne voyait pas les coquilles de la source
+(« fin **des** gestion », « ascen**c**eur », « indivi**son** »). Seuls les votes
+décisifs sont cités ; les autres votes du **même texte** (même signature de
+titre) suivent, à condition que leur date tombe dans la vie documentée du
+dossier — c'est la date qui départage deux lois spéciales au même titre, et
+plusieurs candidats → rien (§2.5). Jamais appliqué à un vote qui porte son
+propre `dossierRef`, ni à une motion de censure. Mesuré sur la base de dev :
+128 votes déplacés, **26 des 44 dossiers `TXT-`** résorbés, 3 erreurs de
+rattachement corrigées. Un vote qui change de dossier quitte l'ancien à la
+fusion (`dossier_de`) et ne pose pas de badge « mis à jour » sur le nouveau
+(§7.7). Les **18** `TXT-` restants n'ont aucun vote cité par l'archive.
 
 Un vote de **conduite de séance** (demande de suspension, de seconde délibération)
 qui deviendrait un dossier à lui seul est **écarté du fil** — il ne décide de rien
@@ -190,6 +206,44 @@ nom, groupe, circonscription, `organismes`, **photo officielle donnée par la
 source** — pas dérivée, donc pas à vérifier comme côté AN). Endpoint non documenté
 par data.senat.fr : traité en best-effort.
 
+**Les élus partis.** Les deux annuaires du jour ne contiennent que les élus **en
+exercice**, ce qui avait deux effets. Le référentiel servi n'en retirait jamais
+personne : après le renouvellement du Sénat de septembre 2026, l'API servait
+416 sénateurs pour 348 sièges, et 585 députés pour 577. Et les noms des votants
+venaient du même annuaire : un élu parti disparaissait de tous ses votes passés
+(74 500 votes nominatifs de l'Assemblée sans nom). Désormais :
+
+- le référentiel est **taillé** sur l'annuaire du jour (`retirer_hors_referentiel`,
+  jamais sur un annuaire vide) ; les votes passés (`vote_depute`) restent ;
+- les **noms** viennent d'un annuaire historique — `AMO30` (~14 Mo) côté
+  Assemblée, `data.senat.fr/data/senateurs/ODSEN_GENERAL.csv` (Latin-1) côté
+  Sénat —, sans fiche ni lien (`deputeId` reste réservé aux élus en exercice) ;
+- côté Sénat, le JSON nominatif ne dit pas le **groupe** du votant, mais la
+  **page du scrutin** liste, groupe par groupe et position par position, les
+  noms de ceux qui ont voté (« Contre : Mme Marie-Do Aeschlimann, MM. … »).
+  Chaque votant est rangé dans le groupe dont la liste porte son nom
+  (`_groupe_du_jour`, correspondance exacte du nom replié) : c'est son groupe
+  **le jour du vote**. Le groupe de l'annuaire n'est qu'un repli, et une liste
+  qui dépasserait alors le décompte **officiel** du groupe n'est pas montrée.
+  Mesuré : avant, les sénateurs étaient rangés dans leur groupe d'aujourd'hui
+  — 220 listes sur 3 060 comptaient plus de noms que de voix, et après le
+  renouvellement de 2026 le contrôle seul masquait 80 % des listes du RDSE et
+  du GEST ; avec la page, 100 % des votants des scrutins vérifiés sont nommés
+  dans le bon groupe.
+
+**Deux conséquences de la session 2024** (textes examinés au seul Sénat) :
+
+- l'archive des amendements est celle de l'**Assemblée** : l'appariement
+  `(dossierRef, numéro)` n'est fait que pour un vote de l'Assemblée. Un vote du
+  Sénat sur « l'amendement n° 1343 » du même dossier désigne un autre
+  amendement que le n° 1343 de l'Assemblée — vécu, un amendement « présenté par
+  le Gouvernement » au Sénat recevait l'exposé d'un amendement LFI-NFP. Ce qui
+  avait été apparié ainsi n'est pas préservé par la fusion ;
+- la Q1 d'un texte que seul le Sénat a examiné (aucun vote ni aucune étape à
+  l'Assemblée, `examine_par_assemblee`) est demandée avec l'amorce
+  « Les sénateurs ont examiné ce texte pour… » ; une Q1 déjà en base qui
+  l'attribuait aux députés est écartée et régénérée.
+
 La **commission permanente** (`Depute.commission`, 346/348) se lit dans
 `organismes` : les sept permanentes portent un `ordre` 7001-7007, tandis que la
 commission des affaires européennes — à laquelle 41 sénateurs siègent **en plus**
@@ -200,13 +254,22 @@ la permanente, sans liste de libellés en dur qui vieillirait mal.
 > source : les champs servis sont matricule, nom, groupe, circonscription,
 > organismes, avatar). `depuis` reste donc `None` pour les 348 sénateurs et l'app
 > masque le champ — ce n'est **pas** un trou d'ingestion à combler, et le déduire
-> de la série d'élection serait une supposition (§2.5). Il faudrait une autre
-> source (`data.senat.fr`, jeu ODSEN).
+> de la série d'élection serait une supposition (§2.5). `ODSEN_ELUSEN.csv`
+> (data.senat.fr) publie les mandats, mais vérifié le 12 oct. 2026, il n'avait
+> pas suivi le renouvellement de septembre (197 actifs sur 348, aucun mandat en
+> cours) : à reconsidérer quand il sera à jour.
 
 > ⚠️ **`{session}` est l'année de DÉBUT de session** (octobre → septembre), pas
 > l'année civile : le scrutin n° 340 de la session « 2025 » a eu lieu le
 > **21 juillet 2026**, et `scr2026.html` répond 404. Même famille de piège que
 > les zéros de tête des URLs de l'AN.
+
+> ⚠️ **Toutes les sessions de la législature sont lues**
+> (`sessions_de_la_legislature`), de la session en cours jusqu'à celle de la
+> première séance de l'Assemblée (18 juillet 2024 → session 2023) ; les votes
+> antérieurs à cette date sont écartés. Ne lire que la session en cours avait
+> laissé de côté **toute la session 2024** (367 scrutins), et chaque 1er octobre
+> la fin de la session écoulée sortait du périmètre.
 
 **Un texte, un dossier.** Le rattachement suit la même cascade que côté AN, pour
 qu'un texte examiné dans les deux chambres ne se dédouble pas dans le fil :

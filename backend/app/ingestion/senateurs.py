@@ -23,6 +23,8 @@ vote sort sans cohésion — l'app masque alors la ligne.
 """
 from __future__ import annotations
 
+import csv
+import io
 from dataclasses import dataclass
 
 from app.domain.enums import Chambre, PositionVote
@@ -148,6 +150,65 @@ def construire_annuaire(bruts: list[dict]) -> dict[str, InfoSenateur]:
     return annuaire
 
 
+def _lignes_csv_senat(csv_texte: str) -> list[dict[str, str]]:
+    """Lignes d'un export data.senat.fr (en-tête de requête en `%` ignoré)."""
+    corps = "\n".join(
+        ligne for ligne in csv_texte.splitlines() if not ligne.startswith("%")
+    )
+    return [
+        {k.strip(): (v or "").strip() for k, v in ligne.items() if k}
+        for ligne in csv.DictReader(io.StringIO(corps))
+    ]
+
+
+def construire_annuaire_historique(
+    csv_texte: str, annuaire: dict[str, InfoSenateur]
+) -> dict[str, InfoSenateur]:
+    """Les sénateurs qui ne siègent plus, depuis `ODSEN_GENERAL.csv` (pure).
+
+    Sans eux, un scrutin ancien perdait le nom de chaque sénateur parti depuis
+    — au renouvellement de septembre 2026, c'étaient 68 noms effacés de toute
+    la session précédente. Ils servent seulement à **nommer** : ni fiche, ni
+    lien (le référentiel servi reste l'annuaire du jour).
+
+    Le groupe d'un votant se lit d'abord sur la page du scrutin, qui liste les
+    noms de chaque groupe (`senat._groupe_du_jour`). Le **dernier groupe
+    connu** ici n'est qu'un repli, sous le contrôle des décomptes. Son libellé
+    (« RDPI », « Les Républicains », ou un ancien code comme « UC ») est traduit
+    par l'annuaire du jour, qui porte libellés et codes ; un groupe qu'il ne
+    connaît plus reste vide (`groupe_code=""`) — le sénateur est nommé si la
+    page le place, jamais rangé dans un groupe deviné (§2.5).
+    """
+    code_par_libelle: dict[str, str] = {}
+    for info in annuaire.values():
+        if info.groupe_code:
+            code_par_libelle.setdefault(info.groupe_code, info.groupe_code)
+            if info.groupe_abrev:
+                code_par_libelle[info.groupe_abrev] = info.groupe_code
+    infos_par_code = {info.groupe_code: info for info in annuaire.values()}
+    historique: dict[str, InfoSenateur] = {}
+    for ligne in _lignes_csv_senat(csv_texte):
+        matricule = ligne.get("Matricule", "")
+        if not matricule or matricule in annuaire:
+            continue
+        nom = " ".join(
+            p for p in (ligne.get("Prénom usuel"), ligne.get("Nom usuel")) if p
+        ).strip()
+        if not nom:
+            continue
+        code = code_par_libelle.get(ligne.get("Groupe politique", ""), "")
+        groupe = infos_par_code.get(code)
+        historique[matricule] = InfoSenateur(
+            matricule=matricule,
+            nom=nom,
+            groupe_code=code,
+            groupe_nom=groupe.groupe_nom if groupe else "",
+            groupe_abrev=groupe.groupe_abrev if groupe else "",
+            circonscription=ligne.get("Circonscription", ""),
+        )
+    return historique
+
+
 def build_senateurs(annuaire: dict[str, InfoSenateur]) -> list[Depute]:
     """Référentiel servi par l'API, à partir de l'annuaire (fonction pure).
 
@@ -156,6 +217,10 @@ def build_senateurs(annuaire: dict[str, InfoSenateur]) -> list[Depute]:
     Vérifié à la source : les champs servis sont matricule, nom, groupe,
     circonscription, organismes, avatar — aucune date de mandat. Ce n'est donc
     pas un oubli d'ingestion, et le combler demanderait une autre source.
+    `ODSEN_ELUSEN.csv` (data.senat.fr) publie bien les mandats, mais vérifié
+    le 12 oct. 2026, il n'avait pas suivi le renouvellement de septembre :
+    197 sénateurs actifs sur 348, et aucun mandat en cours. Une date tirée de
+    là serait fausse pour la moitié de l'hémicycle.
     """
     return [
         Depute(

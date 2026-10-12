@@ -170,3 +170,63 @@ def test_enrichir_ambiguite_non_resolue_renvoie_none():
     index = construire_index(zf)
     # Vote en juillet 2026 : aucun candidat à ± 3 jours.
     assert enrichir(index, "DLR5L17N53940", "80", date(2026, 7, 2)) is None
+
+
+# --- chambre : l'archive est celle de l'Assemblée ----------------------------
+
+
+def _vote_amendement(chambre: str, scrutin_id: str):
+    from app.schemas import ResultatGlobal, Scrutin
+
+    return Scrutin(
+        id=scrutin_id,
+        dossier_id="DLR5L17N53940",
+        date="2026-07-02",
+        objet="l'amendement n° 80, présenté par le Gouvernement, à l'article 2",
+        statut="adopte",
+        chambre=chambre,
+        scrutin_public=True,
+        resultat=ResultatGlobal(pour=10, contre=2, abstention=0, non_votants=0),
+        positions_groupes=[],
+        sources=[],
+    )
+
+
+def test_un_vote_du_senat_n_est_jamais_enrichi_par_l_archive_de_l_assemblee():
+    """Le n° 80 voté au Sénat n'est pas le n° 80 de l'Assemblée, même dossier."""
+    from app.ingestion.sync import _amendement_from_scrutin
+
+    index = construire_index(
+        _zip(("json/DLR5L17N53940/T/AM1.json", _amendement_json(numero_long="80")))
+    )
+    an = _amendement_from_scrutin(_vote_amendement("assemblee", "VTANR5L17V1"), index)
+    assert an.dispositif is not None
+    senat = _amendement_from_scrutin(_vote_amendement("senat", "SEN-2024-12"), index)
+    assert senat.dispositif is None and senat.expose_sommaire is None
+
+
+def test_la_fusion_ne_preserve_pas_un_contenu_faux_au_senat():
+    """Ce qu'un run antérieur avait apparié à tort au Sénat disparaît."""
+    from app.ingestion.sync import _merge_avec_existant, build_dossier
+    from app.ingestion.assemblee import ScrutinParse
+
+    def dossier(vote):
+        return build_dossier(
+            [
+                ScrutinParse(
+                    scrutin=vote,
+                    dossier_id="DLR5L17N53940",
+                    dossier_titre="Titre",
+                    dossier_ref="DLR5L17N53940",
+                    theme="Autre",
+                    legislature="2024",
+                    numero="12",
+                )
+            ]
+        )
+
+    prev = dossier(_vote_amendement("senat", "SEN-2024-12"))
+    prev.amendements[0].dispositif = "contenu d'un autre amendement"
+    incoming = dossier(_vote_amendement("senat", "SEN-2024-12"))
+    fusion = _merge_avec_existant(prev, incoming)
+    assert fusion.amendements[0].dispositif is None

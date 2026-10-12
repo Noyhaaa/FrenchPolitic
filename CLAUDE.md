@@ -231,9 +231,16 @@ app/data/seed.py       Données FICTIVES (backend memory + tests) — ne jamais 
   réconciliation par titre dans l'archive des dossiers législatifs (correspondance
   exacte, puis par signature ; législature courante puis précédente) → dossier
   reconstitué `TXT-…` (id dérivé de la signature du titre) → singleton
-  (`estEvenementAutonome` : motion de censure, déclaration). Le Sénat suit la même
-  logique : `senatChemin` publié par l'AN → lien inverse → titre → `SEN-{slug}` →
-  singleton.
+  (`estEvenementAutonome` : motion de censure, déclaration). Puis les **votes que
+  les actes législatifs citent** (`voteRefs`) corrigent le résultat du titre
+  (`rattacher_par_votes_officiels`) : un vote cité rejoint son dossier, les
+  autres votes du même texte le suivent si leur date tombe dans la vie du
+  dossier. Le Sénat suit la même logique : `senatChemin` publié par l'AN → lien
+  inverse → titre → `SEN-{slug}` → singleton.
+- **Élus en exercice / élus partis.** Le référentiel servi (`depute`) est
+  **taillé** à chaque run sur l'annuaire du jour (`retirer_hors_referentiel`).
+  Les **noms** des votants viennent d'annuaires historiques (`AMO30`,
+  `ODSEN_GENERAL.csv`) : un élu parti reste nommé sur ses votes, sans lien.
 - **Préservation entre runs.** Un run sans archive n'efface pas ce qui est en
   base : exposé, initiative, état, loi finale, réponses validées, enrichissement
   des amendements. Le résumé n'est préservé que s'il est `relu_par_humain`.
@@ -298,7 +305,21 @@ deux côtés. **Toute évolution se répercute des deux côtés.**
     (oct.→sept.) : passe par `session_pour` ;
   - la « législature » d'un scrutin du Sénat est une session. Pour une URL de
     l'AN, utilise `legislature_du_ref(dossierRef)` ;
-  - deux amendements identiques ont plusieurs numéros : on n'en retient aucun.
+  - deux amendements identiques ont plusieurs numéros : on n'en retient aucun ;
+  - l'archive des amendements est celle de l'**Assemblée** : un vote du Sénat
+    sur « l'amendement n° 1343 » n'est jamais enrichi par le n° 1343 de l'AN
+    (vécu : un amendement du Gouvernement au Sénat recevait l'exposé d'un
+    amendement LFI-NFP de l'Assemblée) ;
+  - un texte que **seul le Sénat** a examiné (ni vote ni étape à l'Assemblée,
+    `examine_par_assemblee`) a une Q1 qui parle des **sénateurs**
+    (`_SYS_POURQUOI_SENAT`) — « les députés ont examiné ce texte » y serait
+    faux ;
+  - **toutes** les sessions qui recouvrent la législature sont lues
+    (`sessions_de_la_legislature`), pas seule la session en cours ;
+  - le JSON nominatif ne donne pas le groupe du votant : c'est la **page du
+    scrutin** qui le dit (listes de noms par groupe, `_groupe_du_jour`), et
+    non l'annuaire du jour — les sénateurs changent de groupe. En repli, une
+    liste qui dépasserait le décompte officiel du groupe est masquée.
 - **Titres cités** : retire **toutes** les mentions finales de procédure
   (`_RE_MENTION_FINALE`, répétable). Sinon le texte se dédouble en un `TXT-…`
   vide. Une parenthèse au milieu du titre reste.
@@ -349,11 +370,14 @@ deux côtés. **Toute évolution se répercute des deux côtés.**
   texte consolidé.
 - **Commission des députés AN** : `GroupResolver` ne garde que les organes `GP`.
   Il faudrait résoudre les mandats `COMPER`.
-- **Dossiers `TXT-` restants**, deux causes :
-  - des coquilles de la source : une distance d'édition à 1 caractère les
-    rattraperait, mais le risque de faux appariement est à mesurer ;
-  - des titres présents en L16 et L17, que le garde-fou d'ambiguïté écarte.
-    Piste : préférer la législature courante quand elle a un candidat.
+- **Dossiers `TXT-` restants** (18) : aucun de leurs votes n'est cité par les
+  actes législatifs. Restent des coquilles de la source (une distance
+  d'édition à 1 caractère, risque de faux appariement à mesurer) et des titres
+  présents en L16 et L17 (piste : préférer la législature courante).
+- **Décisions sans scrutin public** (P2 de l'audit d'oct. 2026) : ~130 textes
+  décidés sans scrutin public (25 conventions promulguées, résolutions, textes
+  sénatoriaux) et ~14 000 amendements de séance votés à main levée sont absents.
+  Le modèle (`scrutinPublic=false`) est prêt, l'ingestion ne l'alimente pas.
 - **Sénat** : comptes rendus (`cri.zip`) pour avoir une Q2 sur les textes
   sénatoriaux, amendements (Ameli), Monalisa (XML structuré) à la place du grattage
   PDF.

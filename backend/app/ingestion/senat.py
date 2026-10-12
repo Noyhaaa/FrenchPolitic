@@ -37,6 +37,7 @@ import asyncio
 import html
 import re
 from dataclasses import dataclass, field
+from datetime import date
 
 import httpx
 
@@ -59,6 +60,7 @@ from app.ingestion.senateurs import (
     id_groupe_senat,
     id_senateur,
 )
+from app.utils.text import fold
 from app.schemas import (
     PositionGroupe,
     ResultatGlobal,
@@ -73,6 +75,9 @@ URL_SCRUTIN = BASE + "/scrutin-public/{session}/scr{session}-{numero}.html"
 URL_SCRUTIN_JSON = BASE + "/scrutin-public/{session}/scr{session}-{numero}.json"
 URL_DOSSIER = BASE + "/dossier-legislatif/{slug}.html"
 URL_SENATEURS = BASE + "/api-senat/senateurs.json"
+# Tous les sénateurs, anciens compris (data.senat.fr, CSV en Latin-1). Sert à
+# nommer ceux qui ne siègent plus dans les scrutins où ils ont voté.
+URL_SENATEURS_HISTORIQUE = "https://data.senat.fr/data/senateurs/ODSEN_GENERAL.csv"
 # Texte déposé au Sénat (exposé des motifs + dispositif) : le slug du dossier
 # EST la référence du texte (« pjl25-689 » → « /leg/pjl25-689.pdf »).
 URL_TEXTE_PDF = BASE + "/leg/{slug}.pdf"
@@ -108,6 +113,40 @@ _RE_NON_VOTANTS = re.compile(
 _RE_BLOC_GROUPE = re.compile(r'<div id="accordion-scrutin-([\w-]+)"')
 # Début du conteneur replié qui porte les listes nominatives d'un groupe.
 _DEBUT_LISTE_NOMS = '<div id="accordion-collapse'
+# Positions dans les listes nominatives d'un groupe (« Pour : », « Contre : »,
+# « Abstention : », « N'ont pas pris part au vote : »).
+_RE_RUBRIQUE_LISTE = re.compile(
+    r"(Pour|Contre|Abstentions?|N['’](?:a|ont) pas pris part au vote)\s*:", re.I
+)
+_RUBRIQUES = {
+    "pour": PositionVote.pour,
+    "contre": PositionVote.contre,
+    "abstention": PositionVote.abstention,
+    "abstentions": PositionVote.abstention,
+}
+
+
+def _listes_nominatives(bloc: str) -> dict[PositionVote, str]:
+    """Les noms listés par position dans le conteneur replié d'un groupe.
+
+    Texte replié (`fold`), sans balises : il ne sert qu'à vérifier qu'un nom y
+    figure, jamais à fabriquer un nom.
+    """
+    debut = bloc.find(_DEBUT_LISTE_NOMS)
+    if debut < 0:
+        return {}
+    fin = bloc.find("</ul>", debut)
+    texte = _texte(bloc[debut : fin if fin > 0 else len(bloc)])
+    listes: dict[PositionVote, str] = {}
+    rubriques = list(_RE_RUBRIQUE_LISTE.finditer(texte))
+    for i, m in enumerate(rubriques):
+        position = _RUBRIQUES.get(m.group(1).lower())
+        fin_rubrique = rubriques[i + 1].start() if i + 1 < len(rubriques) else len(texte)
+        if position is not None:
+            listes[position] = fold(texte[m.end() : fin_rubrique])
+    return listes
+
+
 _RE_ENTETE_GROUPE = re.compile(
     r'<h3 class="accordion-title[^"]*">(.*?)</h3>', re.S
 )
@@ -136,6 +175,28 @@ def session_pour(annee: int, mois: int) -> int:
     return annee if mois >= _PREMIER_MOIS_SESSION else annee - 1
 
 
+# Première séance de chaque législature de l'Assemblée : le Sénat n'a pas de
+# législature, c'est elle qui borne les votes sénatoriaux qu'on ingère.
+DEBUT_LEGISLATURE: dict[int, date] = {17: date(2024, 7, 18)}
+
+
+def sessions_de_la_legislature(legislature: int, aujourdhui: date) -> list[int]:
+    """Sessions du Sénat qui recouvrent la législature, de la plus récente à la
+    plus ancienne.
+
+    Ne lire que la session en cours laissait de côté toutes les précédentes :
+    la session 2024 (oct. 2024 → sept. 2025, 367 scrutins) n'avait jamais été
+    ingérée, et chaque 1er octobre la fin de la session écoulée sortait du
+    périmètre. Législature inconnue → la seule session en cours.
+    """
+    courante = session_pour(aujourdhui.year, aujourdhui.month)
+    debut = DEBUT_LEGISLATURE.get(legislature)
+    if debut is None:
+        return [courante]
+    premiere = session_pour(debut.year, debut.month)
+    return list(range(courante, premiere - 1, -1))
+
+
 def _texte(fragment: str) -> str:
     """Contenu textuel d'un fragment HTML, espaces normalisés."""
     sans_balises = re.sub(r"<[^>]+>", " ", fragment)
@@ -159,6 +220,10 @@ class GroupeScrutinSenat:
     contre: int = 0
     abstention: int = 0
     non_votants: int = 0
+    # Les noms listés par la page sous chaque position, repliés (`fold`) : le
+    # JSON nominatif ne dit pas le groupe du votant, la page si — c'est lui qui
+    # range un sénateur dans le groupe où il siégeait LE JOUR DU VOTE.
+    listes: dict[PositionVote, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -253,6 +318,7 @@ def _groupes(page: str) -> list[GroupeScrutinSenat]:
                 contre=compte(r"\bContre"),
                 abstention=compte(r"\bAbstentions?"),
                 non_votants=compte(r"pas pris part au vote"),
+                listes=_listes_nominatives(bloc),
             )
         )
     return groupes
@@ -337,6 +403,13 @@ def article_vise_senat(objet: str) -> str | None:
     return f"Article {reste}"
 
 
+def est_scrutin_senat(scrutin_id: str) -> bool:
+    """Le vote est-il un scrutin du Sénat ? Lu sur l'identifiant que CE module
+    attribue (`PageScrutinSenat.id`, « SEN-{session}-{numéro} ») — une
+    convention interne, pas une forme d'identifiant venue de la source."""
+    return re.fullmatch(r"SEN-\d{4}-\d+", scrutin_id) is not None
+
+
 def source_scrutin_senat(session: int, numero: int) -> SourceOfficielle:
     return SourceOfficielle(
         type="scrutin",
@@ -373,10 +446,34 @@ def _position_majoritaire(groupe: GroupeScrutinSenat) -> PositionVote:
     return en_tete[0] if len(en_tete) == 1 else PositionVote.non_votant
 
 
+def _figure_dans(nom: str, liste: str) -> bool:
+    """Le nom (replié) figure-t-il, mot pour mot, dans la liste ? Les bornes
+    évitent qu'« Marc Laménie » soit trouvé dans « Jean-Marc Laménie »."""
+    motif = rf"(?<![a-z0-9-]){re.escape(fold(nom))}(?![a-z0-9-])"
+    return re.search(motif, liste) is not None
+
+
+def _groupe_du_jour(
+    info: InfoSenateur, position: PositionVote, groupes: list[GroupeScrutinSenat]
+) -> str:
+    """Le groupe où le votant siégeait le jour du vote, lu sur la page.
+
+    La page liste les noms de chaque groupe sous chaque position : un seul
+    groupe dont la liste porte ce nom → c'est le sien. Sinon (page sans listes,
+    homonyme), repli sur le groupe que l'annuaire lui connaît aujourd'hui —
+    le contrôle des décomptes de `parse_scrutin_senat` veille sur ce repli.
+    """
+    candidats = [
+        g.code for g in groupes if _figure_dans(info.nom, g.listes.get(position, ""))
+    ]
+    return candidats[0] if len(candidats) == 1 else info.groupe_code
+
+
 def _votants_par_groupe(
     votes: object,
     annuaire: dict[str, InfoSenateur],
     senateurs_connus: frozenset[str] | None,
+    groupes: list[GroupeScrutinSenat] | None = None,
 ) -> dict[str, dict[PositionVote, list[Votant]]]:
     """Répartit le vote nominatif par (code de groupe, position).
 
@@ -403,7 +500,8 @@ def _votants_par_groupe(
         if info is None or position is None:
             continue
         identifiant = id_senateur(matricule)
-        par_groupe.setdefault(info.groupe_code, {}).setdefault(position, []).append(
+        code = _groupe_du_jour(info, position, groupes or [])
+        par_groupe.setdefault(code, {}).setdefault(position, []).append(
             Votant(
                 nom=info.nom,
                 depute_id=identifiant if identifiant in connus else None,
@@ -431,7 +529,21 @@ def parse_scrutin_senat(
     404, même règle que côté Assemblée).
     """
     annuaire = annuaire or {}
-    nominatif = _votants_par_groupe(votes, annuaire, senateurs_connus)
+    nominatif = _votants_par_groupe(votes, annuaire, senateurs_connus, page.groupes)
+
+    def noms_coherents(
+        noms: dict[PositionVote, list[Votant]], position: PositionVote, officiel: int
+    ) -> list[Votant] | None:
+        # Le JSON nominatif ne dit pas le groupe du votant : on le range dans
+        # le groupe que l'annuaire lui connaît aujourd'hui. Pour un sénateur
+        # qui a changé de groupe depuis, la liste compterait plus de noms que
+        # le décompte OFFICIEL du groupe (mesuré : 220 listes sur 3 060). Une
+        # liste qui contredit le décompte n'est pas montrée (§2.5) ; le chiffre
+        # officiel, lui, reste affiché.
+        liste = noms.get(position) or None
+        if liste is not None and len(liste) > officiel:
+            return None
+        return liste
 
     positions: list[PositionGroupe] = []
     for groupe in page.groupes:
@@ -448,9 +560,13 @@ def parse_scrutin_senat(
                 # Jamais de cohésion au Sénat : la délégation de vote par groupe
                 # la viderait de sens (cf. `senateurs`, §7.4).
                 cohesion=None,
-                votants_pour=noms.get(PositionVote.pour) or None,
-                votants_contre=noms.get(PositionVote.contre) or None,
-                votants_abstention=noms.get(PositionVote.abstention) or None,
+                votants_pour=noms_coherents(noms, PositionVote.pour, groupe.pour),
+                votants_contre=noms_coherents(
+                    noms, PositionVote.contre, groupe.contre
+                ),
+                votants_abstention=noms_coherents(
+                    noms, PositionVote.abstention, groupe.abstention
+                ),
             )
         )
 
@@ -561,38 +677,39 @@ class SenatOpenDataClient:
             headers={"User-Agent": "Mozilla/5.0"},
         )
 
-    async def numeros(self) -> list[int]:
-        """Numéros de scrutin de la session, du plus récent au plus ancien."""
+    async def numeros(self, session: int | None = None) -> list[int]:
+        """Numéros de scrutin d'une session (par défaut celle du client), du plus
+        récent au plus ancien."""
+        session = self.session if session is None else session
         async with self._client() as client:
-            index = await self._get(
-                client, URL_INDEX_SESSION.format(session=self.session)
-            )
-        return numeros_de_session(index, self.session) if index else []
+            index = await self._get(client, URL_INDEX_SESSION.format(session=session))
+        return numeros_de_session(index, session) if index else []
 
     async def telecharger_scrutins(
-        self, numeros: list[int]
+        self, numeros: list[int], session: int | None = None
     ) -> list[tuple[PageScrutinSenat, object]]:
         """Télécharge et parse les scrutins demandés : `(page, votes nominatifs)`.
 
         Un scrutin dont la page manque ou n'est pas exploitable est sauté ; son
         JSON nominatif absent laisse simplement le vote sans détail (§2.5).
         """
+        session = self.session if session is None else session
         semaphore = asyncio.Semaphore(self.CONCURRENCE)
         resultats: list[tuple[int, PageScrutinSenat, object]] = []
 
         async def charger(client: httpx.AsyncClient, numero: int) -> None:
             async with semaphore:
                 brut = await self._get(
-                    client, URL_SCRUTIN.format(session=self.session, numero=numero)
+                    client, URL_SCRUTIN.format(session=session, numero=numero)
                 )
                 if brut is None:
                     return
-                page = parse_page_scrutin(brut, self.session)
+                page = parse_page_scrutin(brut, session)
                 if page is None:
                     return
                 corps = await self._get(
                     client,
-                    URL_SCRUTIN_JSON.format(session=self.session, numero=numero),
+                    URL_SCRUTIN_JSON.format(session=session, numero=numero),
                 )
             votes: object = None
             if corps:
@@ -622,6 +739,20 @@ class SenatOpenDataClient:
         except ValueError:
             return []
         return donnees if isinstance(donnees, list) else []
+
+    async def senateurs_historique(self) -> str | None:
+        """Export CSV de tous les sénateurs, anciens compris (None si injoignable).
+
+        data.senat.fr le sert en Latin-1 sans le déclarer : on décode nous-mêmes
+        plutôt que de laisser httpx deviner, ce qui abîmerait les accents."""
+        try:
+            async with self._client() as client:
+                reponse = await client.get(URL_SENATEURS_HISTORIQUE)
+            if reponse.status_code != 200:
+                return None
+            return reponse.content.decode("latin-1")
+        except httpx.HTTPError:
+            return None
 
     async def ref_an_du_dossier(self, slug: str, jointure: JointureSenat) -> str | None:
         """Niveau 2 de la cascade : le `dossierRef` AN cité par la page du dossier.
@@ -666,13 +797,19 @@ async def _main(limit: int | None, session: int | None, legislature: int) -> Non
     c'est elle qui évite de dupliquer un texte déjà présent dans le fil — mais
     l'enrichissement (résumés, questions, thèmes affinés) est laissé au run
     complet, qui reconstruira les dossiers touchés.
+
+    Sans `--session`, toutes les sessions de la législature sont lues.
     """
     import argparse as _argparse  # noqa: F401  (documenté par `main`)
-    from datetime import date, datetime, timezone
+    from datetime import datetime, timezone
 
     from app.db.session import init_models, make_engine, make_session_factory
     from app.ingestion.assemblee import AssembleeOpenDataClient
-    from app.ingestion.deputes import remplacer_votes_du_scrutin, upsert_deputes
+    from app.ingestion.deputes import (
+        remplacer_votes_du_scrutin,
+        retirer_hors_referentiel,
+        upsert_deputes,
+    )
     from app.ingestion.dossiers_legislatifs import (
         construire_jointure_senat,
         construire_reconciliation,
@@ -680,22 +817,27 @@ async def _main(limit: int | None, session: int | None, legislature: int) -> Non
     from app.ingestion.senateurs import (
         build_senateurs,
         construire_annuaire,
+        construire_annuaire_historique,
         groupes_senat,
         votes_du_scrutin_senat,
     )
     from app.ingestion.sync import _upsert_groupes, _upsert_scrutin
 
-    if session is None:
-        aujourdhui = date.today()
-        session = session_pour(aujourdhui.year, aujourdhui.month)
+    aujourdhui = date.today()
+    sessions = (
+        [session]
+        if session is not None
+        else sessions_de_la_legislature(legislature, aujourdhui)
+    )
+    borne = DEBUT_LEGISLATURE.get(legislature)
 
     debut = datetime.now(timezone.utc)
     engine = make_engine()
     await init_models(engine)
     sf = make_session_factory(engine)
-    client = SenatOpenDataClient(session=session)
+    client = SenatOpenDataClient(session=sessions[0])
 
-    print(f"Sénat (session {session}, limit={limit})…")
+    print(f"Sénat (sessions {', '.join(map(str, sessions))}, limit={limit})…")
     annuaire = construire_annuaire(await client.senateurs())
     if not annuaire:
         print("⚠ annuaire des sénateurs injoignable : arrêt (rien n'a été écrit).")
@@ -705,8 +847,21 @@ async def _main(limit: int | None, session: int | None, legislature: int) -> Non
     async with sf() as s:
         nb_groupes = await _upsert_groupes(s, groupes_senat(annuaire), Chambre.senat)
         nb_senateurs = await upsert_deputes(s, senateurs)
+        nb_partis = await retirer_hors_referentiel(
+            s, Chambre.senat, {d.id for d in senateurs}
+        )
         await s.commit()
-    print(f"  {nb_senateurs} sénateurs, {nb_groupes} groupes.")
+    print(
+        f"  {nb_senateurs} sénateurs, {nb_groupes} groupes, "
+        f"{nb_partis} ancien(s) sénateur(s) retiré(s) du référentiel."
+    )
+    # Les anciens sénateurs ne servent qu'à nommer leurs votes passés.
+    historique = await client.senateurs_historique()
+    noms = dict(annuaire)
+    if historique:
+        noms.update(construire_annuaire_historique(historique, annuaire))
+    else:
+        print("  ⚠ annuaire historique injoignable : anciens sénateurs non nommés.")
 
     # Jointure vers les dossiers de l'Assemblée : une seule archive (10 Mo).
     client_an = AssembleeOpenDataClient(legislature=legislature)
@@ -715,10 +870,18 @@ async def _main(limit: int | None, session: int | None, legislature: int) -> Non
     reconciliation = construire_reconciliation(documents, (legislature,))
     print(f"  jointure Assemblée ↔ Sénat : {len(jointure)} dossiers appariés.")
 
-    numeros = await client.numeros()
-    if limit is not None:
-        numeros = numeros[:limit]
-    pages = await client.telecharger_scrutins(numeros)
+    pages: list[tuple[PageScrutinSenat, object]] = []
+    for numero_session in sessions:
+        numeros = await client.numeros(numero_session)
+        if limit is not None:
+            numeros = numeros[: max(limit - len(pages), 0)]
+        lues = await client.telecharger_scrutins(numeros, numero_session)
+        if borne is not None:
+            lues = [(p, v) for p, v in lues if p.date >= borne.isoformat()]
+        print(f"  session {numero_session} : {len(lues)} scrutins")
+        pages += lues
+        if limit is not None and len(pages) >= limit:
+            break
     connus = frozenset(s.id for s in senateurs)
 
     refs_par_slug: dict[str, str | None] = {}
@@ -738,7 +901,7 @@ async def _main(limit: int | None, session: int | None, legislature: int) -> Non
             parse = parse_scrutin_senat(
                 page,
                 votes,
-                annuaire,
+                noms,
                 dossier_ref=ref,
                 reconciliation=reconciliation,
                 senateurs_connus=connus,
@@ -751,7 +914,7 @@ async def _main(limit: int | None, session: int | None, legislature: int) -> Non
                     s,
                     parse.scrutin.id,
                     parse.scrutin.date,
-                    votes_du_scrutin_senat(votes, annuaire),
+                    votes_du_scrutin_senat(votes, noms),
                 )
             if i % 50 == 0:
                 await s.commit()
@@ -780,7 +943,7 @@ def main() -> None:
         "--session",
         type=int,
         default=None,
-        help="Année de DÉBUT de session (oct.→sept.) ; par défaut, la session en cours",
+        help="Année de DÉBUT de session (oct.→sept.) ; par défaut, toutes celles de la législature",
     )
     parser.add_argument(
         "--legislature",

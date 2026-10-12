@@ -734,3 +734,79 @@ def test_lexique_de_la_source_admis_seulement_si_le_mot_y_figure():
         )
         is None
     )
+
+
+# --- Texte que seul le Sénat a examiné ----------------------------------------
+
+
+class _LLMQuiNote(_FakeLLM):
+    """Retient les consignes système reçues."""
+
+    def __init__(self, *reponses: str) -> None:
+        super().__init__(*reponses)
+        self.systemes: list[str] = []
+
+    async def generate_text(self, system: str, user: str) -> str:
+        self.systemes.append(system)
+        return await super().generate_text(system, user)
+
+
+async def test_q1_d_un_texte_examine_au_seul_senat_parle_des_senateurs():
+    """« Les députés ont examiné ce texte » serait un fait faux (§2.5)."""
+    llm = _LLMQuiNote("Les sénateurs ont examiné ce texte pour préserver les droits des victimes.")
+    q = await generer_questions(
+        _TITRE, [_scrutin("l'ensemble…")], _EXPOSE, llm, examine_par_assemblee=False
+    )
+    assert "sénateurs ont examiné un texte au Sénat" in llm.systemes[0]
+    assert q.pourquoi is not None
+    assert accroche_depuis_q1(q.pourquoi) == "Préserver les droits des victimes."
+
+
+async def test_q1_d_un_texte_de_l_assemblee_garde_sa_consigne():
+    llm = _LLMQuiNote("Les députés ont examiné ce texte pour préserver les droits des victimes.")
+    await generer_questions(_TITRE, [_scrutin("l'ensemble…")], _EXPOSE, llm)
+    assert "députés ont examiné un texte à l'Assemblée nationale" in llm.systemes[0]
+
+
+def _dossier_senat():
+    from app.ingestion.assemblee import ScrutinParse
+    from app.ingestion.sync import build_dossier
+
+    vote = Scrutin(
+        id="SEN-2024-12",
+        dossier_id="SEN-ppl24-001",
+        date="2025-02-18",
+        objet="l'ensemble de la proposition de loi",
+        statut="adopte",
+        chambre="senat",
+        scrutin_public=True,
+        resultat=ResultatGlobal(pour=200, contre=100, abstention=0, non_votants=0),
+        positions_groupes=[],
+        sources=[],
+    )
+    return build_dossier(
+        [
+            ScrutinParse(
+                scrutin=vote,
+                dossier_id="SEN-ppl24-001",
+                dossier_titre="Proposition de loi",
+                dossier_ref=None,
+                theme="Autre",
+                legislature="2024",
+                numero="12",
+            )
+        ]
+    )
+
+
+def test_examine_par_assemblee_lit_les_votes_et_la_trajectoire():
+    from app.ingestion.sync import examine_par_assemblee
+    from app.schemas import PhaseScrutin
+
+    dossier = _dossier_senat()
+    assert not examine_par_assemblee(dossier)
+    # Adopté à main levée à l'Assemblée : pas de scrutin, mais l'étape existe.
+    dossier.trajectoire = [
+        PhaseScrutin(label="1ère lecture", chambre="assemblee", date="2025-05-01")
+    ]
+    assert examine_par_assemblee(dossier)

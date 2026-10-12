@@ -720,3 +720,125 @@ def test_source_dossier_juste_meme_sans_vote_de_l_assemblee():
     assert dossier.sources[0].url == (
         "https://www.assemblee-nationale.fr/dyn/17/dossiers/DLR5L17N54085"
     )
+
+
+# --------------------------------------------------------------------------
+# Sessions de la législature, anciens sénateurs, cohérence des listes
+# --------------------------------------------------------------------------
+
+
+def test_toutes_les_sessions_de_la_legislature():
+    """La 17e législature s'ouvre le 18 juillet 2024, pendant la session 2023 :
+    on lit de la session en cours jusqu'à celle-là, sans en sauter une."""
+    from datetime import date
+
+    from app.ingestion.senat import sessions_de_la_legislature
+
+    assert sessions_de_la_legislature(17, date(2026, 10, 12)) == [2026, 2025, 2024, 2023]
+    assert sessions_de_la_legislature(17, date(2026, 9, 30)) == [2025, 2024, 2023]
+    # Législature sans date d'ouverture connue : la seule session en cours.
+    assert sessions_de_la_legislature(99, date(2026, 10, 12)) == [2026]
+
+
+_ODSEN = (
+    '% Requête :select senmat as "Matricule", …\n'
+    "% \tsuite de la requête\n"
+    "Matricule,Qualité,Nom usuel,Prénom usuel,État,Date naissance,Date de décès,"
+    "Groupe politique,Type d'app au grp politique,Commission permanente,"
+    "Circonscription\n"
+    "21071F,Mme,Aeschlimann,Marie-Do,ACTIF,1974-04-17,,Les Républicains,,,Hauts-de-Seine\n"
+    "11111A,M.,Parti,Jean,ANCIEN,1950-01-01,,Les Républicains,,,Cantal\n"
+    "22222B,Mme,Disparu,Anne,ANCIEN,1940-01-01,,Groupe dissous,,,Lot\n"
+    "33333C,M.,,,ANCIEN,1940-01-01,,UC,,,Gers\n"
+    "33333X,M.,Ancien,Paul,ANCIEN,1950-01-01,,UC,,,Gers\n"
+)
+
+
+def test_annuaire_historique_nomme_les_senateurs_partis(annuaire):
+    from app.ingestion.senateurs import construire_annuaire_historique
+
+    historique = construire_annuaire_historique(_ODSEN, annuaire)
+    # Le sénateur en exercice reste décrit par l'annuaire du jour.
+    assert "21071F" not in historique
+    parti = historique["11111A"]
+    assert parti.nom == "Jean Parti"
+    # Libellé de la source traduit en code par l'annuaire du jour.
+    assert parti.groupe_code == "UMP"
+    assert parti.circonscription == "Cantal"
+    assert parti.portrait_url is None
+    # Ancien code de groupe (« UC ») : reconnu comme code.
+    assert historique["33333X"].groupe_code == "UC"
+    # Groupe que l'annuaire du jour ne connaît plus : nommé, mais sans groupe
+    # deviné — seule la page du scrutin pourra le placer.
+    assert historique["22222B"].groupe_code == ""
+    # Nom absent : ignoré.
+    assert "33333C" not in historique
+
+
+def test_un_ancien_senateur_est_nomme_sans_lien(annuaire):
+    from app.ingestion.senateurs import construire_annuaire_historique
+
+    noms = {**construire_annuaire_historique(_ODSEN, annuaire), **annuaire}
+    votes = {"votes": [{"matricule": "11111A", "vote": "p"}]}
+    parse = parse_scrutin_senat(
+        _page_ensemble(), votes, noms, senateurs_connus=frozenset({"SEN-21071F"})
+    )
+    ump = {g.groupe_id: g for g in parse.scrutin.positions_groupes}["SEN-UMP"]
+    assert [(v.nom, v.depute_id) for v in ump.votants_pour or []] == [
+        ("Jean Parti", None)
+    ]
+    # Son vote compte aussi dans la table nominative (fiche d'historique).
+    assert [v.acteur_ref for v in votes_du_scrutin_senat(votes, noms)] == [
+        "SEN-11111A"
+    ]
+
+
+def test_liste_contredisant_le_decompte_officiel_masquee(annuaire):
+    """Un votant rangé dans son groupe d'aujourd'hui alors qu'il en a changé
+    ferait dépasser le décompte officiel : la liste n'est pas montrée."""
+    page = parse_page_scrutin(
+        _page(
+            2,
+            "8 octobre 2025",
+            _OBJET_ENSEMBLE,
+            groupes=_bloc_groupe("UC", "Groupe Union Centriste", 59, 0, 0, 0, 59),
+        ),
+        2025,
+    )
+    assert page is not None
+    votes = {"votes": [{"matricule": "19760E", "vote": "c"}]}  # UC : 0 contre
+    parse = parse_scrutin_senat(page, votes, annuaire)
+    uc = {g.groupe_id: g for g in parse.scrutin.positions_groupes}["SEN-UC"]
+    assert uc.contre == 0
+    assert uc.votants_contre is None
+
+
+def test_votant_range_dans_le_groupe_ou_la_page_le_liste(annuaire):
+    """Le JSON ne dit pas le groupe ; la page, si. Un sénateur qui a changé de
+    groupe depuis est rangé là où il siégeait le jour du vote."""
+    from app.ingestion.senateurs import InfoSenateur
+
+    bloc_uc = _bloc_groupe("UC", "Groupe Union Centriste", 59, 0, 1, 0, 58).replace(
+        "</ul>", "", 1
+    )
+    page_html = _page(
+        3,
+        "8 octobre 2025",
+        _OBJET_ENSEMBLE,
+        groupes=_bloc_groupe("UMP", "Groupe Les R&eacute;publicains", 131, 0, 0, 0, 131)
+        + bloc_uc,
+    )
+    # Liste nominative du groupe UC : « Contre : Mme Marie-Do Aeschlimann ».
+    page_html = page_html.replace(
+        '<div id="accordion-collapse-scrutin-UC"',
+        '<div id="accordion-collapse-scrutin-UC"><ul><li><b>Contre</b>&nbsp;: '
+        "Mme Marie-Do Aeschlimann</li></ul></div><div ",
+        1,
+    )
+    page = parse_page_scrutin(page_html, 2025)
+    assert page is not None
+    votes = {"votes": [{"matricule": "21071F", "vote": "c"}]}  # UMP aujourd'hui
+    parse = parse_scrutin_senat(page, votes, annuaire)
+    par_id = {g.groupe_id: g for g in parse.scrutin.positions_groupes}
+    assert [v.nom for v in par_id["SEN-UC"].votants_contre or []] == ["Marie-Do Aeschlimann"]
+    assert par_id["SEN-UMP"].votants_contre is None

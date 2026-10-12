@@ -36,7 +36,11 @@ from app.ingestion.normalize import (
     type_motion,
     type_vote,
 )
-from app.ingestion.dossiers_legislatifs import Reconciliation, signature_titre
+from app.ingestion.dossiers_legislatifs import (
+    Reconciliation,
+    VotesOfficiels,
+    signature_titre,
+)
 from app.ingestion.organes import GroupResolver
 from app.schemas import (
     PositionGroupe,
@@ -54,6 +58,16 @@ ORGANES_URL = (
     "https://data.assemblee-nationale.fr/static/openData/repository/"
     "{leg}/amo/deputes_actifs_mandats_actifs_organes/"
     "AMO10_deputes_actifs_mandats_actifs_organes.json.zip"
+)
+# Tous les acteurs, y compris ceux dont le mandat est terminé (~14 Mo). L'archive
+# AMO10 ci-dessus ne contient que les députés EN EXERCICE : s'en servir pour
+# nommer les votants effaçait de chaque ancien scrutin les députés partis depuis
+# (démission, entrée au Gouvernement, décès) — mesuré, 74 500 votes nominatifs
+# sans nom. Celle-ci ne sert qu'aux NOMS ; le référentiel servi reste AMO10.
+ACTEURS_HISTORIQUE_URL = (
+    "https://data.assemblee-nationale.fr/static/openData/repository/"
+    "{leg}/amo/tous_acteurs_mandats_organes_xi_legislature/"
+    "AMO30_tous_acteurs_tous_mandats_tous_organes_historique.json.zip"
 )
 DOSSIERS_URL = (
     "https://data.assemblee-nationale.fr/static/openData/repository/"
@@ -92,6 +106,12 @@ class ScrutinParse:
     # Le vote ne porte sur aucun texte de loi (motion de censure, déclaration) :
     # il est son propre dossier. Voir `Dossier.est_evenement_autonome`.
     est_evenement_autonome: bool = False
+    # Le `dossierRef` vient du scrutin lui-même (fait officiel), et non d'une
+    # correspondance de titre : `rattacher_par_votes_officiels` n'y touche pas.
+    ref_du_scrutin: bool = False
+    # Signature du texte cité par l'objet du vote : elle regroupe les votes d'un
+    # même texte (articles, amendements) autour du vote décisif cité par l'archive.
+    cle_titre: str | None = None
 
 
 class AssembleeOpenDataClient:
@@ -291,6 +311,23 @@ class AssembleeOpenDataClient:
                     acteurs.append(json.load(f))
         return organes, acteurs
 
+    async def download_acteurs_historiques(self) -> list[dict]:
+        """Tous les acteurs de l'archive AMO historique, mandats terminés compris.
+
+        Sert uniquement à **nommer** : un député parti reste l'auteur de ses
+        votes passés. Il n'entre pas pour autant dans le référentiel servi par
+        l'API (ni fiche ni lien), qui reste celui des mandats en cours.
+        """
+        zf = await self._download_zip(
+            ACTEURS_HISTORIQUE_URL.format(leg=self.legislature)
+        )
+        acteurs: list[dict] = []
+        for name in zf.namelist():
+            if name.endswith(".json") and "/acteur/" in name:
+                with zf.open(name) as f:
+                    acteurs.append(json.load(f))
+        return acteurs
+
 
 def scrutin_source(legislature: str, numero: str) -> SourceOfficielle:
     return SourceOfficielle(
@@ -377,12 +414,15 @@ def parse_scrutin(
     #    dossier : c'est un événement autonome, légitime dans le fil.
     reco = reconciliation
     est_evenement_autonome = False
+    ref_du_scrutin = bool(dossier_ref)
+    rattachement_cite = None if dossier_ref else texte_de_rattachement(objet_libelle)
+    cle_titre = signature_titre(rattachement_cite) if rattachement_cite else None
 
     if dossier_ref:
         dossier_id = dossier_ref
         dossier_titre = dossier_titre_raw or objet.get("libelle") or objet_libelle
     else:
-        rattachement = texte_de_rattachement(objet_libelle)
+        rattachement = rattachement_cite
         ref_retrouve = reco.ref_pour_titre(rattachement) if reco else None
         if ref_retrouve:
             # Réconciliation : le titre cité correspond exactement à un dossier
@@ -472,4 +512,54 @@ def parse_scrutin(
         legislature=legislature,
         numero=numero,
         est_evenement_autonome=est_evenement_autonome,
+        ref_du_scrutin=ref_du_scrutin,
+        cle_titre=cle_titre,
     )
+
+
+def rattacher_par_votes_officiels(
+    parses: list[ScrutinParse], votes: VotesOfficiels
+) -> int:
+    """Range dans leur dossier officiel les votes que l'archive désigne (pure).
+
+    La réconciliation par titre (dans `parse_scrutin`) est une déduction ; les
+    `voteRefs` des actes législatifs sont un fait. Ce passage corrige donc ses
+    choix, dans cet ordre :
+
+    1. un vote **cité** par un acte rejoint le dossier qui le cite ;
+    2. un vote non cité du **même texte** (même `cle_titre` qu'un vote cité)
+       rejoint ce dossier si sa date tombe dans la vie du dossier — et, quand
+       le titre désigne plusieurs dossiers (une loi spéciale chaque année), le
+       seul dont la période contient le vote. Plusieurs candidats → rien ;
+    3. sinon, le rattachement par titre reste tel quel.
+
+    Ne touche jamais un vote qui porte lui-même son `dossierRef`, ni un
+    événement autonome (motion de censure : son « dossier » d'engagement de
+    responsabilité n'est pas un texte de loi). Renvoie le nombre de votes
+    déplacés.
+    """
+    refs_par_cle: dict[str, set[str]] = {}
+    for p in parses:
+        ref = votes.ref_pour_vote(p.scrutin.id)
+        if ref and p.cle_titre:
+            refs_par_cle.setdefault(p.cle_titre, set()).add(ref)
+
+    deplaces = 0
+    for p in parses:
+        if p.ref_du_scrutin or p.est_evenement_autonome:
+            continue
+        ref = votes.ref_pour_vote(p.scrutin.id)
+        if ref is None and p.cle_titre:
+            candidats = [
+                r
+                for r in sorted(refs_par_cle.get(p.cle_titre, ()))
+                if votes.couvre(r, p.scrutin.date)
+            ]
+            ref = candidats[0] if len(candidats) == 1 else None
+        if ref is None or ref == p.dossier_id:
+            continue
+        p.dossier_id = ref
+        p.dossier_ref = ref
+        p.scrutin.dossier_id = ref
+        deplaces += 1
+    return deplaces
