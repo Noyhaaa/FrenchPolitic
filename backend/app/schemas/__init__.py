@@ -9,6 +9,7 @@ from app.schemas.depute import (
 from app.schemas.scrutin import (
     Accueil,
     Amendement,
+    AmendementsCommission,
     ArgumentGroupe,
     DispositifTexte,
     Dossier,
@@ -56,6 +57,7 @@ __all__ = [
     "PortraitVote",
     "VoteDepute",
     "Amendement",
+    "AmendementsCommission",
     "ArgumentGroupe",
     "DispositifTexte",
     "Dossier",

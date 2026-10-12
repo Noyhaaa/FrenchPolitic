@@ -81,6 +81,17 @@ class PositionGroupe(CamelModel):
     votants_abstention: list[Votant] | None = None
 
 
+class AmendementsCommission(CamelModel):
+    """Le décompte des amendements tranchés par une commission saisie AU FOND
+    à l'Assemblée (`app.ingestion.commission`). Un décompte, pas un vote : ni
+    scrutin ni nominatif en commission. Les commissions pour avis et celles du
+    Sénat n'y sont pas — le chiffre ne dit que ce qu'il compte."""
+
+    commission: str  # libellé officiel : « Commission des affaires sociales »
+    adoptes: int
+    rejetes: int
+
+
 class Amendement(CamelModel):
     id: str
     # Numéro officiel (« 80 » pour « l'amendement n° 80 »), si identifiable.
@@ -488,6 +499,10 @@ class Dossier(CamelModel):
     mise_a_jour: MiseAJourDossier | None = None
     scrutins: list[ScrutinResume] = []
     amendements: list[Amendement] = []
+    # Amendements tranchés en commission saisie au fond, à l'Assemblée, par
+    # commission. Vide pour un dossier sans `dossierRef` ou sans examen en
+    # commission documenté : le bloc est masqué (§2.5).
+    amendements_commission: list[AmendementsCommission] = []
     # ⚠️ Liste **dérivée** : recomposée à chaque écriture par
     # `app.domain.sources.documents_du_dossier` depuis les documents que le
     # dossier porte déjà (texte déposé, rapports, compte rendu, loi). Ne rien y

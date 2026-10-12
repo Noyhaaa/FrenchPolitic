@@ -149,6 +149,7 @@ détaille ce que chacune télécharge.
 | `revalider` | repasse les garde-fous, efface les réponses fautives | – | – |
 | `divisions` | indice « votes les plus disputés » | – | – |
 | `positions` | position des groupes depuis les décomptes + résumé + sens Q2 | – | – |
+| `commissions` | amendements tranchés en commission saisie au fond | amendements + dossiers + AMO | – |
 | `motions` | classe les motions (ne déclasse jamais) | – | – |
 | `initiatives` / `etats` | qui porte le texte / où il en est | archive dossiers (10 Mo) | – |
 | `sources` | rapports de commission + « documents du dossier » | idem + HEAD | – |
@@ -277,6 +278,10 @@ deux côtés. **Toute évolution se répercute des deux côtés.**
 - **`Dossier`** est l'entité centrale (un texte). Il porte :
   - `resume`, avec `questions` et `publicConcerne` ;
   - `scrutins` (des `ScrutinResume`), `amendements` (avec `sousAmendements`) ;
+  - `amendementsCommission` : le seul **décompte** (adoptés, rejetés) de la
+    commission saisie **au fond** à l'AN, nommée. Ni les commissions pour avis
+    (elles ne modifient pas le texte), ni le Sénat, ni un organe d'examen que
+    les actes ne désignent pas (`app/ingestion/commission.py`) ;
   - `trajectoire`, `etat`, `initiative`, `texteAdopte` ;
   - `exposeMotifs` (parole de l'auteur) et `dispositif` (fait officiel, jamais
     affiché brut, source de la Q4) ;
@@ -400,6 +405,10 @@ deux côtés. **Toute évolution se répercute des deux côtés.**
   ne le lui passe.
 - **Planifier la synchro** (plusieurs fois par jour), et Légifrance/PISTE pour le
   texte consolidé.
+- **Amendements de commission non attribués** (~600) : leur `examenRef`
+  désigne un organe que les actes du dossier ne saisissent pas (vécu :
+  « simplification de la vie économique », commission spéciale L16 dans les
+  actes, affaires économiques dans l'`examenRef`). Non comptés (§2.5).
 - **Commission des députés AN** : `GroupResolver` ne garde que les organes `GP`.
   Il faudrait résoudre les mandats `COMPER`.
 - **Dossiers `TXT-` restants** (11) : ni cités par les actes législatifs, ni

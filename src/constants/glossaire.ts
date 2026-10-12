@@ -122,6 +122,32 @@ export const GLOSSAIRE: TermeGlossaire[] = [
     requete: 'commission mixte paritaire',
   },
   {
+    id: 'commission-saisie-au-fond',
+    libelle: 'Commission saisie au fond',
+    nature: 'loc.',
+    categorie: 'procedure',
+    definition:
+      'La commission chargée d’examiner un texte avant la séance. Elle l’amende, et en règle générale la séance discute ensuite le texte qu’elle a adopté.',
+    etapes: [
+      {
+        titre: 'Le texte est renvoyé à une commission',
+        detail:
+          'L’une des huit commissions permanentes de l’Assemblée, ou une commission spéciale créée pour ce texte.',
+      },
+      {
+        titre: 'Elle adopte ou rejette des amendements',
+        detail:
+          'D’autres commissions peuvent donner un avis et proposer des amendements, sans modifier le texte elles-mêmes.',
+      },
+      {
+        titre: 'La séance part de sa version',
+        detail:
+          'Sauf pour les lois de finances, de financement de la sécurité sociale et les révisions de la Constitution, où la séance discute le texte déposé.',
+      },
+    ],
+    voisins: ['Amendement', 'Renvoi en commission', 'Séance publique'],
+  },
+  {
     id: 'conseil-constitutionnel',
     libelle: 'Conseil constitutionnel',
     nature: 'n.m.',

@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, spacing, typography } from '@/theme';
 import {
   AiNotice,
+  AmendementsCommissionCard,
   AmendementsSection,
   ExposeMotifsCard,
   InitiativeLigne,
@@ -543,6 +544,14 @@ export function DossierDetailScreen() {
           {boutonVoirPlus(autresVotes.length, 'votes', 'votes')}
         </SectionCard>
         )}
+
+        {/* 6bis. Avant la séance : les amendements tranchés par la commission
+            saisie au fond (décompte seul, ni voix ni votants). Masqué sans
+            examen en commission documenté (§2.5). `?? []` : un dossier mis en
+            cache avant l'ajout du champ ne l'a pas. */}
+        <AmendementsCommissionCard
+          commissions={dossier.amendementsCommission ?? []}
+        />
 
         {/* 7. Amendements — liste dé-densifiée : barre de synthèse + filtres,
             une ligne calme par amendement qui se déplie à la demande. Ses

@@ -10,6 +10,7 @@ export { ResultBar, segmentsMotionCensure } from './ResultBar';
 export { GroupVoteRow } from './GroupVoteRow';
 export { SourceGrid } from './SourceLink';
 export { SectionCard } from './SectionCard';
+export { AmendementsCommissionCard } from './AmendementsCommissionCard';
 export { Legend } from './Legend';
 export { LigneFracture } from './LigneFracture';
 export { DefinitionGlossaire, MarqueurGlossaire } from './DefinitionGlossaire';

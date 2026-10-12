@@ -151,6 +151,18 @@ export interface Votant {
 }
 
 /**
+ * Décompte des amendements tranchés par une commission saisie AU FOND à
+ * l'Assemblée. Un décompte, pas un vote : ni voix ni votants en commission.
+ * Les commissions pour avis et celles du Sénat n'y figurent pas.
+ */
+export interface AmendementsCommission {
+  /** Libellé officiel : « Commission des affaires sociales ». */
+  commission: string;
+  adoptes: number;
+  rejetes: number;
+}
+
+/**
  * Un amendement du texte (§4.5). Quand il a fait l'objet d'un scrutin public,
  * `scrutinId` pointe vers ce vote (détail + nominatif via la fiche vote) — c'est
  * là que le vote de l'amendement s'affiche, pas dans la liste des votes du texte.
@@ -555,6 +567,8 @@ export interface Dossier {
   /** Votes du dossier (allégés), du plus récent au plus ancien. */
   scrutins: ScrutinResume[];
   amendements: Amendement[];
+  /** Amendements tranchés en commission saisie au fond (vide → bloc masqué). */
+  amendementsCommission: AmendementsCommission[];
   /**
    * Les documents officiels du dossier, dans l'ordre de la vie du texte
    * (dossier législatif → texte déposé → rapports → compte rendu → texte voté

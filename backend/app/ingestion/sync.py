@@ -63,6 +63,12 @@ from app.domain.enums import Chambre, PositionVote, StatutScrutin
 from app.domain.recherche import index_recherche
 from app.domain.sources import dedupe_sources, documents_du_dossier
 from app.ingestion.debats import IndexDebats, url_compte_rendu
+from app.ingestion.commission import (
+    CompteursCommission,
+    amendements_commission,
+    commissions_au_fond,
+    noms_commissions,
+)
 from app.ingestion.dossiers_legislatifs import (
     JointureSenat,
     construire_jointure_senat,
@@ -829,6 +835,10 @@ def _merge_avec_existant(
     # vérifiée. Un run sans archive (ou sans réseau) garde ceux déjà connus.
     if not incoming.rapports_commission and prev.rapports_commission:
         incoming.rapports_commission = prev.rapports_commission
+    # Amendements de commission : un run sans l'archive (~300 Mo, best-effort)
+    # garde le décompte connu.
+    if not incoming.amendements_commission and prev.amendements_commission:
+        incoming.amendements_commission = prev.amendements_commission
     # Publics concernés : acquis d'un run avec LLM, préservés sur un run sans.
     if not incoming.resume.public_concerne and prev.resume.public_concerne:
         incoming.resume.public_concerne = prev.resume.public_concerne
@@ -1014,6 +1024,10 @@ class SyncJob:
         )
         self._slug_senat_par_dossier: dict[str, str] = {}
         self._actes_par_ref: dict[str, object] = {}
+        # Amendements de commission : décomptes par organe (archive des
+        # amendements) et libellés des commissions (AMO, historique compris).
+        self._compteurs_commission: CompteursCommission | None = None
+        self._noms_commissions: dict[str, str] = {}
         # dossierRef → `procedureParlementaire` : distingue une résolution (dont
         # la lecture unique est l'aboutissement) d'un texte de loi.
         self._procedure_par_ref: dict[str, object] = {}
@@ -1854,8 +1868,11 @@ class SyncJob:
         # Best-effort : sans elle, on retombe sur les seuls députés en exercice.
         acteurs: dict[str, str] = {}
         historiques: list[dict] = []
+        organes_historiques: list[dict] = []
         try:
-            historiques = await self._client.download_acteurs_historiques()
+            organes_historiques, historiques = (
+                await self._client.download_amo_historique()
+            )
             acteurs = build_acteurs_from_amo(historiques)
         except (httpx.HTTPError, zipfile.BadZipFile) as exc:
             report.anomalies.append(
@@ -1868,6 +1885,9 @@ class SyncJob:
         civilites = build_civilites_from_amo(historiques)
         civilites.update(build_civilites_from_amo(acteurs_bruts))
         self._indexer_groupes(resolver)
+        # Une commission spéciale dissoute n'est plus dans l'annuaire du jour :
+        # l'historique la nomme encore.
+        self._noms_commissions = noms_commissions(organes, organes_historiques)
         async with self._sf() as session:
             report.groupes = await _upsert_groupes(session, resolver)
             # Annuaire des députés (mandats actifs) : alimente la fiche député
@@ -1975,6 +1995,7 @@ class SyncJob:
         try:
             archive_amendements = await self._client.download_amendements()
             self._index_amendements = archive_amendements.index
+            self._compteurs_commission = archive_amendements.commission
         except (httpx.HTTPError, zipfile.BadZipFile) as exc:
             report.anomalies.append(
                 f"amendements non téléchargés ({type(exc).__name__}) : "
@@ -2217,6 +2238,15 @@ class SyncJob:
                     self._procedure_par_ref.get(ref_dossier),
                 )
                 statut_au_vu_des_actes(dossier)
+                # Amendements tranchés en commission saisie au fond. Sans
+                # archive ce run, la liste reste vide et la fusion garde celle
+                # en base.
+                if self._compteurs_commission is not None:
+                    dossier.amendements_commission = amendements_commission(
+                        self._compteurs_commission.get(ref_dossier),
+                        commissions_au_fond(self._actes_par_ref.get(ref_dossier)),
+                        self._noms_commissions,
+                    )
                 # Qui porte le texte — même archive, même document de dépôt que
                 # l'exposé des motifs. Absente pour un dossier sans `dossierRef`
                 # (« TXT-… », « SEN-… », motion) : la ligne disparaît (§2.5).

@@ -89,6 +89,13 @@ python -m app.ingestion.divisions           # --dry-run pour voir le classement
 # LLM. À enchaîner avec `divisions` puis `deputes` (« contre son groupe »).
 python -m app.ingestion.positions           # --dry-run pour voir le bilan
 
+# Décompte des amendements tranchés en commission saisie AU FOND, à l'AN
+# (`Dossier.amendementsCommission`). Archive des amendements (~300 Mo), des
+# dossiers (actes de saisine) et AMO (libellés). Ni scrutins ni LLM. Ne compte
+# ni les commissions pour avis (elles ne modifient pas le texte), ni un organe
+# d'examen que les actes du dossier ne saisissent pas.
+python -m app.ingestion.commissions         # --dry-run pour voir le bilan
+
 # Renseigne « qui porte le texte » (Dossier.initiative) sur les dossiers déjà en
 # base. Ne télécharge que l'archive des dossiers législatifs (~10 Mo) et lit les
 # identités dans la table `depute` : ni scrutins, ni PDF, ni LLM — quelques

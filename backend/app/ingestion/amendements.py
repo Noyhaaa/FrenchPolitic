@@ -26,11 +26,17 @@ import html as _html
 import json
 import re
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from app.domain.enums import Chambre, ModaliteVote, StatutScrutin
 from app.ingestion.assemblee import ScrutinParse
+from app.ingestion.commission import (
+    CompteursCommission,
+    compter,
+    nouveaux_compteurs,
+    organe_examen,
+)
 from app.ingestion.dossiers_legislatifs import legislature_du_ref
 from app.ingestion.normalize import (
     est_amendement,
@@ -174,6 +180,9 @@ class ArchiveAmendements:
     seance: list[AmendementSeance]
     # uid → numéro, pour nommer l'amendement visé par un sous-amendement.
     numero_par_uid: dict[str, str]
+    # Amendements de COMMISSION tranchés, par dossier et organe d'examen — un
+    # décompte seulement (`app.ingestion.commission`).
+    commission: CompteursCommission = field(default_factory=dict)
 
 
 # Sorts d'un amendement MIS AUX VOIX. « Tombé », « Non soutenu », « Retiré »,
@@ -189,14 +198,15 @@ def _texte(valeur: object) -> str | None:
 def lire_archive(zf: zipfile.ZipFile) -> ArchiveAmendements:
     """Lit l'archive des amendements une fois, en flux.
 
-    Ne retient que les amendements de **séance** (préfixe d'organe « AN »,
-    numéro purement numérique). Les amendements de commission (numéros
-    préfixés « AE… ») sont ignorés : un vote de commission n'est pas un vote de
-    l'Assemblée, et le modèle ne les porte pas.
+    Ne retient en détail que les amendements de **séance** (préfixe d'organe
+    « AN », numéro purement numérique). Ceux de commission (numéros préfixés
+    « AS… », « CL… ») ne sont que **comptés** par organe d'examen : un vote de
+    commission n'est pas un vote de l'Assemblée, et le modèle ne le porte pas.
     """
     index: IndexAmendements = {}
     seance: list[AmendementSeance] = []
     numero_par_uid: dict[str, str] = {}
+    commission = nouveaux_compteurs()
     for name in zf.namelist():
         if not name.endswith(".json"):
             continue
@@ -211,6 +221,12 @@ def lire_archive(zf: zipfile.ZipFile) -> ArchiveAmendements:
             continue
         identification = amendement.get("identification", {})
         if identification.get("prefixeOrganeExamen") != "AN":
+            adopte = _SORTS_VOTES.get(
+                _texte((amendement.get("cycleDeVie") or {}).get("sort")) or ""
+            )
+            organe = organe_examen(amendement.get("examenRef"))
+            if adopte is not None and organe is not None:
+                compter(commission, dossier_ref, organe, adopte)
             continue
         numero = identification.get("numeroLong", "")
         if not isinstance(numero, str) or not numero.isdigit():
@@ -255,7 +271,12 @@ def lire_archive(zf: zipfile.ZipFile) -> ArchiveAmendements:
                 contenu=enrichi,
             )
         )
-    return ArchiveAmendements(index=index, seance=seance, numero_par_uid=numero_par_uid)
+    return ArchiveAmendements(
+        index=index,
+        seance=seance,
+        numero_par_uid=numero_par_uid,
+        commission=commission,
+    )
 
 
 def construire_index(zf: zipfile.ZipFile) -> IndexAmendements:

@@ -315,22 +315,29 @@ class AssembleeOpenDataClient:
                     acteurs.append(json.load(f))
         return organes, acteurs
 
-    async def download_acteurs_historiques(self) -> list[dict]:
-        """Tous les acteurs de l'archive AMO historique, mandats terminés compris.
+    async def download_amo_historique(self) -> tuple[list[dict], list[dict]]:
+        """L'archive AMO historique, mandats terminés compris : (organes, acteurs).
 
         Sert uniquement à **nommer** : un député parti reste l'auteur de ses
-        votes passés. Il n'entre pas pour autant dans le référentiel servi par
-        l'API (ni fiche ni lien), qui reste celui des mandats en cours.
+        votes passés, une commission spéciale dissoute reste celle qui a
+        examiné le texte. Rien n'entre pour autant dans le référentiel servi
+        par l'API (ni fiche ni lien), qui reste celui des mandats en cours.
         """
         zf = await self._download_zip(
             ACTEURS_HISTORIQUE_URL.format(leg=self.legislature)
         )
+        organes: list[dict] = []
         acteurs: list[dict] = []
         for name in zf.namelist():
-            if name.endswith(".json") and "/acteur/" in name:
+            if not name.endswith(".json"):
+                continue
+            if "/organe/" in name:
+                with zf.open(name) as f:
+                    organes.append(json.load(f))
+            elif "/acteur/" in name:
                 with zf.open(name) as f:
                     acteurs.append(json.load(f))
-        return acteurs
+        return organes, acteurs
 
 
 def scrutin_source(legislature: str, numero: str) -> SourceOfficielle:
