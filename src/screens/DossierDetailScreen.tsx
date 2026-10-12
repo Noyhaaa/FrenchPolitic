@@ -15,6 +15,7 @@ import { colors, radius, spacing, typography } from '@/theme';
 import {
   AiNotice,
   AmendementsCommissionCard,
+  EnBref,
   AmendementsSection,
   ExposeMotifsCard,
   InitiativeLigne,
@@ -404,6 +405,12 @@ export function DossierDetailScreen() {
         {phases.length > 0 || dossier.etat ? (
           <TrajectoireNavette phases={phases} etat={dossier.etat} />
         ) : null}
+
+        {/* 1quater. En bref — les phrases du résumé neutre (gabarit, sans LLM)
+            que la fiche ne dit pas ailleurs : combien de scrutins publics sur
+            quelle période, et quels groupes ont voté pour ou contre le vote
+            décisif. Masqué si aucune des deux n'existe (§2.5). */}
+        <EnBref phrases={resume.resume} decisif={decisif} />
 
         {/* 1ter. La loi finale — sa référence et où la lire (§7.5). Tout le
             reste de la fiche décrit le texte DÉPOSÉ ; sur un texte promulgué,

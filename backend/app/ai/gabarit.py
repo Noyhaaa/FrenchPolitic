@@ -101,10 +101,15 @@ def composer_resume(faits: FaitsDossier, context: RagContext) -> ResumeScrutin:
             quand = f"le {date_fr(faits.date_dernier)}"
         else:
             quand = f"du {date_fr(faits.date_premier)} au {date_fr(faits.date_dernier)}"
+        # Le sujet est nommé (« Le texte ») : la fiche affiche cette phrase
+        # seule, sans la phrase 1 qui lui servait d'antécédent (« En bref »).
         if faits.nb_votes_texte == 1:
-            p2 = f"Il a fait l'objet d'un scrutin sur le texte, {quand}."
+            p2 = f"Le texte a fait l'objet d'un scrutin public, hors amendements, {quand}."
         else:
-            p2 = f"Il a fait l'objet de {faits.nb_votes_texte} scrutins sur le texte, {quand}."
+            p2 = (
+                f"Le texte a fait l'objet de {faits.nb_votes_texte} scrutins publics, "
+                f"hors amendements, {quand}."
+            )
         phrases.append(PhraseSourcee(phrase=p2, source_id="trajectoire"))
 
     # 3. Vote décisif : résultat chiffré officiel.

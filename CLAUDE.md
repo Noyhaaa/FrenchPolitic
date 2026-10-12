@@ -180,7 +180,7 @@ atteint depuis plusieurs onglets et elles couvrent la tab bar.
 | Écran | Hook → endpoint | À respecter |
 |---|---|---|
 | `HomeScreen` | `useAccueil` → `/accueil`, `useRecap` → `/recap` | Affichage **atomique** : une seule réponse, pas de remplissage progressif. Rangées vides masquées. Pas de défilement infini. La rangée « votes les plus disputés » vient de `app/domain/division.py`, de l'arithmétique sur les décomptes : chiffres affichés, motions de censure et votes de conduite de séance exclus. |
-| `DossierDetailScreen` | `useDossier` → `/dossiers/{id}` | Ordre : frise + « Où en est le texte » → loi → initiative → questions → votes (vote décisif mis en avant) → amendements → sous-amendements → **documents du dossier**. C'est le **seul** endroit de la fiche avec des liens vers des documents. |
+| `DossierDetailScreen` | `useDossier` → `/dossiers/{id}` | Ordre : frise + « Où en est le texte » → « En bref » → loi → initiative → questions → votes (vote décisif mis en avant) → amendements de commission → amendements → sous-amendements → **documents du dossier**. « En bref » (`EnBref`) ne rend que deux phrases du résumé neutre (gabarit, sans LLM) : `trajectoire` et `positions_groupes`, celle-ci titrée par le vote décisif. Les autres phrases répètent un bloc de la fiche. C'est le **seul** endroit de la fiche avec des liens vers des documents. |
 | `ScrutinDetailScreen` | `useScrutin` → `/scrutins/{id}` | Résultat **en tête**. Vote sur le texte : groupes + `LigneFracture` + nominatif. Vote d'amendement : `QuestionsAmendementCard` et **pas** de vote par groupe. |
 | `ExplorerScreen` | `useThemes` → `/themes` | Découverte uniquement : il **ouvre** `Dossiers`, il ne cherche jamais lui-même. |
 | `DossiersScreen` | `useRecherche` → `/recherche`, `/deputes?q=` | Demande `LIMITE_MAX` (100). Le tri et les groupes viennent du seul `utils/periodes.ts`. |
@@ -398,9 +398,6 @@ deux côtés. **Toute évolution se répercute des deux côtés.**
 
 ## Backlog priorisé (§10 MVP)
 
-- **Afficher le résumé neutre.** Le gabarit remplit `resume.resume`, mais
-  `DossierDetailScreen` ne rend que `contexte` / `objectif` / `historique`, que
-  seul le seed remplit. Il manque le câblage d'affichage, **pas un LLM**.
 - **« Signaler une erreur »** : `AiNotice` accepte `onSignaler`, mais aucun écran
   ne le lui passe.
 - **Planifier la synchro** (plusieurs fois par jour), et Légifrance/PISTE pour le

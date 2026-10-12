@@ -75,6 +75,19 @@ def test_gabarit_compose_cinq_phrases_sourcees():
     assert "Environnement" in texte
 
 
+def test_phrase_trajectoire_nomme_son_sujet():
+    # La fiche l'affiche seule (« En bref ») : pas de « Il » sans antécédent.
+    faits = _faits_complet()
+    phrases = {
+        p.source_id: p.phrase
+        for p in composer_resume(faits, contexte_depuis_faits(faits)).resume
+    }
+    assert phrases["trajectoire"] == (
+        "Le texte a fait l'objet de 2 scrutins publics, hors amendements, "
+        "du 3 juillet 2026 au 16 juillet 2026."
+    )
+
+
 def test_gabarit_passe_les_garde_fous():
     """Le résumé du gabarit ne déclenche aucun garde-fou (ancrage, lexique,
     chiffres) — garantie clé du chemin déterministe."""
