@@ -4,15 +4,23 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from app.domain.enums import PositionVote
+from app.domain.enums import Chambre, PositionVote
 from app.ingestion.debats import DebatTexte, ExplicationVote, IndexDebats
 from app.ingestion.organes import GroupInfo
 from app.ingestion.sync import (
     SyncJob,
     SyncReport,
+    _ancre_du_desaccord,
+    _positions_documentees,
     _vote_conclusif,
 )
-from app.schemas import PositionGroupe, QuestionsCitoyennes, ResultatGlobal, Scrutin
+from app.schemas import (
+    ArgumentGroupe,
+    PositionGroupe,
+    QuestionsCitoyennes,
+    ResultatGlobal,
+    Scrutin,
+)
 
 
 class _FakeLLM:
@@ -83,6 +91,44 @@ def test_vote_conclusif_ignore_les_votes_d_articles():
     ]
     assert _vote_conclusif(articles) is None
     assert _vote_conclusif([]) is None
+
+
+def test_vote_conclusif_ignore_le_senat():
+    # Les arguments viennent des comptes rendus de l'AN : un vote du Sénat,
+    # même plus récent, n'a pas leurs groupes (vécu : Q2 privée de recalage).
+    senat = _vote("l'ensemble de la proposition de loi sur le devoir conjugal", [])
+    senat.chambre = Chambre.senat
+    an = _vote("l'ensemble de la proposition de loi sur le devoir conjugal (première lecture).", [])
+    assert _vote_conclusif([senat, an]) is an
+    assert _vote_conclusif([senat]) is None
+
+
+def test_ancre_du_desaccord_garde_le_vote_des_arguments():
+    # Une nouvelle lecture plus récente ne réattribue pas aux groupes, sur un
+    # autre vote, ce qu'ils ont dit en première lecture.
+    nouvelle = _vote("l'ensemble de la proposition de loi sur X (nouvelle lecture).", [])
+    premiere = _vote("l'ensemble de la proposition de loi sur X (première lecture).", [])
+    votes = [nouvelle, premiere]
+    assert _ancre_du_desaccord(votes, premiere.objet) is premiere
+    # Vote d'origine introuvable → le vote conclusif.
+    assert _ancre_du_desaccord(votes, "un objet disparu") is nouvelle
+    assert _ancre_du_desaccord(votes, None) is nouvelle
+
+
+def test_positions_documentees_ecarte_une_egalite():
+    # 1 pour, 1 contre : le groupe a voté mais n'a pas de sens à afficher.
+    egalite = PositionGroupe(
+        groupe_id="G1", groupe_nom="Groupe A", couleur="#111",
+        position_majoritaire=PositionVote.non_votant, pour=1, contre=1, abstention=0,
+    )
+    nette = _pos("G2", "Groupe B", PositionVote.pour)
+    ancre = _vote("l'ensemble du texte", [egalite, nette])
+    arguments = [
+        ArgumentGroupe(groupe="Groupe A", sens=PositionVote.pour, argument="a"),
+        ArgumentGroupe(groupe="Groupe B", sens=PositionVote.contre, argument="b"),
+    ]
+    realignes = _positions_documentees(arguments, ancre)
+    assert [(a.groupe, a.sens) for a in realignes] == [("Groupe B", PositionVote.pour)]
 
 
 # --- repli discussion générale (orateur → groupe via annuaire) ---

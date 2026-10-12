@@ -9,7 +9,7 @@ from app.ingestion.normalize import (
     est_amendement,
     est_sous_amendement,
     guess_theme,
-    map_position,
+    position_par_decompte,
     map_statut,
     numero_amendement,
     numero_amendement_parent,
@@ -874,10 +874,17 @@ def test_map_statut():
     assert map_statut("rejeté") == "rejete"
 
 
-def test_map_position_absent_devient_non_votant():
-    assert map_position("absent") == PositionVote.non_votant
-    assert map_position("pour") == PositionVote.pour
+def test_position_par_decompte_suit_les_voix_pas_le_champ_publie():
+    # Vécu (VTANR5L17V8280) : l'AN publie RN « pour » à 12 voix contre 106.
+    assert position_par_decompte(12, 106, 0) == PositionVote.contre
+    assert position_par_decompte(57, 4, 6) == PositionVote.pour
+    assert position_par_decompte(1, 2, 5) == PositionVote.abstention
 
+
+def test_position_par_decompte_egalite_ou_rien_exprime_devient_non_votant():
+    assert position_par_decompte(10, 10, 0) == PositionVote.non_votant
+    # Motion de censure : un groupe qui ne la vote pas n'a aucune voix recensée.
+    assert position_par_decompte(0, 0, 0) == PositionVote.non_votant
 
 def test_guess_theme():
     assert guess_theme("Accès aux soins et hôpitaux") == "Santé"

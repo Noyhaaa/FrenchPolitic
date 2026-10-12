@@ -3,6 +3,7 @@ import {
   Chambre,
   ModaliteVote,
   ObjetVote,
+  PositionGroupe,
   PositionVote,
   ScrutinResume,
   StatutScrutin,
@@ -77,6 +78,16 @@ export function positionLabel(position: PositionVote): string {
     case 'non_votant':
       return 'Non-votant';
   }
+}
+
+/**
+ * Le groupe a voté mais ses voix se partagent à égalité entre deux positions
+ * (1 pour, 1 contre) : il n'a pas de position majoritaire, et le backend pose
+ * alors `non_votant`. À ne surtout pas lire « n'a pas pris part » — le groupe
+ * a voté, ses décomptes le disent (§2.5).
+ */
+export function egaliteDeVoix(g: PositionGroupe): boolean {
+  return g.positionMajoritaire === 'non_votant' && g.pour + g.contre + g.abstention > 0;
 }
 
 /** Date relative simple et lisible (« Aujourd'hui », « Hier », « 6 juil. »). */

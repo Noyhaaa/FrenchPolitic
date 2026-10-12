@@ -59,7 +59,7 @@ from app.ingestion.deputes import (
     votes_du_scrutin,
 )
 from app.domain.division import division
-from app.domain.enums import Chambre, StatutScrutin
+from app.domain.enums import Chambre, PositionVote, StatutScrutin
 from app.domain.recherche import index_recherche
 from app.domain.sources import dedupe_sources, documents_du_dossier
 from app.ingestion.debats import IndexDebats, url_compte_rendu
@@ -361,8 +361,15 @@ def _vote_conclusif(votes_texte: list[Scrutin]) -> Scrutin | None:
         lambda o: _RE_MOTION.match(o) is not None,
     )
     # Une décision sans scrutin public n'a pas de positions de groupe : elle ne
-    # peut pas ancrer un désaccord, qui juxtapose ces positions.
-    plies = [(s, fold(s.objet)) for s in votes_texte if s.scrutin_public]
+    # peut pas ancrer un désaccord, qui juxtapose ces positions. Un vote du
+    # Sénat non plus : les arguments viennent des comptes rendus de
+    # l'ASSEMBLÉE, et ses groupes ne figurent pas dans un scrutin du Sénat
+    # (vécu : un texte voté ensuite au Sénat voyait sa Q2 privée de recalage).
+    plies = [
+        (s, fold(s.objet))
+        for s in votes_texte
+        if s.scrutin_public and s.chambre is Chambre.assemblee
+    ]
     for critere in criteres:
         for scrutin, objet in plies:
             if critere(objet):
@@ -370,20 +377,42 @@ def _vote_conclusif(votes_texte: list[Scrutin]) -> Scrutin | None:
     return None
 
 
+def _ancre_du_desaccord(
+    votes_texte: list[Scrutin], objet: str | None
+) -> Scrutin | None:
+    """Le vote sur lequel recaler le sens d'un désaccord déjà en base.
+
+    D'abord le vote même dont les arguments ont été tirés (`desaccord_objet`) :
+    l'argument et la position doivent venir de la même séance. Une nouvelle
+    lecture plus récente ne réattribue pas aux groupes, sur un autre vote, ce
+    qu'ils ont dit lors du premier. À défaut, le vote conclusif.
+    """
+    if objet:
+        for s in votes_texte:
+            if s.objet == objet and s.scrutin_public and s.chambre is Chambre.assemblee:
+                return s
+    return _vote_conclusif(votes_texte)
+
+
 def _position_documentee(position: PositionGroupe) -> bool:
     """Le groupe a-t-il un vote **exprimé** sur ce scrutin ?
 
     ⚠️ Sur une **motion de censure**, la Constitution (art. 49) ne fait recenser
-    que les votes FAVORABLES : l'open data porte alors `positionMajoritaire =
+    que les votes FAVORABLES : l'open data publiait alors `positionMajoritaire =
     « pour »` pour TOUS les groupes, y compris ceux dont aucun député n'a voté
-    (décompte 0/0/0). S'y fier reviendrait à afficher « Pour » en face de groupes
-    qui combattaient la motion — c'est le cas réel qui a motivé ce contrôle.
+    (décompte 0/0/0) — c'est le cas réel qui a motivé ce contrôle. La position
+    est désormais déduite des décomptes (`position_par_decompte`, `non_votant`
+    à 0/0/0), le contrôle reste comme garde-fou.
 
     On ne retient donc une position que si la source la documente par au moins
     une voix (§2.5). Un groupe sans vote exprimé est simplement absent du
     désaccord, comme un groupe dont la paraphrase a été rejetée.
     """
-    return (position.pour + position.contre + position.abstention) > 0
+    # Une égalité (1 pour, 1 contre) est exprimée mais n'a pas de sens à
+    # afficher : `position_par_decompte` la pose en `non_votant`, on l'écarte.
+    return (
+        position.pour + position.contre + position.abstention
+    ) > 0 and position.position_majoritaire is not PositionVote.non_votant
 
 
 def _positions_documentees(
@@ -1628,7 +1657,7 @@ class SyncJob:
         # à chaque run — ce sont des faits, pas des sorties de modèle.
         desaccord_sources: dict[str, str] | None = None
         if prev is not None and prev.desaccord:
-            ancre = _vote_conclusif(votes_texte)
+            ancre = _ancre_du_desaccord(votes_texte, prev.desaccord_objet)
             arguments = (
                 _positions_documentees(prev.desaccord, ancre)
                 if ancre is not None

@@ -40,7 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import DeputeRow, VoteDeputeRow
 from app.domain.enums import Chambre, PositionVote
-from app.ingestion.normalize import as_list, map_position
+from app.ingestion.normalize import as_list, position_par_decompte, to_int
 from app.ingestion.organes import GroupResolver
 from app.schemas import Depute
 from app.utils.text import fold
@@ -240,10 +240,17 @@ def votes_du_scrutin(raw: dict) -> list[VoteActeur]:
         if not isinstance(groupe, dict):
             continue
         vote = groupe.get("vote") or {}
-        brut_majoritaire = vote.get("positionMajoritaire")
-        majoritaire = map_position(brut_majoritaire) if brut_majoritaire else None
-        # Un groupe majoritairement « non votant » / absent ne fournit pas de
-        # référence exploitable : on ne qualifie alors aucune divergence (§2.5).
+        # Position du groupe tirée de ses décomptes, jamais du champ publié qui
+        # les contredit parfois (position_par_decompte) : sinon les 106 RN
+        # opposés à un texte seraient tous « contre leur groupe ».
+        dv = vote.get("decompteVoix") or {}
+        majoritaire: PositionVote | None = position_par_decompte(
+            to_int(dv.get("pour")),
+            to_int(dv.get("contre")),
+            to_int(dv.get("abstentions")),
+        )
+        # Égalité ou aucun vote exprimé : pas de référence exploitable, on ne
+        # qualifie alors aucune divergence (§2.5).
         if majoritaire not in _POSITIONS_EXPRIMEES:
             majoritaire = None
         nominatif = vote.get("decompteNominatif") or {}

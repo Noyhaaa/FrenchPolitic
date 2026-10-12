@@ -2,6 +2,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { colors, radius, spacing, typography } from '@/theme';
 import type { PositionGroupe, PositionVote } from '@/types';
+import { egaliteDeVoix } from '@/utils/format';
 
 interface Props {
   positionsGroupes: PositionGroupe[];
@@ -14,9 +15,10 @@ interface Props {
   afficherUnanimite?: boolean;
 }
 
-/** Un camp du vote (une position + les groupes qui l'ont majoritairement prise). */
+/** Un camp du vote (une position + les groupes qui l'ont majoritairement prise).
+ * `egalite` : groupes qui ont voté sans position majoritaire (voix partagées). */
 interface Camp {
-  position: PositionVote;
+  position: PositionVote | 'egalite';
   label: string;
   color: string;
   groupes: PositionGroupe[];
@@ -43,6 +45,12 @@ export function LigneFracture({ positionsGroupes, afficherUnanimite }: Props) {
       groupes: [],
     },
     {
+      position: 'egalite',
+      label: 'Voix partagées à égalité',
+      color: colors.textSecondary,
+      groupes: [],
+    },
+    {
       position: 'non_votant',
       label: "N'ont pas pris part",
       color: colors.nonVotant,
@@ -51,7 +59,7 @@ export function LigneFracture({ positionsGroupes, afficherUnanimite }: Props) {
   ];
   const parPosition = new Map(camps.map((c) => [c.position, c]));
   for (const g of positionsGroupes) {
-    parPosition.get(g.positionMajoritaire)?.groupes.push(g);
+    parPosition.get(egaliteDeVoix(g) ? 'egalite' : g.positionMajoritaire)?.groupes.push(g);
   }
   const campsRemplis = camps.filter((c) => c.groupes.length > 0);
   // Un seul camp = pas de fracture à montrer (unanimité des groupes présents),

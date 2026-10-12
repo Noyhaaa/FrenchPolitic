@@ -119,7 +119,10 @@ SCRUTIN = {
                         {
                             "organeRef": "PO845401",
                             "vote": {
-                                "positionMajoritaire": "pour",
+                                # Le champ publié est faux exprès : la
+                                # position vient des décomptes (2 pour, 1 contre).
+                                "positionMajoritaire": "contre",
+                                "decompteVoix": {"pour": "2", "contre": "1", "abstentions": "0"},
                                 "decompteNominatif": {
                                     "pours": {
                                         "votant": [
@@ -136,11 +139,13 @@ SCRUTIN = {
                         {
                             "organeRef": "PO845413",
                             "vote": {
-                                # Groupe sans position majoritaire exploitable :
-                                # aucune divergence n'est qualifiée (§2.5).
-                                "positionMajoritaire": "nonVotant",
+                                # Égalité pour/abstention : pas de position
+                                # majoritaire, aucune divergence qualifiée (§2.5).
+                                "positionMajoritaire": "abstention",
+                                "decompteVoix": {"pour": "1", "contre": "0", "abstentions": "1"},
                                 "decompteNominatif": {
-                                    "abstentions": {"votant": {"acteurRef": "PA900001"}}
+                                    "pours": {"votant": {"acteurRef": "PA900002"}},
+                                    "abstentions": {"votant": {"acteurRef": "PA900001"}},
                                 },
                             },
                         },
@@ -243,7 +248,9 @@ def test_build_deputes_mandat_unique_et_lieu_absent():
 
 def test_votes_du_scrutin():
     votes = {v.acteur_ref: v for v in votes_du_scrutin(SCRUTIN)}
-    assert set(votes) == {"PA841605", "PA841606", "PA841607", "PA841608", "PA900001"}
+    assert set(votes) == {
+        "PA841605", "PA841606", "PA841607", "PA841608", "PA900001", "PA900002"
+    }
     assert votes["PA841605"].position is PositionVote.pour
     assert votes["PA841605"].contre_son_groupe is False
 

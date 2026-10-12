@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 from app.ingestion.normalize import (
     as_list,
     guess_theme,
-    map_position,
+    position_par_decompte,
     map_statut,
     texte_de_rattachement,
     to_int,
@@ -477,7 +477,13 @@ def parse_scrutin(
                 groupe_id=info.id,
                 groupe_nom=info.nom,
                 couleur=info.couleur,
-                position_majoritaire=map_position(vote.get("positionMajoritaire")),
+                # Jamais le `positionMajoritaire` publié : il contredit les
+                # décomptes sur 3 % des groupes (cf. position_par_decompte).
+                position_majoritaire=position_par_decompte(
+                    to_int(dv.get("pour")),
+                    to_int(dv.get("contre")),
+                    to_int(dv.get("abstentions")),
+                ),
                 pour=to_int(dv.get("pour")),
                 contre=to_int(dv.get("contre")),
                 abstention=to_int(dv.get("abstentions")),

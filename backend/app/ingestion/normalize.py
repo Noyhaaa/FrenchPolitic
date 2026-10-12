@@ -516,17 +516,29 @@ def titre_court(titre_officiel: str) -> str:
     return titre[0].upper() + titre[1:]
 
 
-def map_position(position_majoritaire: str | None) -> PositionVote:
-    """Position majoritaire d'un groupe → enum interne."""
-    p = fold(position_majoritaire or "")
-    if p.startswith("pour"):
-        return PositionVote.pour
-    if p.startswith("contre"):
-        return PositionVote.contre
-    if p.startswith("abstention"):
-        return PositionVote.abstention
-    # « absent », « nonVotant »… : le groupe n'a majoritairement pas pris part.
-    return PositionVote.non_votant
+def position_par_decompte(pour: int, contre: int, abstention: int) -> PositionVote:
+    """Position majoritaire d'un groupe, déduite de ses décomptes officiels.
+
+    L'AN publie un champ `positionMajoritaire`, mais il contredit ses propres
+    décomptes sur 3 % des groupes (3 095 sur 104 064 en L17 — vécu : RN « pour »
+    à 12 voix contre 106 sur l'aide à mourir, PS « abstention » à 57 pour). Les
+    décomptes, eux, sont nominatifs donc vérifiables : la position s'en déduit,
+    comme au Sénat qui ne publie pas ce champ.
+
+    Égalité entre deux positions en tête, ou aucun vote exprimé (cas de tous les
+    groupes qui ne votent pas une motion de censure, art. 49) : pas de position
+    majoritaire exploitable → `non_votant` (§2.5).
+    """
+    exprimes = (
+        (PositionVote.pour, pour),
+        (PositionVote.contre, contre),
+        (PositionVote.abstention, abstention),
+    )
+    maximum = max(n for _, n in exprimes)
+    if maximum <= 0:
+        return PositionVote.non_votant
+    en_tete = [p for p, n in exprimes if n == maximum]
+    return en_tete[0] if len(en_tete) == 1 else PositionVote.non_votant
 
 
 def truncate(text: str, limit: int = 160) -> str:

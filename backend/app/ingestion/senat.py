@@ -50,6 +50,7 @@ from app.ingestion.dossiers_legislatifs import (
 )
 from app.ingestion.normalize import (
     guess_theme,
+    position_par_decompte,
     texte_de_rattachement,
     truncate,
     type_motion,
@@ -427,23 +428,9 @@ def source_dossier_senat(slug: str) -> SourceOfficielle:
 
 
 def _position_majoritaire(groupe: GroupeScrutinSenat) -> PositionVote:
-    """Position majoritaire d'un groupe, déduite de ses décomptes officiels.
-
-    Le Sénat ne publie pas ce champ (l'AN si) : on le calcule. En cas d'égalité
-    parfaite entre deux positions — ou d'aucun vote exprimé — le groupe n'a pas
-    de position majoritaire exploitable : `non_votant`, le même repli que côté
-    Assemblée pour un groupe sans position (§2.5).
-    """
-    exprimes = (
-        (PositionVote.pour, groupe.pour),
-        (PositionVote.contre, groupe.contre),
-        (PositionVote.abstention, groupe.abstention),
-    )
-    maximum = max(n for _, n in exprimes)
-    if maximum == 0:
-        return PositionVote.non_votant
-    en_tete = [p for p, n in exprimes if n == maximum]
-    return en_tete[0] if len(en_tete) == 1 else PositionVote.non_votant
+    """Position majoritaire d'un groupe, déduite de ses décomptes officiels
+    (le Sénat ne publie pas ce champ) — même règle qu'à l'Assemblée."""
+    return position_par_decompte(groupe.pour, groupe.contre, groupe.abstention)
 
 
 def _figure_dans(nom: str, liste: str) -> bool:

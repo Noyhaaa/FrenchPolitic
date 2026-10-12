@@ -1,7 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { colors, mono, spacing, typography } from '@/theme';
 import { PositionGroupe } from '@/types';
-import { positionLabel } from '@/utils/format';
+import { egaliteDeVoix, positionLabel } from '@/utils/format';
 import { ResultBar } from './ResultBar';
 
 interface Props {
@@ -19,9 +19,11 @@ export function GroupVoteRow({ groupe }: Props) {
   return (
     <View
       style={styles.row}
-      accessibilityLabel={`${groupe.groupeNom} : position majoritaire ${positionLabel(
-        groupe.positionMajoritaire
-      )}. ${pour} pour, ${contre} contre, ${abstention} abstentions.`}
+      accessibilityLabel={`${groupe.groupeNom} : ${
+        egaliteDeVoix(groupe)
+          ? 'voix partagées à égalité'
+          : `position majoritaire ${positionLabel(groupe.positionMajoritaire)}`
+      }. ${pour} pour, ${contre} contre, ${abstention} abstentions.`}
     >
       <View style={[styles.colorBar, { backgroundColor: groupe.couleur }]} />
       <View style={styles.info}>

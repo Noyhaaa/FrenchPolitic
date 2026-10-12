@@ -83,6 +83,12 @@ python -m app.ingestion.revalider           # --dry-run pour voir le bilan sans 
 # colonne, puis à chaque changement des poids du calcul. Ni réseau ni LLM.
 python -m app.ingestion.divisions           # --dry-run pour voir le classement
 
+# Recalcule la position majoritaire des groupes depuis leurs décomptes (le champ
+# `positionMajoritaire` de l'AN les contredit sur 3 % des groupes), puis le
+# résumé neutre et le sens des arguments de la Q2 qui la lisent. Ni réseau ni
+# LLM. À enchaîner avec `divisions` puis `deputes` (« contre son groupe »).
+python -m app.ingestion.positions           # --dry-run pour voir le bilan
+
 # Renseigne « qui porte le texte » (Dossier.initiative) sur les dossiers déjà en
 # base. Ne télécharge que l'archive des dossiers législatifs (~10 Mo) et lit les
 # identités dans la table `depute` : ni scrutins, ni PDF, ni LLM — quelques
@@ -1111,9 +1117,15 @@ tests/               Tests API + garde-fous + génération + ingestion (+ repo p
   (votes exprimés et leur ventilation, cohésion = part des votes suivant la
   majorité de son groupe) et un
   **historique paginé**. « Contre son groupe » est un **fait déduit** du même
-  scrutin (position ≠ `positionMajoritaire` du groupe), calculé pour les seules
+  scrutin (position ≠ position majoritaire du groupe), calculé pour les seules
   positions exprimées et **absent** quand le groupe n'a pas de position
-  majoritaire exploitable ; un ratio au dénominateur nul reste `null`
+  majoritaire exploitable (égalité, aucune voix). ⚠️ Cette position se
+  **déduit des décomptes** (`position_par_decompte`), jamais du champ
+  `positionMajoritaire` publié : il les contredit sur 3 % des groupes de la
+  L17 (3 095 sur 104 064 — RN « pour » à 12 voix contre 106 sur l'aide à
+  mourir), marque « pour » les groupes sans aucune voix, et tranche les
+  égalités au hasard. Une égalité s'affiche « voix partagées à égalité »,
+  jamais « n'a pas pris part » ; un ratio au dénominateur nul reste `null`
   (« information non disponible », jamais 0 %, §2.5). La **photo officielle**
   est le seul champ dont l'URL est *dérivée* (`.../tribun/{leg}/photos/carre/
   {acteurRef sans PA}.jpg` — le référentiel AMO ne la porte pas) : elle n'est

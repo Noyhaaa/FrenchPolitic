@@ -148,6 +148,7 @@ détaille ce que chacune télécharge.
 | `reformater` | titre court + accroche | – | – |
 | `revalider` | repasse les garde-fous, efface les réponses fautives | – | – |
 | `divisions` | indice « votes les plus disputés » | – | – |
+| `positions` | position des groupes depuis les décomptes + résumé + sens Q2 | – | – |
 | `motions` | classe les motions (ne déclasse jamais) | – | – |
 | `initiatives` / `etats` | qui porte le texte / où il en est | archive dossiers (10 Mo) | – |
 | `sources` | rapports de commission + « documents du dossier » | idem + HEAD | – |
@@ -319,6 +320,15 @@ deux côtés. **Toute évolution se répercute des deux côtés.**
 - **La classification d'une motion se fait sur l'objet entier**, avant la
   troncature à 120 caractères : au Sénat, la nature de la motion n'arrive
   qu'après. `app.ingestion.motions` ne déclasse donc jamais.
+- **`positionMajoritaire` de l'AN est faux sur 3 % des groupes** (contredit
+  ses propres décomptes, « pour » sur un groupe sans voix). La position se
+  **déduit des décomptes** (`position_par_decompte`), aux deux chambres. Une
+  égalité n'a pas de position (`non_votant` côté données, « voix partagées à
+  égalité » à l'écran, `egaliteDeVoix`) : jamais « n'a pas pris part ».
+- **La Q2 s'ancre sur un vote de l'Assemblée** (`_vote_conclusif`) : ses
+  arguments viennent des comptes rendus de l'AN, dont les groupes n'existent
+  pas dans un scrutin du Sénat. Le recalage du sens vise d'abord le vote d'où
+  viennent les arguments (`_ancre_du_desaccord`).
 - **Motion de censure** : `contre` et `abstention` valent 0 **par construction**
   (art. 49). Pas de barre pour/contre, pas d'écart, pas d'indice de division : on
   compare à `suffragesRequis` (`phrase_motion_censure`).

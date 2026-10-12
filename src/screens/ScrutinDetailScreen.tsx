@@ -39,6 +39,7 @@ import { useScrutin } from '@/hooks';
 import { PositionGroupe, StatutScrutin, Votant } from '@/types';
 import {
   detailObjetAmendement,
+  egaliteDeVoix,
   estVoteAmendement,
   estVoteSousAmendement,
   formatDateLong,
@@ -230,7 +231,7 @@ export function ScrutinDetailScreen() {
     : termeTypeVote(scrutin.typeVote);
   // Fracture à montrer seulement si les groupes ne sont pas unanimes.
   const campsDistincts = new Set(
-    scrutin.positionsGroupes.map((g) => g.positionMajoritaire),
+    scrutin.positionsGroupes.map((g) => (egaliteDeVoix(g) ? 'egalite' : g.positionMajoritaire)),
   ).size;
 
   return (
