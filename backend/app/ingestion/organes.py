@@ -101,6 +101,22 @@ def build_civilites_from_amo(acteur_wrappers: list[dict]) -> dict[str, str]:
     return civilites
 
 
+def build_civ_from_amo(acteur_wrappers: list[dict]) -> dict[str, str]:
+    """Annuaire `acteurRef` → civilité (« M. » / « Mme ») : la désignation
+    officielle d'un député dans une mise au point (« Mme Voynet a fait savoir
+    qu'elle… »). Une civilité absente reste absente : on ne devine pas."""
+    civ: dict[str, str] = {}
+    for wrapper in acteur_wrappers:
+        acteur = wrapper.get("acteur", wrapper)
+        uid = acteur.get("uid")
+        if isinstance(uid, dict):
+            uid = uid.get("#text")
+        valeur = ((acteur.get("etatCivil") or {}).get("ident") or {}).get("civ")
+        if uid and valeur in ("M.", "Mme"):
+            civ[uid] = valeur
+    return civ
+
+
 def build_resolver_from_organes(organe_wrappers: list[dict]) -> GroupResolver:
     """Construit le résolveur à partir des JSON d'organes (clé « organe »).
 

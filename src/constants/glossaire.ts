@@ -214,6 +214,31 @@ export const GLOSSAIRE: TermeGlossaire[] = [
     voisins: ['Navette'],
   },
   {
+    id: 'mise-au-point',
+    libelle: 'Mise au point',
+    nature: 'n.f.',
+    categorie: 'vote',
+    definition:
+      'Après un scrutin public, un député fait savoir qu’il voulait voter autrement que ce qui a été enregistré. C’est publié avec le scrutin, sans changer ni son vote enregistré ni le résultat.',
+    etapes: [
+      {
+        titre: 'Le vote est enregistré',
+        detail: 'Le résultat est proclamé à partir des votes enregistrés.',
+      },
+      {
+        titre: 'Le député signale une erreur',
+        detail:
+          'Il indique le vote qu’il voulait exprimer, ou qu’il ne voulait pas prendre part au scrutin.',
+      },
+      {
+        titre: 'La déclaration est publiée',
+        detail:
+          'Elle figure avec le scrutin, « sous réserve de l’article 68, alinéa 4, du Règlement ». Le décompte reste celui du vote enregistré.',
+      },
+    ],
+    voisins: ['Scrutin public', 'Non-votant'],
+  },
+  {
     id: 'motion-ajournement',
     libelle: 'Motion d’ajournement',
     nature: 'n.f.',

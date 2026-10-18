@@ -31,6 +31,7 @@ import {
   QuestionsAmendementCard,
   ResultBar,
   segmentsMotionCensure,
+  MisesAuPointCard,
   SectionCard,
   SourceGrid,
   StatusBadge,
@@ -585,6 +586,15 @@ export function ScrutinDetailScreen() {
             )}
           </SectionCard>
         )}
+
+        {/* Mises au point (AN) : ce que des députés ont déclaré après le vote.
+            Sur TOUT vote public, amendements compris — ce sont d'ailleurs les
+            plus nombreux. Un fait à côté du vote : rien au-dessus n'est
+            recalculé. Masqué s'il n'y en a pas (§2.5). */}
+        <MisesAuPointCard
+          misesAuPoint={scrutin.misesAuPoint ?? []}
+          onOuvrirDepute={ouvrirDepute}
+        />
 
         {/* Sous-amendements de cet amendement (le cas échéant) — liste compacte
             (connecteur ↳, même langage visuel que le dépliage de la fiche

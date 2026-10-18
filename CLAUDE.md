@@ -150,6 +150,7 @@ détaille ce que chacune télécharge.
 | `divisions` | indice « votes les plus disputés » | – | – |
 | `positions` | position des groupes depuis les décomptes + résumé + sens Q2 | – | – |
 | `commissions` | amendements tranchés en commission saisie au fond | amendements + dossiers + AMO | – |
+| `mises_au_point` | déclarations des députés après le vote (AN) | scrutins + AMO | – |
 | `motions` | classe les motions (ne déclasse jamais) | – | – |
 | `initiatives` / `etats` | qui porte le texte / où il en est | archive dossiers (10 Mo) | – |
 | `sources` | rapports de commission + « documents du dossier » | idem + HEAD | – |
@@ -295,6 +296,11 @@ deux côtés. **Toute évolution se répercute des deux côtés.**
   - sans scrutin public : `modalite` (`main_levee`, `article_49_3`,
     `article_151_7`), `etape?` et `conclusion?` (libellés de l'archive) ;
   - `positionsGroupes` avec leurs `Votant` ;
+  - `misesAuPoint` (AN seulement) : ce qu'un député déclare après le vote
+    (« a fait savoir qu'il avait voulu « voter contre » », dysfonctionnement).
+    `phrase` est la formule de l'Assemblée mot pour mot. Un fait **à côté** du
+    vote : aucune statistique n'en tient compte (art. 68 RAN), et l'app ne dit
+    jamais ce que le résultat « aurait été » ;
   - pour un amendement : `questions?`, `dispositif?`, `exposeSommaire?`, `cible?`.
 - **`DossierListItem`**, l'objet allégé du fil et de la recherche, porte
   `natureTexte`, `chambres`, `statutMotion`, et le résultat, le type de vote et

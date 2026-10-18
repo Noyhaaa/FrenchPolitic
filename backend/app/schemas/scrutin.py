@@ -65,6 +65,31 @@ class Votant(CamelModel):
     depute_id: str | None = None
 
 
+class MiseAuPoint(CamelModel):
+    """Ce qu'un député a déclaré après le vote, tel que l'Assemblée le publie
+    avec le scrutin (open data `miseAuPoint`). Un fait officiel, mais qui ne
+    modifie ni le vote enregistré ni le résultat (art. 68, al. 4, du Règlement
+    de l'AN) : les statistiques restent calculées sur le vote officiel.
+
+    - `mise_au_point` : « Mme X a fait savoir qu'elle avait voulu « voter
+      contre » », ou « M. Y n'a pas pris part au scrutin ».
+    - `dysfonctionnement` : « M. X a voté « pour ». Sa position de vote n'a pas
+      pu être prise en compte. »
+
+    `phrase` est la formule de l'Assemblée, recomposée mot pour mot. L'Assemblée
+    seulement : le Sénat ne publie pas ces déclarations en données ouvertes.
+    """
+
+    nom: str
+    # Posé seulement si le député siège encore (même règle que `Votant`).
+    depute_id: str | None = None
+    nature: Literal["mise_au_point", "dysfonctionnement"]
+    # La position que le député déclare (voulue, ou votée mais non prise en
+    # compte) — jamais celle enregistrée, qui reste dans la ventilation.
+    position: PositionVote
+    phrase: str
+
+
 class PositionGroupe(CamelModel):
     groupe_id: str
     groupe_nom: str
@@ -311,6 +336,9 @@ class Scrutin(CamelModel):
     conclusion: str | None = None
     resultat: ResultatGlobal
     positions_groupes: list[PositionGroupe] = []
+    # Déclarations des députés après le vote (AN seulement). Vide = aucune
+    # publiée : le bloc est masqué.
+    mises_au_point: list[MiseAuPoint] = []
     # Pour un vote d'amendement/sous-amendement : son contenu enrichi (open data
     # AN). `cible`/`dispositif` sont factuels ; `expose_sommaire` est le point de
     # vue de l'auteur (non neutre, §4.3) → bloc attribué sur la fiche vote.
