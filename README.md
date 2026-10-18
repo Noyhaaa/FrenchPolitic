@@ -19,12 +19,12 @@ Tout ce qu'affiche l'app vient de sources publiques officielles. Rien n'est sais
 
 | Source | Ce qu'on en tire |
 |---|---|
-| **Open data Assemblée nationale** — scrutins publics (17e législature) | Le vote lui-même : objet, date, résultat, ventilation par groupe, **nominatif** |
-| **Archive AMO** (acteurs & organes) | L'annuaire des députés, leur groupe, leur circonscription, leur photo |
+| **Open data Assemblée nationale** — scrutins publics (17e législature) | Le vote lui-même : objet, date, résultat, ventilation par groupe, **nominatif**, mises au point |
+| **Archive AMO** (acteurs & organes) | L'annuaire des députés, leur groupe, leur circonscription, leur commission permanente, leur début de mandat, leur photo ; le nom des commissions |
 | **Archive « Dossiers législatifs »** | Le rattachement d'un vote à son **dossier**, le lien officiel, la **trajectoire** du texte dans les deux chambres, **où il en est aujourd'hui** (n° de la loi promulguée, JO, Légifrance), **qui le porte**, et la référence du **texte définitivement voté** |
 | **PDF des « petites lois »** (AN, Sénat) | La **loi finale** : les articles tels que le Parlement les a votés — source de « qu'est-ce que ça change ? » sur un texte en vigueur |
 | **PDF des textes déposés** (AN, repli senat.fr) | L'**exposé des motifs** (parole de l'auteur) et le **dispositif** (les articles) |
-| **Archive « amendements »** (AN) | Le contenu réel d'un amendement : article visé, dispositif, exposé sommaire |
+| **Archive « amendements »** (AN) | Le contenu réel d'un amendement : article visé, dispositif, exposé sommaire ; son sort en séance ou en commission |
 | **Comptes rendus des débats** (« SyceronBrut ») | Les **explications de vote** des groupes en séance |
 | **senat.fr** — pages de scrutin, JSON nominatif, annuaire | Les votes du Sénat, les sénateurs, leur groupe et leur commission |
 
@@ -77,7 +77,10 @@ l'ensemble de la proposition de loi visant à… », rarement à quel dossier il
 appartient. La chaîne essaie, dans cet ordre : le `dossierRef` officiel → le titre
 cité comparé aux titres de l'archive (exact, puis par signature tolérante aux
 apostrophes et coquilles) → un dossier reconstitué à identifiant stable → sinon un
-**événement autonome** (motion de censure, déclaration). Un titre qui désigne deux
+**événement autonome** (motion de censure, déclaration). Puis les faits de
+l'archive corrigent ce résultat : les votes que les actes législatifs citent, les
+décisions de séance, et le dossier qui siégeait à l'Assemblée le jour du vote
+sous un titre concordant. Un titre qui désigne deux
 dossiers possibles n'est **jamais** tranché au hasard : la table s'abstient.
 
 Le **résumé neutre est écrit par un gabarit déterministe**, pas par un LLM :
@@ -118,14 +121,19 @@ arithmétiquement depuis le vote décisif.
   prédiction. Pour une loi promulguée, la carte **« La loi »** donne son numéro,
   son *Journal officiel* et **deux liens** : le texte **voté par le Parlement** et
   le texte **en vigueur** (Légifrance) — ce ne sont pas les mêmes, une loi pouvant
-  avoir été modifiée depuis. Puis le résumé, **le vote en
-  4 questions**, puis trois sections — les
-  votes sur le texte avec le **vote décisif** mis en avant, les **amendements**,
-  les **sous-amendements**. L'exposé des motifs y est cité et attribué.
+  avoir été modifiée depuis. Puis **« En bref »** (deux phrases du résumé
+  déterministe : le parcours du texte et la position des groupes au vote
+  décisif), **le vote en 4 questions**, puis les votes sur le texte avec le
+  **vote décisif** mis en avant, le décompte des **amendements tranchés en
+  commission** (la commission saisie au fond, nommée), les **amendements** et les
+  **sous-amendements**. L'exposé des motifs y est cité et attribué.
 - **Fiche vote** : le résultat en tête, puis le **vote par groupe** avec la ligne
   de fracture et les **noms des votants** dépliables (chaque nom ouvre la fiche du
-  parlementaire s'il siège encore). Sur un vote d'amendement, sa carte « en 4
-  questions » et son contenu réel remplacent la ventilation par groupe.
+  parlementaire s'il siège encore). Les **mises au point** des députés après le
+  vote (« a fait savoir qu'il avait voulu voter contre ») sont citées dans la
+  formule de l'Assemblée, à côté du vote : elles ne changent aucun décompte. Sur
+  un vote d'amendement, sa carte « en 4 questions » et son contenu réel
+  remplacent la ventilation par groupe.
 - **Explorer** : quatre portes d'entrée et les catégories — un écran de
   découverte, qui **ouvre** l'écran de résultats au lieu de l'afficher sur place.
 - **Dossiers** : les résultats en chronologie dense. La recherche est
@@ -146,33 +154,36 @@ hors-ligne sur chaque écran.
 bout sur les deux chambres, avec le rattachement par dossier, l'enrichissement des
 amendements, les questions citoyennes et la trajectoire.
 
-Mesuré sur la base de développement au **29 juillet 2026** (dernier run complet) :
+Mesuré sur la base de développement au **18 octobre 2026** (dernier run complet) :
 
 | | |
 |---|---|
-| Dossiers | **328** — dont 255 rattachés à leur dossier officiel, 44 reconstitués, 26 événements autonomes, 3 d'origine sénatoriale |
-| Scrutins | **8 433** Assemblée + **340** Sénat |
-| Parlementaires | **925** (577 députés + 348 sénateurs), **1,39 M** de votes nominatifs |
-| Trajectoire au Parlement | 262 / 328 dossiers |
-| Où en est le texte (état actuel) | **254 / 328** — 96 promulgués · 126 en navette · 21 résolutions · 7 au Conseil constitutionnel · 4 retirés |
-| Loi finale (texte voté) | **76 / 96 lois** ont leur lien, **45** leur contenu — d'où une Q4 à l'indicatif au lieu du pitch de l'auteur au conditionnel |
-| Initiative (qui porte le texte) | **242 / 255 dossiers officiels** — 49 Gouvernement · 124 parlementaires (110 nommés) · 69 Sénat |
-| Accroche (le but du texte en une phrase) | 241 / 328 |
-| Exposé des motifs | 242 / 328 · dispositif : 176 |
-| Q2 « principal désaccord » (depuis les débats) | 211 / 328 |
-| Amendements AN enrichis de leur contenu | **6 042 / 7 221 (83,7 %)** |
-| Sénateurs avec commission permanente | 346 / 348 |
+| Dossiers | **464** — dont 427 rattachés à leur dossier officiel, 1 reconstitué, 26 événements autonomes, 10 d'origine sénatoriale |
+| Votes | **17 770** Assemblée (dont 8 876 scrutins publics) + **850** Sénat (dont 708 scrutins publics) ; les autres sont des décisions à main levée, au 49.3 ou en procédure simplifiée |
+| Parlementaires | **922** (574 députés + 348 sénateurs), **1,57 M** de votes nominatifs |
+| Trajectoire au Parlement | 426 / 464 dossiers |
+| Où en est le texte (état actuel) | **426 / 464** — 142 promulgués · 211 en navette · 66 résolutions · 7 retirés |
+| Loi finale (texte voté) | **110** lois ont leur lien, **66** leur contenu — d'où une Q4 à l'indicatif au lieu du pitch de l'auteur au conditionnel |
+| Initiative (qui porte le texte) | **401 / 427 dossiers officiels** — 86 Gouvernement · 190 parlementaires (166 nommés) · 125 Sénat |
+| Accroche (le but du texte en une phrase) | 374 / 464 |
+| Exposé des motifs | 374 / 464 · dispositif : 278 |
+| Q1 « pourquoi ce texte ? » · Q4 « qu'est-ce que ça change ? » | 374 · 370 / 464 |
+| Q2 « principal désaccord » (depuis les débats) | 228 / 464 |
+| Amendements tranchés en commission saisie au fond | 211 dossiers |
+| Votes d'amendement AN (scrutin public) enrichis de leur contenu | **6 283 / 7 590 (82,8 %)** |
+| Mises au point après le vote | 3 406, sur 1 636 scrutins |
+| Commission permanente | 574 / 574 députés · 347 / 348 sénateurs |
 
 Ces trous sont **documentés, pas masqués** : chaque bloc sans source disparaît de
 l'écran plutôt que d'afficher une approximation.
 
-**Limites connues, avec leur cause.** 44 dossiers restent reconstitués : 32 dont le
-titre est réellement absent de l'archive (dont des coquilles de la source), 12 que
-l'archive contient mais qu'un garde-fou d'ambiguïté écarte — le même titre existe
-dans deux législatures, donc on s'abstient. Le début de mandat d'un sénateur est
-absent parce que l'annuaire du Sénat **ne le publie pas** (vérifié à la source), et
-la commission d'un député parce que l'archive AMO demande un travail de résolution
-non fait. Ce ne sont pas des oublis : ils sont inscrits dans le code, à l'endroit
+**Limites connues, avec leur cause.** Un seul dossier reste reconstitué, la
+« programmation nationale énergie et climat » : le seul dossier en séance ces
+jours-là ne partage que 43 % des mots de son titre, sous le seuil, donc on
+s'abstient. Le début de mandat d'un sénateur est absent parce que l'annuaire du
+Sénat **ne le publie pas** (vérifié à la source). Les ~9 000 amendements votés à
+main levée affichent leur contenu officiel, mais pas encore leurs questions
+générées. Ce ne sont pas des oublis : ils sont inscrits dans le code, à l'endroit
 où quelqu'un se poserait la question.
 
 **En cours / à venir.** Les comptes rendus du Sénat (pour que la Q2 existe aussi
