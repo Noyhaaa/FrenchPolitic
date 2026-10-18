@@ -104,6 +104,11 @@ async def _main(
             f"levée ; {report.dossiers_sans_scrutin_public} dossier(s) n'ont "
             "aucun scrutin public."
         )
+    if report.votes_rattaches_par_seance:
+        print(
+            f"  {report.votes_rattaches_par_seance} vote(s) rangé(s) dans le "
+            "dossier qui siégeait à l'Assemblée le jour du vote (titre concordant)."
+        )
     if report.votes_rattaches_par_decision:
         print(
             f"  {report.votes_rattaches_par_decision} vote(s) d'un dossier "

@@ -42,6 +42,7 @@ from app.ingestion.dossiers_legislatifs import (
     legislature_du_ref,
     slug_dossier_senat,
 )
+from app.ingestion.navette import _descendants
 from app.ingestion.normalize import est_amendement, guess_theme
 from app.schemas import ResultatGlobal, Scrutin, SourceOfficielle
 from app.utils.text import fold
@@ -424,6 +425,117 @@ def rattacher_par_decisions(
         p.dossier_ref = ref
         p.scrutin.dossier_id = ref
         deplaces += 1
+    return deplaces
+
+
+# ---------------------------------------------------------------------------
+# Un vote → le dossier qui siège ce jour-là
+# ---------------------------------------------------------------------------
+
+# Concordance « en séance » : moins exigeante que `titres_concordants`, parce
+# qu'elle s'ajoute à un fait fort — l'archive date une séance du dossier à
+# l'Assemblée le jour même du vote. Mesuré sur 3 048 votes dont l'AN donne
+# elle-même le dossier : 3 011 retrouvés, 36 sans conclusion, aucune erreur.
+_SEUIL_SEANCE = 0.5
+_MOTS_PARTAGES_MIN = 2
+
+
+def seances_par_jour(actes_par_ref: dict[str, object]) -> dict[str, frozenset[str]]:
+    """Jour → dossiers dont un acte de séance à l'Assemblée (`AN…-DEBATS…`)
+    porte cette date."""
+    par_jour: dict[str, set[str]] = defaultdict(set)
+    for ref, actes in actes_par_ref.items():
+        for acte in _descendants(actes):
+            code = acte.get("codeActe") or ""
+            jour = str(acte.get("dateActe") or "")[:10]
+            if isinstance(code, str) and code.startswith("AN") and "DEBATS" in code and jour:
+                par_jour[jour].add(ref)
+    return {jour: frozenset(refs) for jour, refs in par_jour.items()}
+
+
+def _concorde_en_seance(titre_cite: str, mots_dossier: frozenset[str]) -> bool:
+    titre = titre_cite.strip()
+    if titre.endswith("…"):
+        titre = titre[:-1].rsplit(" ", 1)[0]
+    mots = _mots(titre)
+    communs = len(mots & mots_dossier)
+    return (
+        bool(mots)
+        and communs >= _MOTS_PARTAGES_MIN
+        and communs / len(mots) >= _SEUIL_SEANCE
+    )
+
+
+def rattacher_par_seances(
+    parses: list[ScrutinParse],
+    seances: dict[str, frozenset[str]],
+    titres: TitresDossiers,
+    cites: frozenset[str] = frozenset(),
+) -> int:
+    """Range un vote de l'Assemblée dans le dossier qui siégeait ce jour-là
+    (pure, modifie `parses` en place).
+
+    Deux faits doivent concorder : l'archive date une séance du dossier à
+    l'Assemblée le jour du vote, et le titre que le vote cite partage au moins
+    la moitié de ses mots significatifs avec les titres du dossier. Un seul
+    dossier doit remplir les deux conditions ; sinon rien ne bouge (§2.5).
+
+    1. Un dossier **reconstitué** (`TXT-…`) rejoint son dossier officiel, tous
+       ses votes ensemble (vécu : « ssimplification du droit de l'urbanisme »,
+       coquille de la source ; « LP.3 (4) » contre « LP.3(4) »).
+    2. Un vote dont le `dossierRef` officiel est **contredit** par le titre
+       qu'il cite rejoint le dossier qui siégeait (vécu : un amendement au
+       projet de loi d'urgence agricole publié sous le `dossierRef` du corps
+       électoral de Nouvelle-Calédonie). Un vote que les actes citent
+       (`cites`, voteRefs) n'est jamais déplacé : c'est un fait.
+
+    Renvoie le nombre de votes déplacés.
+    """
+    def candidat(titre: str, jours: set[str]) -> str | None:
+        refs = {r for jour in jours for r in seances.get(jour, ())}
+        retenus = [
+            r for r in refs if _concorde_en_seance(titre, titres.mots.get(r, frozenset()))
+        ]
+        return retenus[0] if len(retenus) == 1 else None
+
+    an = [
+        p
+        for p in parses
+        if p.scrutin.chambre is Chambre.assemblee
+        and p.scrutin.scrutin_public
+        and not p.est_evenement_autonome
+    ]
+    groupes: dict[str, list[ScrutinParse]] = defaultdict(list)
+    for p in an:
+        if p.dossier_ref is None and p.dossier_id.startswith("TXT-"):
+            groupes[p.dossier_id].append(p)
+    cible: dict[str, str] = {}
+    for groupe, votes in groupes.items():
+        ref = candidat(votes[0].dossier_titre, {v.scrutin.date[:10] for v in votes})
+        if ref:
+            cible[groupe] = ref
+
+    deplaces = 0
+
+    def deplacer(p: ScrutinParse, ref: str) -> None:
+        nonlocal deplaces
+        p.dossier_id = ref
+        p.dossier_ref = ref
+        p.scrutin.dossier_id = ref
+        deplaces += 1
+
+    for p in an:
+        if p.dossier_id in cible:
+            deplacer(p, cible[p.dossier_id])
+            continue
+        if not p.dossier_ref or not p.titre_cite or p.scrutin.id in cites:
+            continue
+        mots_ref = titres.mots.get(p.dossier_ref)
+        if not mots_ref or _concorde_en_seance(p.titre_cite, mots_ref):
+            continue
+        ref = candidat(p.titre_cite, {p.scrutin.date[:10]})
+        if ref and ref != p.dossier_ref:
+            deplacer(p, ref)
     return deplaces
 
 

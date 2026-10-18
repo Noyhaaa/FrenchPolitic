@@ -224,9 +224,10 @@ def lire_archive(zf: zipfile.ZipFile) -> ArchiveAmendements:
             adopte = _SORTS_VOTES.get(
                 _texte((amendement.get("cycleDeVie") or {}).get("sort")) or ""
             )
+            prefixe = identification.get("prefixeOrganeExamen")
             organe = organe_examen(amendement.get("examenRef"))
-            if adopte is not None and organe is not None:
-                compter(commission, dossier_ref, organe, adopte)
+            if adopte is not None and (prefixe or organe):
+                compter(commission, dossier_ref, prefixe, organe, adopte)
             continue
         numero = identification.get("numeroLong", "")
         if not isinstance(numero, str) or not numero.isdigit():

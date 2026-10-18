@@ -162,9 +162,9 @@ export function DeputeDetailScreen() {
               <Text style={styles.badgeTexte}>{depute.groupeNom}</Text>
             </View>
             {/* Circonscription, commission et début de mandat : chaque champ
-                masqué s'il n'est pas documenté (§2.5). La commission n'est
-                servie qu'au Sénat, le début de mandat qu'à l'Assemblée — les
-                sources ne publient pas les mêmes choses de part et d'autre. */}
+                masqué s'il n'est pas documenté (§2.5). La commission est
+                servie aux deux chambres, le début de mandat (prise de
+                fonction) qu'à l'Assemblée : la source du Sénat n'en a pas. */}
             <Text style={typography.meta}>
               {[
                 depute.circonscription,
