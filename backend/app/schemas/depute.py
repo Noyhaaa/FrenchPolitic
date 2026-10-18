@@ -34,10 +34,9 @@ class Depute(CamelModel):
     circonscription: str
     depuis: str | None = None  # début de mandat (ISO), None si non documenté
     portrait_url: str | None = None  # photo officielle, sinon initiales côté app
-    # Commission permanente. Servie pour les SÉNATEURS (l'annuaire senat.fr la
-    # publie dans `organismes`) ; None côté Assemblée, où l'obtenir demanderait
-    # d'indexer les organes `COMPER` — le résolveur ne garde aujourd'hui que les
-    # groupes politiques. None → champ masqué (§2.5).
+    # Commission permanente, aux deux chambres : au Sénat lue dans
+    # `organismes` (senat.fr), à l'Assemblée sur le mandat COMPER principal
+    # (AMO). Nom seul des deux côtés, même gabarit (§7.4). None → masqué (§2.5).
     commission: str | None = None
 
 

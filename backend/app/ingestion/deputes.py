@@ -110,8 +110,38 @@ def circonscription(mandat: dict | None) -> str:
     return f"{departement}, {rang} circ."
 
 
+def _commission_permanente(
+    mandats: list[dict], commissions: dict[str, str]
+) -> str | None:
+    """La commission permanente du député : l'organe de son mandat COMPER en
+    cours **principal** (`nominPrincipale` = 1). Mesuré : chacun des 574 en a
+    exactement un ; le second mandat de 74 députés porte sur la même commission
+    (leur fonction : président, secrétaire…). Libellé inconnu → None (§2.5)."""
+    principal = next(
+        (
+            m
+            for m in mandats
+            if m.get("typeOrgane") == "COMPER"
+            and _est_actif(m)
+            and str(m.get("nominPrincipale")) == "1"
+        ),
+        None,
+    )
+    return commissions.get(_organe_ref(principal)) if principal else None
+
+
+def _debut_de_mandat(assemblee: dict) -> str | None:
+    """La prise de fonction du député (`mandature.datePriseFonction`), sinon le
+    début de son mandat. Jamais l'entrée dans un groupe : les groupes se
+    forment plus tard (19 juillet 2024) et un député peut en changer."""
+    prise = (assemblee.get("mandature") or {}).get("datePriseFonction")
+    return prise or assemblee.get("dateDebut") or None
+
+
 def build_deputes_from_amo(
-    acteur_wrappers: list[dict], resolver: GroupResolver
+    acteur_wrappers: list[dict],
+    resolver: GroupResolver,
+    commissions: dict[str, str] | None = None,
 ) -> list[Depute]:
     """Référentiel des députés depuis l'archive AMO (clé « acteur »).
 
@@ -119,6 +149,8 @@ def build_deputes_from_amo(
     anciens députés ne sont pas dans l'annuaire) ; le groupe vient du mandat GP
     en cours, résolu en nom + couleur par le `GroupResolver` (même source que
     la ventilation des scrutins, donc mêmes couleurs qu'ailleurs dans l'app).
+    `commissions` (uid → libellé, cf. `noms_commissions`) nomme la commission
+    permanente ; sans lui, le champ reste vide.
     """
     deputes: list[Depute] = []
     for wrapper in acteur_wrappers:
@@ -159,7 +191,8 @@ def build_deputes_from_amo(
                 groupe_nom=info.nom,
                 groupe_couleur=info.couleur,
                 circonscription=circonscription(assemblee),
-                depuis=(groupe or {}).get("dateDebut") or None,
+                depuis=_debut_de_mandat(assemblee),
+                commission=_commission_permanente(mandats, commissions or {}),
                 # Photo : ajoutée ensuite par `attacher_portraits`, qui vérifie
                 # chaque URL avant de l'attacher (fonction pure ici — pas de
                 # réseau, et surtout aucune URL posée sans preuve, §2.5).
@@ -367,6 +400,7 @@ async def remplacer_votes_du_scrutin(
 async def _main(limit: int | None, legislature: int) -> None:
     from app.db.session import init_models, make_engine, make_session_factory
     from app.ingestion.assemblee import AssembleeOpenDataClient
+    from app.ingestion.commission import noms_commissions
     from app.ingestion.organes import build_resolver_from_organes
 
     debut = datetime.now(timezone.utc)
@@ -378,7 +412,9 @@ async def _main(limit: int | None, legislature: int) -> None:
     print(f"Députés (législature {legislature}, limit={limit})…")
     organes, acteurs_bruts = await client.download_amo()
     resolver = build_resolver_from_organes(organes)
-    deputes = build_deputes_from_amo(acteurs_bruts, resolver)
+    deputes = build_deputes_from_amo(
+        acteurs_bruts, resolver, noms_commissions(organes)
+    )
     nb_photos = await attacher_portraits(deputes, legislature)
     async with sf() as session:
         nb_deputes = await upsert_deputes(session, deputes)

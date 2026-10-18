@@ -93,7 +93,11 @@ python -m app.ingestion.positions           # --dry-run pour voir le bilan
 # (`Dossier.amendementsCommission`). Archive des amendements (~300 Mo), des
 # dossiers (actes de saisine) et AMO (libellés). Ni scrutins ni LLM. Ne compte
 # ni les commissions pour avis (elles ne modifient pas le texte), ni un organe
-# d'examen que les actes du dossier ne saisissent pas.
+# d'examen que les actes du dossier ne saisissent pas. La commission d'un
+# amendement se lit sur son PRÉFIXE (`prefixeOrganeExamen` = `libelleAbrev`
+# AMO), puis seulement sur `examenRef` : ce dernier désigne une autre commission
+# pour 608 amendements (commission spéciale « simplification de la vie
+# économique » : 350 adoptés, 245 rejetés, invisibles avant).
 python -m app.ingestion.commissions         # --dry-run pour voir le bilan
 
 # Mises au point des scrutins de l'AN (`Scrutin.misesAuPoint`) : ce que les
@@ -200,6 +204,22 @@ propre `dossierRef`, ni à une motion de censure. Mesuré sur la base de dev :
 rattachement corrigées. Un vote qui change de dossier quitte l'ancien à la
 fusion (`dossier_de`) et ne pose pas de badge « mis à jour » sur le nouveau
 (§7.7). Les **18** `TXT-` restants n'ont aucun vote cité par l'archive.
+
+**Le dossier qui siégeait le jour du vote** (`rattacher_par_seances`, après les
+votes cités). L'archive date chaque séance d'un dossier à l'Assemblée (actes
+`AN…-DEBATS-…`) : un vote de l'AN rejoint le dossier qui siégeait ce jour-là
+quand son titre cité partage au moins la moitié de ses mots significatifs (deux
+au minimum) avec les titres du dossier, et qu'**aucun autre** dossier du jour ne
+concorde (§2.5). Mesuré avant de l'appliquer, sur les 3 048 votes qui portent un
+`dossierRef` officiel : 3 011 retrouvés, 36 sans conclusion, **aucune erreur**.
+La même règle corrige un `dossierRef` que le titre cité contredit — vécu, un
+amendement au projet de loi d'urgence agricole rangé dans le dossier du corps
+électoral de Nouvelle-Calédonie —, jamais un vote que les actes citent
+(`voteRefs`). Mesuré sur la base de dev : 214 votes déplacés, **10 des 11**
+`TXT-` résorbés (ceux qu'aucune autre règle ne voyait : coquilles de la source,
+titres présents en L16 et en L17). Le dernier, la « programmation nationale
+énergie et climat », ne partage que 43 % des mots du seul dossier en séance ces
+jours-là : on n'attache rien.
 
 Un vote de **conduite de séance** (demande de suspension, de seconde délibération)
 qui deviendrait un dossier à lui seul est **écarté du fil** — il ne décide de rien
@@ -365,7 +385,7 @@ venaient du même annuaire : un élu parti disparaissait de tous ses votes pass�
   « Les sénateurs ont examiné ce texte pour… » ; une Q1 déjà en base qui
   l'attribuait aux députés est écartée et régénérée.
 
-La **commission permanente** (`Depute.commission`, 346/348) se lit dans
+La **commission permanente** (`Depute.commission`, 347/348) se lit dans
 `organismes` : les sept permanentes portent un `ordre` 7001-7007, tandis que la
 commission des affaires européennes — à laquelle 41 sénateurs siègent **en plus**
 de la leur — ouvre une autre série (8001). Retenir le plus petit `ordre` donne donc
@@ -1123,7 +1143,10 @@ tests/               Tests API + garde-fous + génération + ingestion (+ repo p
   reste celui, officiel, du groupe — l'écart est donc visible, pas masqué.
 - **Députés** (§5.2) : référentiel (`depute`) construit depuis l'archive AMO —
   nom, groupe (mandat GP en cours, couleur partagée avec les ventilations),
-  circonscription (« Pas-de-Calais, 5ᵉ circ. »), début de mandat — et **votes
+  circonscription (« Pas-de-Calais, 5ᵉ circ. »), **commission permanente**
+  (mandat `COMPER` principal, `nominPrincipale` = 1 ; nom lu dans les organes
+  AMO), **début de mandat** (`mandature.datePriseFonction` — jamais la date
+  d'entrée dans le groupe, qu'affichaient les 574 fiches avant correction) — et **votes
   nominatifs** (`vote_depute`, une ligne par député × scrutin, écrite par lots).
   Mesuré sur la base de dev : **577 députés**, **1 270 476 votes** sur 8 434
   scrutins. La fiche député en dérive un **portrait sur 12 mois glissants**

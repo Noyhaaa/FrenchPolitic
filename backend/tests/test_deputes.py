@@ -50,9 +50,10 @@ ACTEUR = {
             "mandat": [
                 {
                     "typeOrgane": "ASSEMBLEE",
-                    "dateDebut": "2024-07-18",
+                    "dateDebut": "2024-07-07",
                     "dateFin": None,
                     "organes": {"organeRef": "PO717460"},
+                    "mandature": {"datePriseFonction": "2024-07-08"},
                     "election": {
                         "lieu": {
                             "region": "Hauts-de-France",
@@ -70,7 +71,15 @@ ACTEUR = {
                 {
                     "typeOrgane": "COMPER",
                     "dateDebut": "2024-07-20",
+                    "nominPrincipale": "1",
                     "organes": {"organeRef": "PO111111"},
+                },
+                # Fonction dans une autre commission, non principale : ignorée.
+                {
+                    "typeOrgane": "COMPER",
+                    "dateDebut": "2025-10-01",
+                    "nominPrincipale": "0",
+                    "organes": {"organeRef": "PO222222"},
                 },
             ]
         },
@@ -220,7 +229,11 @@ async def test_portrait_attache_seulement_si_verifie(monkeypatch):
 
 
 def test_build_depute_depuis_wrapper_acteur():
-    deputes = build_deputes_from_amo([ACTEUR], RESOLVER)
+    deputes = build_deputes_from_amo(
+        [ACTEUR],
+        RESOLVER,
+        {"PO111111": "Commission des affaires sociales", "PO222222": "Autre"},
+    )
     assert len(deputes) == 1
     d = deputes[0]
     assert d.id == "PA841605"  # uid sérialisé en objet
@@ -229,7 +242,9 @@ def test_build_depute_depuis_wrapper_acteur():
     assert d.groupe_nom == "Rassemblement National"
     assert d.groupe_couleur.startswith("#")
     assert d.circonscription == "Pas-de-Calais, 5ᵉ circ."
-    assert d.depuis == "2024-07-19"  # début du mandat de groupe
+    # Prise de fonction du député, jamais l'entrée dans son groupe (19 juillet).
+    assert d.depuis == "2024-07-08"
+    assert d.commission == "Commission des affaires sociales"
     # L'open data ne fournit pas de photo : on n'en invente pas (§2.5).
     assert d.portrait_url is None
 
@@ -243,7 +258,9 @@ def test_build_deputes_mandat_unique_et_lieu_absent():
     deputes = build_deputes_from_amo([ACTEUR_SANS_LIEU], RESOLVER)
     assert len(deputes) == 1
     assert deputes[0].circonscription == ""
-    assert deputes[0].depuis is None  # aucun mandat de groupe documenté
+    # Sans `mandature`, le début du mandat ; sans commission connue, rien.
+    assert deputes[0].depuis == "2024-07-18"
+    assert deputes[0].commission is None
 
 
 def test_votes_du_scrutin():

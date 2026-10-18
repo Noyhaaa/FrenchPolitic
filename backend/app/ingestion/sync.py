@@ -49,6 +49,8 @@ from app.ingestion.decisions import (
     extraire_decisions,
     parse_decision,
     rattacher_par_decisions,
+    rattacher_par_seances,
+    seances_par_jour,
 )
 from app.ingestion.deputes import (
     attacher_portraits,
@@ -68,6 +70,7 @@ from app.ingestion.commission import (
     amendements_commission,
     commissions_au_fond,
     noms_commissions,
+    organes_par_abreviation,
 )
 from app.ingestion.dossiers_legislatifs import (
     JointureSenat,
@@ -229,6 +232,9 @@ class SyncReport:
     # Votes publics d'un dossier reconstitué (`TXT-…`, `SEN-…`) rangés sous le
     # dossier officiel qu'une décision de séance du même jour désigne.
     votes_rattaches_par_decision: int = 0
+    # Votes rangés dans le dossier qui siégeait le jour du vote, à titre
+    # concordant (`rattacher_par_seances`).
+    votes_rattaches_par_seance: int = 0
     # Décisions SANS scrutin public versées au fil (main levée, 49.3, art.
     # 151-7) et amendements de séance votés à main levée (§5.2).
     decisions_sans_scrutin: int = 0
@@ -1029,6 +1035,7 @@ class SyncJob:
         # amendements) et libellés des commissions (AMO, historique compris).
         self._compteurs_commission: CompteursCommission | None = None
         self._noms_commissions: dict[str, str] = {}
+        self._commission_par_abreviation: dict[str, str] = {}
         # dossierRef → `procedureParlementaire` : distingue une résolution (dont
         # la lecture unique est l'aboutissement) d'un texte de loi.
         self._procedure_par_ref: dict[str, object] = {}
@@ -1893,6 +1900,9 @@ class SyncJob:
         # Une commission spéciale dissoute n'est plus dans l'annuaire du jour :
         # l'historique la nomme encore.
         self._noms_commissions = noms_commissions(organes, organes_historiques)
+        self._commission_par_abreviation = organes_par_abreviation(
+            organes, organes_historiques
+        )
         async with self._sf() as session:
             report.groupes = await _upsert_groupes(session, resolver)
             # Annuaire des députés (mandats actifs) : alimente la fiche député
@@ -1900,7 +1910,9 @@ class SyncJob:
             # chaque run — un changement de groupe s'y répercute. Les photos
             # officielles sont vérifiées une à une avant d'être attachées
             # (best-effort : sans réseau, on repart sans photo).
-            deputes = build_deputes_from_amo(acteurs_bruts, resolver)
+            deputes = build_deputes_from_amo(
+                acteurs_bruts, resolver, noms_commissions(organes)
+            )
             report.portraits = await attacher_portraits(
                 deputes, self._client.legislature
             )
@@ -2141,6 +2153,19 @@ class SyncJob:
         report.votes_rattaches_officiellement = rattacher_par_votes_officiels(
             parses_an, votes_officiels
         )
+        # Puis le dossier qui siégeait le jour du vote, à titre concordant :
+        # il range les dossiers reconstitués (`TXT-…`) restants et corrige un
+        # `dossierRef` que le titre cité contredit. Jamais un vote cité.
+        report.votes_rattaches_par_seance = rattacher_par_seances(
+            parses_an,
+            seances_par_jour(self._actes_par_ref),
+            titres,
+            frozenset(
+                p.scrutin.id
+                for p in parses_an
+                if votes_officiels.ref_pour_vote(p.scrutin.id)
+            ),
+        )
 
         # 2bis) Scrutins du Sénat, versés dans le MÊME regroupement par dossier.
         #       C'est ce qui fait qu'un texte examiné dans les deux chambres est
@@ -2251,6 +2276,7 @@ class SyncJob:
                         self._compteurs_commission.get(ref_dossier),
                         commissions_au_fond(self._actes_par_ref.get(ref_dossier)),
                         self._noms_commissions,
+                        self._commission_par_abreviation,
                     )
                 # Qui porte le texte — même archive, même document de dépôt que
                 # l'exposé des motifs. Absente pour un dossier sans `dossierRef`

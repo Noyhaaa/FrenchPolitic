@@ -12,6 +12,7 @@ from app.ingestion.commission import (
     commissions_au_fond,
     noms_commissions,
     organe_examen,
+    organes_par_abreviation,
 )
 from app.schemas import AmendementsCommission
 
@@ -67,14 +68,43 @@ def test_noms_commissions_complete_sans_ecraser():
 
 def test_amendements_commission_au_fond_et_nommee():
     noms = {"PO420120": "Commission des affaires sociales"}
-    par_organe = {"PO420120": [12, 30], "PO59048": [4, 1], "PO999": [3, 3]}
+    par_cle = {
+        ("CION-SOC", "PO420120"): [12, 30],
+        ("CION_FIN", "PO59048"): [4, 1],
+        (None, "PO999"): [3, 3],
+    }
     # Pour avis (PO59048) : hors décompte. Commission sans nom : jamais un `PO…`.
-    assert amendements_commission(par_organe, ["PO420120", "PO999"], noms) == [
+    assert amendements_commission(par_cle, ["PO420120", "PO999"], noms) == [
         AmendementsCommission(
             commission="Commission des affaires sociales", adoptes=12, rejetes=30
         )
     ]
     assert amendements_commission(None, ["PO420120"], noms) == []
+
+
+def test_le_prefixe_prime_sur_un_examenref_contradictoire():
+    # Vécu : commission spéciale « simplification de la vie économique »,
+    # préfixe CSVIEECO (confirmé par l'acte de saisine), `examenRef` vers les
+    # affaires économiques sur ses 1 487 amendements.
+    par_abreviation = organes_par_abreviation(
+        [{"organe": {"uid": "PO849474", "codeType": "CNPS", "libelleAbrev": "CSVIEECO"}},
+         {"organe": {"uid": "PO419610", "codeType": "COMPER", "libelleAbrev": "CION-ECO"}}]
+    )
+    noms = {"PO849474": "Commission spéciale simplification"}
+    par_cle = {("CSVIEECO", "PO419610"): [350, 245]}
+    assert amendements_commission(par_cle, ["PO849474"], noms, par_abreviation) == [
+        AmendementsCommission(
+            commission="Commission spéciale simplification", adoptes=350, rejetes=245
+        )
+    ]
+    # Sans annuaire des abréviations, on retombe sur `examenRef` : non attribué.
+    assert amendements_commission(par_cle, ["PO849474"], noms) == []
+
+
+def test_abreviation_ambigue_ecartee():
+    deux = [{"organe": {"uid": u, "codeType": "COMPER", "libelleAbrev": "X"}}
+            for u in ("PO1", "PO2")]
+    assert organes_par_abreviation(deux) == {}
 
 
 def _archive(*amendements: tuple[str, dict]) -> zipfile.ZipFile:
@@ -101,6 +131,6 @@ def test_lire_archive_compte_les_amendements_tranches_en_commission():
             ("DLR5L17N1", amdt("Retiré")),  # pas mis aux voix : ignoré
         )
     )
-    assert archive.commission["DLR5L17N1"]["PO420120"] == [1, 1]
+    assert archive.commission["DLR5L17N1"][("CION-SOC", "PO420120")] == [1, 1]
     # Un amendement de commission n'entre ni dans l'index ni dans la séance.
     assert archive.seance == [] and archive.index == {}

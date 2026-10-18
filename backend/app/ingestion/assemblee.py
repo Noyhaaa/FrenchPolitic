@@ -113,6 +113,11 @@ class ScrutinParse:
     # Signature du texte cité par l'objet du vote : elle regroupe les votes d'un
     # même texte (articles, amendements) autour du vote décisif cité par l'archive.
     cle_titre: str | None = None
+    # Le texte que l'objet du vote cite (« … du projet de loi d'urgence pour la
+    # protection et la souveraineté agricoles »), même quand le scrutin porte
+    # un `dossierRef` : il sert à repérer un `dossierRef` que le titre
+    # contredit (`rattacher_par_seances`).
+    titre_cite: str | None = None
     # Sous-amendement voté sans scrutin public : l'id du vote de l'amendement
     # qu'il vise, connu par l'archive (`amendementParentRef`). Les numéros
     # repartent de 1 à chaque lecture : le numéro seul désignerait parfois
@@ -537,6 +542,7 @@ def parse_scrutin(
         numero=numero,
         est_evenement_autonome=est_evenement_autonome,
         ref_du_scrutin=ref_du_scrutin,
+        titre_cite=texte_de_rattachement(objet_libelle),
         cle_titre=cle_titre,
     )
 

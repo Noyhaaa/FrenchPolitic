@@ -817,8 +817,8 @@ export interface Depute {
   /** Photo officielle si disponible — sinon l'app affiche les initiales. */
   portraitUrl?: string;
   /**
-   * Commission permanente. Servie pour les **sénateurs** (l'annuaire senat.fr
-   * la publie) ; absente côté Assemblée pour l'instant. Absente = masquée (§2.5).
+   * Commission permanente, aux deux chambres (nom seul, même gabarit).
+   * Absente = masquée (§2.5).
    */
   commission?: string;
 }

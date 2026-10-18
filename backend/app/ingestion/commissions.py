@@ -25,6 +25,7 @@ from app.ingestion.commission import (
     amendements_commission,
     commissions_au_fond,
     noms_commissions,
+    organes_par_abreviation,
 )
 from app.schemas import Dossier
 
@@ -62,6 +63,7 @@ async def _main(dry_run: bool, legislature: int) -> None:
     organes, _ = await client.download_amo()
     organes_historiques, _ = await client.download_amo_historique()
     noms = noms_commissions(organes, organes_historiques)
+    par_abreviation = organes_par_abreviation(organes, organes_historiques)
     print(f"Téléchargement de l'archive des dossiers (législature {legislature})…")
     actes = await _actes_par_ref(client)
     print("Téléchargement de l'archive des amendements (~300 Mo)…")
@@ -77,7 +79,10 @@ async def _main(dry_run: bool, legislature: int) -> None:
             # L'id d'un dossier officiel EST son `dossierRef` : les dossiers
             # reconstitués (« TXT-… », « SEN-… ») n'ont ni saisine ni décompte.
             liste = amendements_commission(
-                compteurs.get(row.id), commissions_au_fond(actes.get(row.id)), noms
+                compteurs.get(row.id),
+                commissions_au_fond(actes.get(row.id)),
+                noms,
+                par_abreviation,
             )
             if not liste:
                 sans += 1

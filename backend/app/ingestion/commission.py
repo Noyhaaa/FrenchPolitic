@@ -10,8 +10,8 @@ Ce qui n'est PAS compté, faute de quoi le chiffre tromperait (§2.5) :
 - les amendements d'une commission saisie **pour avis** — elle ne modifie pas
   le texte, elle propose des amendements que la commission au fond ou la
   séance reprendront, ou non (mesuré en L17 : 1 333 adoptés) ;
-- un amendement dont l'organe d'examen ne se rattache à aucune saisine
-  documentée du dossier (mesuré : 608) ;
+- un amendement dont l'organe d'examen ne se rattache à aucune saisine au
+  fond documentée du dossier ;
 - les commissions du **Sénat** : l'archive est celle de l'Assemblée.
 """
 from __future__ import annotations
@@ -29,8 +29,11 @@ _RE_ORGANE_EXAMEN = re.compile(r"^EXANR5L\d+(PO\d+)")
 # peut saisir au fond à l'Assemblée.
 _TYPES_COMMISSION = frozenset({"COMPER", "CNPS"})
 
-# dossierRef → organe d'examen → [adoptés, rejetés]
-CompteursCommission = dict[str, dict[str, list[int]]]
+# dossierRef → (préfixe de l'amendement, organe de son `examenRef`) →
+# [adoptés, rejetés]. Les deux sont gardés : l'organe se résout ensuite, quand
+# l'annuaire AMO est connu (`_organe`).
+CleExamen = tuple[str | None, str | None]
+CompteursCommission = dict[str, dict[CleExamen, list[int]]]
 
 
 def organe_examen(examen_ref: object) -> str | None:
@@ -46,9 +49,41 @@ def nouveaux_compteurs() -> CompteursCommission:
 
 
 def compter(
-    compteurs: CompteursCommission, dossier_ref: str, organe: str, adopte: bool
+    compteurs: CompteursCommission,
+    dossier_ref: str,
+    prefixe: str | None,
+    organe: str | None,
+    adopte: bool,
 ) -> None:
-    compteurs[dossier_ref][organe][0 if adopte else 1] += 1
+    compteurs[dossier_ref][(prefixe, organe)][0 if adopte else 1] += 1
+
+
+def organes_par_abreviation(*organes: list[dict]) -> dict[str, str]:
+    """Abréviation officielle (`libelleAbrev`, « CION-SOC », « CSVIEECO ») →
+    uid de la commission. C'est elle que l'archive des amendements écrit dans
+    `prefixeOrganeExamen`. Une abréviation portée par deux organes est écartée :
+    elle ne désignerait plus une commission unique."""
+    vues: dict[str, set[str]] = defaultdict(set)
+    for liste in organes:
+        for wrapper in liste:
+            organe = wrapper.get("organe") or wrapper
+            abrev, uid = organe.get("libelleAbrev"), organe.get("uid")
+            if organe.get("codeType") in _TYPES_COMMISSION and abrev and uid:
+                vues[abrev].add(uid)
+    return {abrev: next(iter(uids)) for abrev, uids in vues.items() if len(uids) == 1}
+
+
+def _organe(cle: CleExamen, par_abreviation: dict[str, str]) -> str | None:
+    """La commission qui a examiné l'amendement : celle que désigne son
+    **préfixe**, sinon celle de son `examenRef`.
+
+    Les deux concordent sur 27 402 amendements de commission tranchés. Sur 608,
+    `examenRef` contredit le préfixe, et c'est toujours le préfixe que l'acte
+    de saisine du dossier confirme (vécu : les 1 487 amendements de la
+    commission spéciale « simplification de la vie économique », préfixe
+    CSVIEECO, ont tous un `examenRef` vers les affaires économiques)."""
+    prefixe, organe = cle
+    return par_abreviation.get(prefixe or "") or organe
 
 
 def commissions_au_fond(actes_legislatifs: object) -> list[str]:
@@ -90,15 +125,22 @@ def noms_commissions(*organes: list[dict]) -> dict[str, str]:
 
 
 def amendements_commission(
-    par_organe: dict[str, list[int]] | None,
+    par_cle: dict[CleExamen, list[int]] | None,
     au_fond: list[str],
     noms: dict[str, str],
+    par_abreviation: dict[str, str] | None = None,
 ) -> list[AmendementsCommission]:
     """Le décompte de chaque commission saisie au fond qui a tranché des
     amendements. Une commission sans nom connu n'est pas affichée : on ne
     montre jamais un identifiant `PO…` en guise de nom (§2.5)."""
-    if not par_organe:
+    if not par_cle:
         return []
+    par_organe: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+    for cle, (adoptes, rejetes) in par_cle.items():
+        organe = _organe(cle, par_abreviation or {})
+        if organe:
+            par_organe[organe][0] += adoptes
+            par_organe[organe][1] += rejetes
     resultat: list[AmendementsCommission] = []
     for organe in au_fond:
         adoptes, rejetes = par_organe.get(organe, (0, 0))

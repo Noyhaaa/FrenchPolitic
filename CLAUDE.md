@@ -246,7 +246,11 @@ app/data/seed.py       Données FICTIVES (backend memory + tests) — ne jamais 
   dossier. Le Sénat suit la même logique : `senatChemin` publié par l'AN → lien
   inverse → titre → `SEN-{slug}` → singleton. Enfin, un dossier reconstitué
   (`TXT-…`, `SEN-…`) rejoint le dossier officiel qu'une **décision de séance**
-  désigne : même chambre, même jour, titre concordant (`rattacher_par_decisions`).
+  désigne : même chambre, même jour, titre concordant (`rattacher_par_decisions`),
+  ou le dossier dont l'archive date une **séance à l'AN le jour du vote**, à
+  titre concordant (`rattacher_par_seances`, mesuré sans erreur sur 3 048 votes
+  à `dossierRef` officiel). La même règle corrige un `dossierRef` que le titre
+  cité contredit — jamais un vote que les actes citent.
 - **Décisions sans scrutin public** (`app/ingestion/decisions.py`). Les actes de
   décision de l'archive (`…-DEBATS-DEC`) deviennent des votes sans décompte
   (`scrutinPublic=false`, `modalite`, `etape`, `conclusion` verbatim) quand
@@ -254,6 +258,11 @@ app/data/seed.py       Données FICTIVES (backend memory + tests) — ne jamais 
   viennent de l'archive des amendements, rangés dans le dossier où elle les
   range. Conclusion inconnue → rien ; scrutin public possible → rien (§2.5).
   Détail et règles de couverture : README backend.
+- **Commission d'un amendement** : par son **préfixe** (`prefixeOrganeExamen`
+  = `libelleAbrev` AMO), pas par `examenRef`, qui se trompe sur 608 amendements
+  (`app/ingestion/commission.py`). **Commission d'un député** : mandat `COMPER`
+  principal (`nominPrincipale`). **Début de mandat** : `datePriseFonction`,
+  jamais l'entrée dans un groupe.
 - **Élus en exercice / élus partis.** Le référentiel servi (`depute`) est
   **taillé** à chaque run sur l'annuaire du jour (`retirer_hors_referentiel`).
   Les **noms** des votants viennent d'annuaires historiques (`AMO30`,
@@ -311,9 +320,9 @@ deux côtés. **Toute évolution se répercute des deux côtés.**
   clé qui rend un nom cliquable. On n'affiche jamais une référence machine
   `PA…` en guise de nom.
 - **`Depute`** couvre **les deux chambres**. `chambre` est le discriminant, et les
-  ids du Sénat sont préfixés `SEN-…`. `commission` n'existe qu'au Sénat ;
-  `depuis` (début de mandat) qu'à l'Assemblée, parce que la source du Sénat n'a
-  aucune date. `PortraitVote` n'a pas de participation, et pas de cohésion au
+  ids du Sénat sont préfixés `SEN-…`. `commission` existe aux deux chambres
+  (nom seul) ; `depuis` (prise de fonction) qu'à l'Assemblée, parce que la
+  source du Sénat n'a aucune date. `PortraitVote` n'a pas de participation, et pas de cohésion au
   Sénat.
 - **`Dossier.etat`** : **aucun champ ne décrit une étape à venir**, et un test
   vérifie la liste des champs. N'en ajoute pas.
@@ -408,17 +417,10 @@ deux côtés. **Toute évolution se répercute des deux côtés.**
   ne le lui passe.
 - **Planifier la synchro** (plusieurs fois par jour), et Légifrance/PISTE pour le
   texte consolidé.
-- **Amendements de commission non attribués** (~600) : leur `examenRef`
-  désigne un organe que les actes du dossier ne saisissent pas (vécu :
-  « simplification de la vie économique », commission spéciale L16 dans les
-  actes, affaires économiques dans l'`examenRef`). Non comptés (§2.5).
-- **Commission des députés AN** : `GroupResolver` ne garde que les organes `GP`.
-  Il faudrait résoudre les mandats `COMPER`.
-- **Dossiers `TXT-` restants** (11) : ni cités par les actes législatifs, ni
-  désignés par une décision du même jour. Restent des coquilles de la source
-  (une distance d'édition à 1 caractère, risque de faux appariement à mesurer)
-  et des titres présents en L16 et L17 (piste : préférer la législature
-  courante).
+- **Dernier dossier `TXT-`** : « programmation nationale énergie et climat »
+  (206 votes, juin 2025). Le seul dossier qui siégeait ces jours-là
+  (`DLR5L16N49849`) n'a que 43 % de mots communs avec le titre cité : sous le
+  seuil, on n'attache rien (§2.5).
 - **Questions des amendements votés à main levée** (~9 000, deux appels LLM
   chacun) : le code les génère comme pour un vote public, mais le run d'oct.
   2026 s'est fait sans serveur mistral. À faire tourner par tranches
