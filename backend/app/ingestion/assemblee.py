@@ -41,6 +41,7 @@ from app.ingestion.dossiers_legislatifs import (
     VotesOfficiels,
     signature_titre,
 )
+from app.ingestion.mises_au_point import extraire_mises_au_point
 from app.ingestion.organes import GroupResolver
 from app.schemas import (
     PositionGroupe,
@@ -395,6 +396,7 @@ def parse_scrutin(
     acteurs: dict[str, str] | None = None,
     reconciliation: Reconciliation | None = None,
     deputes_connus: frozenset[str] | None = None,
+    civilites: dict[str, str] | None = None,
 ) -> ScrutinParse:
     """Convertit un scrutin open data en `ScrutinParse` (fonction pure).
 
@@ -517,6 +519,11 @@ def parse_scrutin(
         suffrages_requis=to_int(synthese.get("nbrSuffragesRequis")) or None,
         resultat=resultat,
         positions_groupes=positions,
+        # Déclarations publiées après le vote : un fait à côté du vote, qui ne
+        # change ni la ventilation ci-dessus ni le résultat (art. 68 RAN).
+        mises_au_point=extraire_mises_au_point(
+            s.get("miseAuPoint"), acteurs, civilites, deputes_connus
+        ),
         sources=[scrutin_source(legislature, numero)],
     )
 

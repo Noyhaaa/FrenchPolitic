@@ -136,6 +136,7 @@ from app.ingestion.organes import (
     GroupResolver,
     build_acteurs_from_amo,
     build_civilites_from_amo,
+    build_civ_from_amo,
     build_resolver_from_organes,
 )
 from app.ai.faits import construire_faits
@@ -1884,6 +1885,10 @@ class SyncJob:
         # l'Assemblée l'écrit dans l'objet de ses scrutins.
         civilites = build_civilites_from_amo(historiques)
         civilites.update(build_civilites_from_amo(acteurs_bruts))
+        # « M. » / « Mme » seuls : la désignation d'un député dans une mise au
+        # point (« Mme X a fait savoir qu'elle… »).
+        civ = build_civ_from_amo(historiques)
+        civ.update(build_civ_from_amo(acteurs_bruts))
         self._indexer_groupes(resolver)
         # Une commission spéciale dissoute n'est plus dans l'annuaire du jour :
         # l'historique la nomme encore.
@@ -2111,7 +2116,7 @@ class SyncJob:
         for brut in bruts:
             try:
                 parse = parse_scrutin(
-                    brut, resolver, acteurs, reconciliation, deputes_connus
+                    brut, resolver, acteurs, reconciliation, deputes_connus, civ
                 )
             except (KeyError, TypeError) as exc:
                 report.anomalies.append(f"parsing échoué: {exc}")

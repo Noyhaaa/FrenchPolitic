@@ -96,6 +96,12 @@ python -m app.ingestion.positions           # --dry-run pour voir le bilan
 # d'examen que les actes du dossier ne saisissent pas.
 python -m app.ingestion.commissions         # --dry-run pour voir le bilan
 
+# Mises au point des scrutins de l'AN (`Scrutin.misesAuPoint`) : ce que les
+# députés déclarent après le vote, formule de l'Assemblée mot pour mot. Archive
+# des scrutins + AMO (noms, civilités). Ne change aucun décompte ni « contre son
+# groupe » : le vote enregistré fait foi (art. 68, al. 4, RAN).
+python -m app.ingestion.mises_au_point      # --dry-run pour voir le bilan
+
 # Renseigne « qui porte le texte » (Dossier.initiative) sur les dossiers déjà en
 # base. Ne télécharge que l'archive des dossiers législatifs (~10 Mo) et lit les
 # identités dans la table `depute` : ni scrutins, ni PDF, ni LLM — quelques

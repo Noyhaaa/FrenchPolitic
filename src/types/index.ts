@@ -345,6 +345,23 @@ export interface PhaseScrutin {
  * Servi par `GET /scrutins/{id}` (la fiche dossier ne transporte que des
  * `ScrutinResume` pour rester légère et lisible).
  */
+/**
+ * Ce qu'un député a déclaré après le vote, tel que l'Assemblée le publie avec
+ * le scrutin. Un fait officiel qui ne modifie ni le vote enregistré ni le
+ * résultat (art. 68, al. 4, du Règlement de l'AN) : aucune statistique n'en
+ * tient compte. `phrase` est la formule de l'Assemblée, mot pour mot.
+ * Assemblée seulement : le Sénat ne publie pas ces déclarations.
+ */
+export interface MiseAuPoint {
+  nom: string;
+  /** Posé seulement si le député siège encore (lien vers sa fiche). */
+  deputeId?: string;
+  nature: 'mise_au_point' | 'dysfonctionnement';
+  /** La position déclarée, jamais celle enregistrée. */
+  position: PositionVote;
+  phrase: string;
+}
+
 export interface Scrutin {
   id: string;
   /** Dossier (texte de loi) auquel ce vote se rattache. */
@@ -389,6 +406,8 @@ export interface Scrutin {
   suffragesRequis?: number;
   resultat: ResultatGlobal;
   positionsGroupes: PositionGroupe[];
+  /** Déclarations après le vote (AN). Absent ou vide → bloc masqué. */
+  misesAuPoint?: MiseAuPoint[];
   /** Pour un vote d'amendement : article visé (« Article 2 ») — factuel, neutre. */
   cible?: string;
   /** Pour un vote d'amendement : ce qu'il propose de changer (extrait officiel). */
